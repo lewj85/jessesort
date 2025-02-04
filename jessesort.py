@@ -78,19 +78,19 @@ def jessesort_with_nodes(
                 # NOTE: Only try to add nodes before
                 if target < arr_nodes[mid].data and target > arr_nodes[prev_idx].data: # >=?
                     new_node = arr_nodes[mid].add_previous(target)
-                    arr_nodes = arr_nodes[:mid] + [new_node] + arr_nodes[mid:]
+                    arr_nodes.insert(mid, new_node)
                     return arr_nodes, mid
             else: # len(arr_nodes)%2 == 1:
                 # Add node after mid
                 # NOTE: Need >= here! Or we can't add a 2nd 3 to [1,3,5]
                 if target >= arr_nodes[mid].data and target < arr_nodes[next_idx].data:
                     new_node = arr_nodes[mid].add_next(target)
-                    arr_nodes = arr_nodes[:next_idx] + [new_node] + arr_nodes[next_idx:]
+                    arr_nodes.insert(next_idx, new_node)
                     return arr_nodes, next_idx
                 # Add node before mid
                 elif target < arr_nodes[mid].data and target > arr_nodes[prev_idx].data:
                     new_node = arr_nodes[mid].add_previous(target)
-                    arr_nodes = arr_nodes[:mid] + [new_node] + arr_nodes[mid:]
+                    arr_nodes.insert(mid, new_node)
                     return arr_nodes, mid
         elif mid == halflen-1:
             if len(arr_nodes)%2 == 0:
@@ -98,7 +98,7 @@ def jessesort_with_nodes(
                 # NOTE: Only try to add nodes after
                 if target > arr_nodes[mid].data and target < arr_nodes[next_idx].data: # >= ?
                     new_node = arr_nodes[mid].add_next(target)
-                    arr_nodes = arr_nodes[:next_idx] + [new_node] + arr_nodes[next_idx:]
+                    arr_nodes.insert(next_idx, new_node)
                     return arr_nodes, next_idx
     
         # Check if target can replace value at mid
@@ -170,7 +170,7 @@ def jessesort_with_nodes_and_value_array(
         # Handle the case when mid is at the first or last element
         if mid == 0:
             if target <= arr_values[0]:
-                new_node = arr_nodes[0].add_previous(target, arr_nodes[0])
+                new_node = arr_nodes[0].add_previous(target)
                 arr_nodes[0] = new_node
                 arr_values[0] = target
                 return arr_nodes, arr_values, 0 # Replaced first element
@@ -195,23 +195,23 @@ def jessesort_with_nodes_and_value_array(
                 # Add node before mid
                 # NOTE: Only try to add nodes before
                 if target < arr_values[mid] and target > arr_values[prev_idx]: # >=?
-                    new_node = arr_nodes[mid].add_previous(target, arr_nodes[mid])
-                    arr_nodes = arr_nodes[:mid] + [new_node] + arr_nodes[mid:]
-                    arr_values = arr_values[:mid] + [target] + arr_values[mid:]
+                    new_node = arr_nodes[mid].add_previous(target)
+                    arr_nodes.insert(mid, new_node)
+                    arr_values.insert(mid, target)
                     return arr_nodes, arr_values, mid
             else: # len(arr_nodes)%2 == 1:
                 # Add node after mid
                 # NOTE: Need >= here! Or we can't add a 2nd 3 to [1,3,5]
                 if target >= arr_values[mid] and target < arr_values[next_idx]:
                     new_node = arr_nodes[mid].add_next(target)
-                    arr_nodes = arr_nodes[:next_idx] + [new_node] + arr_nodes[next_idx:]
-                    arr_values = arr_values[:next_idx] + [target] + arr_values[next_idx:]
+                    arr_nodes.insert(next_idx, new_node)
+                    arr_values.insert(next_idx, target)
                     return arr_nodes, arr_values, next_idx
                 # Add node before mid
                 elif target < arr_values[mid] and target > arr_values[prev_idx]:
-                    new_node = arr_nodes[mid].add_previous(target, arr_nodes[mid])
-                    arr_nodes = arr_nodes[:mid] + [new_node] + arr_nodes[mid:]
-                    arr_values = arr_values[:mid] + [target] + arr_values[mid:]
+                    new_node = arr_nodes[mid].add_previous(target)
+                    arr_nodes.insert(mid, new_node)
+                    arr_values.insert(mid, target)
                     return arr_nodes, arr_values, mid
         elif mid == halflen-1:
             if len(arr_nodes)%2 == 0:
@@ -219,15 +219,15 @@ def jessesort_with_nodes_and_value_array(
                 # NOTE: Only try to add nodes after
                 if target > arr_values[mid] and target < arr_values[next_idx]: # >= ?
                     new_node = arr_nodes[mid].add_next(target)
-                    arr_nodes = arr_nodes[:next_idx] + [new_node] + arr_nodes[next_idx:]
-                    arr_values = arr_values[:next_idx] + [target] + arr_values[next_idx:]
+                    arr_nodes.insert(next_idx, new_node)
+                    arr_values.insert(next_idx, target)
                     return arr_nodes, arr_values, next_idx
     
         # Check if target can replace value at mid
         # Bottom half
         if mid < halflen and target <= arr_values[mid] and target > arr_values[prev_idx]:
             # Place the target at mid
-            new_node = arr_nodes[mid].add_previous(target, arr_nodes[mid])
+            new_node = arr_nodes[mid].add_previous(target)
             arr_nodes[mid] = new_node
             arr_values[mid] = target
             return arr_nodes, arr_values, mid
@@ -293,13 +293,12 @@ def jessesort_with_split_lists_and_value_array(
     - Current implementation will make many new lists of size 1 for new values in the middle,
       even if those values are already sorted (in either direction). Find a way to add these
       to an existing list or make a new list with all these sequential values rather than build
-      a giant split rainbow with many length 1-2 lists.
-    - Wrap with full sorting function that merges bands at the end.
+      a giant split rainbow with many small length lists.
     - Speedup ideas:
       - First merge, can merge lists from top and bottom half without having to compare every value,
         since bottom values will be generally low and top generally high, just fix cross-section and
         can append [bottom values reversed + cross-section + top values] for each pair of bands.
-      - Smarter merging, e.g. powersort logic. Or naively merge every 2 adjacent bands (lengths will be close).
+      - Smarter merging policies that deal with band length spikes from natural runs (e.g. powersort)
       - For ints, use counting sort for middle elements once middle 2 values of arr_values are within a reasonable range.
     """
 
@@ -393,7 +392,7 @@ def jessesort_with_split_lists_and_value_array(
         mid = (right + left)//2
 
 
-def merge_node_lists(
+def merge_linked_lists(
     node1: Any,
     node2: Any,
 ) -> List[Any]:
@@ -408,14 +407,35 @@ def merge_node_lists(
     merged (list): The two lists merged into one sorted list of values (not nodes).
 
     Example:
-    >>> merge_node_lists([<list of nodes with 1,3,5>], [<list of nodes with 2,4,6>])
+    >>> merge_linked_lists([<list of nodes with 1,3,5>], [<list of nodes with 2,4,6>])
     [1,2,3,4,5,6]
 
     Notes:
     - This returns a list of values, not a list of nodes. Nodes are no longer needed
       during the merge process and will slow things down.
     """
-    pass
+    merged = []
+
+    # Merge elements from both arrays while both have elements
+    while node1 and node2:
+        if node1.data < node2.data:
+            merged.append(node1.data)
+            node1 = node1.next
+        else:
+            merged.append(node2.data)
+            node2 = node2.next
+
+    # If there are any remaining elements in arr1, add them to merged
+    while node1:
+        merged.append(node1.data)
+        node1 = node1.next
+
+    # If there are any remaining elements in arr2, add them to merged
+    while node2:
+        merged.append(node2.data)
+        node2 = node2.next
+
+    return merged
 
 
 def merge_lists(
@@ -464,7 +484,7 @@ def merge_lists(
 def merge_rainbow(
     rainbow: List[Any],
     method: str = "lists",
-    merge_strategy: str = "mirror",
+    merge_policy: str = "mirror",
 ) -> List[Any]:
     """
     Converts rainbow into a fully sorted list by merging bands recursively.
@@ -472,7 +492,7 @@ def merge_rainbow(
     Parameters:
     rainbow (list): The rainbow with sorted bands.
     method (str): One of "lists", "nodes", or "nodes and values". Default is "list".
-    merge_strategy (str): One of "adjacent", "mirror", or "powersort". Default is "mirror".
+    merge_policy (str): One of "adjacent", "mirror", or "powersort". Default is "mirror".
 
     Returns:
     rainbow[0] (list): The final remaining band containing all sorted values after all merges.
@@ -487,74 +507,95 @@ def merge_rainbow(
       approach that avoids the need for comparisons in the bottom and top sections. Consider
       a binary search strategy for identifying the start index of "merged middle".
     """
-    
-    if method == "lists":
 
-        # Merge adjacent bands - not so naive as adjacent bands are likely to have similar lengths
-        if merge_strategy == "adjacent":
+    # If using nodes, first do one merge pass that converts the nodes to lists
+    if method == "nodes" or method == "nodes and values":
 
-            # Reverse order of bottom bands
-            # NOTE: Implementing actual merge logic here for the first merge that handles these reversed
-            #       bottom half arrays may be faster.
-            for i in range(len(rainbow)//2):
-                rainbow[i] = rainbow[i][::-1]
-
-            # Full merge loop
-            while len(rainbow) > 1:
-                tmp_list = []
-                # NOTE: -1 below prevents out-of-bounds but will sometimes kick the bucket down the road
-                #       instead of merging the final band each iteration. This may result in a small last
-                #       band occasionally having to merge with a larger one, which is not ideal for speed.
-                for i in range(0, len(rainbow)-1, 2):
-                    tmp_list.append(merge_lists(rainbow[i], rainbow[i+1]))
-                if len(rainbow)%2 == 1:
-                    tmp_list.append(rainbow[-1])
-                rainbow = tmp_list[:]
-            
-            return rainbow[0]
-        
-        # Merge bands from opposite ends - ie. rainbow[0] & rainbow[-1], rainbow[1] & rainbow[-2], etc
-        elif merge_strategy == "mirror":
-
-            # First mirror loop deals with reversed order of bottom bands
-            tmp_list = []
-            for i in range(len(rainbow)//2):
-                tmp_list.append(merge_lists(rainbow[i][::-1], rainbow[-i-1]))
+        # Need to account for odd numbers of bands as well as check for a middle band
+        # NOTE: The rainbow here is really just the base array with nodes, so it includes
+        #       the end nodes of each band too.
+        tmp_list = []
+        if (len(rainbow)//2)%2 == 0:
+            for i in range(0, len(rainbow)//2, 2):
+                tmp_list.append(merge_linked_lists(rainbow[i], rainbow[i+1]))
             if len(rainbow)%2 == 1:
-                # NOTE: Rather than append the remaining middle list (of length 1), just merge it now
-                #tmp_list.append(rainbow[len(rainbow)//2])
-                tmp_list[-1] = merge_lists(tmp_list[-1], rainbow[len(rainbow)//2])
+                # Middle band has 1 value, just merge it now
+                tmp_list[-1] = merge_lists(tmp_list[-1], [rainbow[len(rainbow)//2].data])
+        else: # if (len(rainbow)//2)%2 == 1:
+            for i in range(0, len(rainbow)//2-1, 2):
+                    tmp_list.append(merge_linked_lists(rainbow[i], rainbow[i+1]))
+            if len(rainbow)%2 == 0:
+                tmp_list.append(merge_linked_lists(rainbow[len(rainbow)//2-1], []))
+            else: # if len(rainbow)%2 == 1:
+                # Middle band has 1 value, just merge it now
+                tmp_list.append(merge_linked_lists(rainbow[len(rainbow)//2-1], rainbow[len(rainbow)//2]))
+        rainbow = tmp_list[:]
+
+    # Else if using lists, first reverse the bottom half lists
+    elif method == "lists":
+        
+        # Reverse order of bottom bands
+        # NOTE: Implementing actual merge logic here for the first merge that handles these reversed
+        #       bottom half arrays may be faster.
+        for i in range(len(rainbow)//2):
+            rainbow[i] = rainbow[i][::-1]
+
+    # Merge adjacent bands - not so naive as adjacent bands are likely to have similar lengths
+    if merge_policy == "adjacent":
+
+        # Full merge loop
+        while len(rainbow) > 1:
+            tmp_list = []
+            # NOTE: -1 below prevents out-of-bounds but will sometimes kick the bucket down the road
+            #       instead of merging the final band each iteration. This may result in a small last
+            #       band occasionally having to merge with a larger one, which is not ideal for speed.
+            for i in range(0, len(rainbow)-1, 2):
+                tmp_list.append(merge_lists(rainbow[i], rainbow[i+1]))
+            if len(rainbow)%2 == 1:
+                tmp_list.append(rainbow[-1])
             rainbow = tmp_list[:]
 
-            # Full merge loop
-            while len(rainbow) > 1:
-                tmp_list = []
-                # NOTE: -1 below prevents out-of-bounds but will sometimes kick the bucket down the road
-                #       instead of merging the final band each iteration. This may result in a small last
-                #       band occasionally having to merge with a larger one, which is not ideal for speed.
-                for i in range(0, len(rainbow)-1, 2):
-                    tmp_list.append(merge_lists(rainbow[i], rainbow[i+1]))
-                if len(rainbow)%2 == 1:
-                    tmp_list.append(rainbow[-1])
-                rainbow = tmp_list[:]
-            
-            return rainbow[0]
-
-        # Merge bands using adaptive powersort methods
-        # NOTE: The overhead here may not be worth it as mirror will naturally pair
-        #       bands of similar length in non-natural-run cases.
-        elif merge_strategy == "powersort":
-            pass
+        return rainbow[0]
     
-    elif method == "nodes" or method == "nodes and values":
-        # TODO Use merge_node_lists() here
+    # Merge bands from opposite ends - ie. rainbow[0] & rainbow[-1], rainbow[1] & rainbow[-2], etc
+    elif merge_policy == "mirror":
+
+        # First mirror loop deals with reversed order of bottom bands
+        tmp_list = []
+        for i in range(len(rainbow)//2):
+            #tmp_list.append(merge_lists(rainbow[i][::-1], rainbow[-i-1]))
+            tmp_list.append(merge_lists(rainbow[i], rainbow[-i-1]))
+        if len(rainbow)%2 == 1:
+            # NOTE: Rather than append the remaining middle list (of length 1), just merge it now
+            #tmp_list.append(rainbow[len(rainbow)//2])
+            tmp_list[-1] = merge_lists(tmp_list[-1], rainbow[len(rainbow)//2])
+        rainbow = tmp_list[:]
+
+        # Full merge loop
+        while len(rainbow) > 1:
+            tmp_list = []
+            # NOTE: -1 below prevents out-of-bounds but will sometimes kick the bucket down the road
+            #       instead of merging the final band each iteration. This may result in a small last
+            #       band occasionally having to merge with a larger one, which is not ideal for speed.
+            for i in range(0, len(rainbow)-1, 2):
+                tmp_list.append(merge_lists(rainbow[i], rainbow[i+1]))
+            if len(rainbow)%2 == 1:
+                tmp_list.append(rainbow[-1])
+            rainbow = tmp_list[:]
+
+        return rainbow[0]
+
+    # Merge bands using adaptive powersort methods
+    # NOTE: The overhead here may not be worth it in many cases as mirror will naturally pair
+    #       bands of similar length in non-natural-run cases.
+    elif merge_policy == "powersort":
         pass
 
 
 def jessesort(
     unsorted_array: List[Any],
     method: str = "lists",
-    merge_strategy: str = "mirror",
+    merge_policy: str = "mirror",
 ) -> List[Any]:
     """
     Wrapper for various JesseSort functions. Builds a rainbow and merges its bands.
@@ -562,7 +603,7 @@ def jessesort(
     Parameters:
     unsorted_array (list): The original unsorted list.
     method (str): One of "lists", "nodes", or "nodes and values". Default is "lists".
-    merge_strategy (str): One of "adjacent", "mirror", or "powersort". Default is "mirror".
+    merge_policy (str): One of "adjacent", "mirror", or "powersort". Default is "mirror".
 
     Returns:
     sorted_array (list): The final sorted array.
@@ -593,12 +634,49 @@ def jessesort(
                 split_rainbow, arr_values, mid, unsorted_array[i])
 
         # Merge the split rainbow
-        return merge_rainbow(split_rainbow, method=method, merge_strategy=merge_strategy)
+        return merge_rainbow(split_rainbow, method=method, merge_policy=merge_policy)
 
     elif method == "nodes":
-        # TODO Use jessesort_with_nodes() here
-        pass
+
+        # Manually add the first 2 values to create the split rainbow
+        val1 = unsorted_array[0]
+        val2 = unsorted_array[1]
+        if val1 <= val2:
+            arr_nodes = [Node(val1), Node(val2)]
+            arr_values = [val1, val2]
+        else:
+            arr_nodes = [Node(val2), Node(val1)]
+            arr_values = [val2, val1]
+
+        # Loop through the rest of the values
+        # NOTE: Using "for target in unsorted_array[2:]" will make an unnecessary copy,
+        #       so use direct indexing instead of slicing
+        mid = 0
+        for i in range(2, len(unsorted_array)):
+            arr_nodes, mid = jessesort_with_nodes(
+                arr_nodes, mid, unsorted_array[i])
+        
+        # Merge the split rainbow
+        return merge_rainbow(arr_nodes, method=method, merge_policy=merge_policy)
 
     elif method == "nodes and values":
-        # TODO Use jessesort_with_nodes_and_value_array() here
-        pass
+        # Manually add the first 2 values to create the split rainbow
+        val1 = unsorted_array[0]
+        val2 = unsorted_array[1]
+        if val1 <= val2:
+            arr_nodes = [Node(val1), Node(val2)]
+            arr_values = [val1, val2]
+        else:
+            arr_nodes = [Node(val2), Node(val1)]
+            arr_values = [val2, val1]
+
+        # Loop through the rest of the values
+        # NOTE: Using "for target in unsorted_array[2:]" will make an unnecessary copy,
+        #       so use direct indexing instead of slicing
+        mid = 0
+        for i in range(2, len(unsorted_array)):
+            arr_nodes, arr_values, mid = jessesort_with_nodes_and_value_array(
+                arr_nodes, arr_values, mid, unsorted_array[i])
+        
+        # Merge the split rainbow
+        return merge_rainbow(arr_nodes, method=method, merge_policy=merge_policy)
