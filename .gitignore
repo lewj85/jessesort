@@ -1,1 +1,6 @@
 __pycache__/
+.devcontainer/
+build
+*.c
+*.so
+
