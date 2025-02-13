@@ -17,8 +17,8 @@ Then you can import it with:
 
 JesseSort consists of two main phases:
 
-1. Generating the Rainbow
+1. Insertion Phase - generates a Rainbow data structure
 
-2. Merging its bands
+2. Merge Phase - merges its bands until 1 remains
 
-The full breakdown of the algorithm can be seen in JesseSort.pdf.
+The full breakdown of the algorithm can be seen in JesseSort.pdf. Preprint also available here: https://www.researchgate.net/publication/388955884_JesseSort
