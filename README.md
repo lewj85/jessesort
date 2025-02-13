@@ -19,22 +19,6 @@ JesseSort consists of two main phases:
 
 1. Generating the Rainbow
 
-The input array is structured into a Rainbow, a hierarchical grouping of elements that facilitates efficient merging.
+2. Merging its bands
 
-This structuring is performed in O(n log(1.5 Hₙ)) time, leveraging properties of harmonic numbers to optimize the sorting process.
-
-2. Merging the Rainbow bands
-
-The bands of the Rainbow are recursively merged until only 1 remains.
-
-
-# Runtime Analysis
-
-JesseSort's total runtime is O(n log n).
-
-
-# Algorithm
-
-JesseSort's efficiency comes from its use of the Rainbow structure, which optimizes the merging process by leveraging harmonic growth properties.
-
-Stay tuned for optimizations, such as merge phase parallelization and optimal PowerSort merge logic.
+The full breakdown of the algorithm can be seen in JesseSort.pdf.
