@@ -6,7 +6,10 @@ JesseSort is a novel sorting algorithm that introduces a new data structure call
 
 To compile JesseSort, run:
 
-`python setup.py build_ext --inplace`
+```
+pip install cython
+python setup.py build_ext --inplace
+```
 
 Then you can import it with:
 
