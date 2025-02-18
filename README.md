@@ -1,6 +1,6 @@
 # JesseSort
 
-JesseSort is a novel sorting algorithm that introduces a new data structure called a Rainbow to efficiently organize and merge elements. It achieves a runtime of O(n log n).
+JesseSort is a hybrid sorting algorithm that utilizes 2 Patience Sorts and Powersort under the hood.
 
 # Setup
 
@@ -20,8 +20,12 @@ Then you can import it with:
 
 JesseSort consists of two main phases:
 
-1. Insertion Phase - generates a Rainbow data structure
+1. Insertion Phase
 
-2. Merge Phase - merges its bands until 1 remains
+Play 2 games of Patience, one with descending stacks and one with ascending stacks. Send values to the optimal game based on the order of the current natural run in the input array. This avoids a commonly encountered worst case and capitalizes on natural runs to bring runtime closer to O(n).
 
-The full breakdown of the algorithm can be seen in JesseSort.pdf. Preprint also available here: https://www.researchgate.net/publication/388955884_JesseSort
+2. Merge Phase - Merges all stacks until 1 remains, utilizing Powersort's near-optimal merge tree.
+
+The full breakdown of the algorithm can be seen in JesseSort.pdf. Preprint is also available here: https://www.researchgate.net/publication/388955884_JesseSort
+
+CAVEAT: This is under active development, so the preprint and code differs slightly from the implementation being worked. We will be using 2 half rainbows (Patience Sort's default output structure) instead of 1 split rainbow.
