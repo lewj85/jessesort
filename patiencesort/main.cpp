@@ -9,7 +9,7 @@ int main() {
     std::srand(std::time(nullptr));
 
     // Define the size of the vector you want to test
-    size_t vectorSize = 100;
+    size_t vectorSize = 50;
 
     // Create a random vector of integers
     std::vector<int> arr(vectorSize);
@@ -19,7 +19,8 @@ int main() {
         // vs std::uniform_int_distribution
     }
 
-    std::vector<int> sortedArr = patienceSort(arr);
+    std::vector<int> sortedArr = patienceSortDescendingPiles(arr);
+    //std::vector<int> sortedArr = patienceSortAscendingPiles(arr);
 
     std::cout << "Sorted Array: ";
     for (int x : sortedArr) std::cout << x << " ";

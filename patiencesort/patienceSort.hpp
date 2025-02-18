@@ -3,6 +3,7 @@
 
 #include <vector>
 
-std::vector<int> patienceSort(std::vector<int>& arr);
+std::vector<int> patienceSortDescendingPiles(std::vector<int>& arr);
+std::vector<int> patienceSortAscendingPiles(std::vector<int>& arr);
 
 #endif // PATIENCESORT_HPP
