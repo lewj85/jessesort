@@ -1,1 +1,1 @@
-g++ main.cpp jesseSort.cpp -o jesseSortTest
+g++ -O3 main.cpp jesseSort.cpp -o jesseSortTest
