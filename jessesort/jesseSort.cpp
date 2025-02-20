@@ -68,6 +68,12 @@ std::vector<int> mergeTwoAscendingPiles(std::vector<int>& pile1, std::vector<int
 
 // Iteratively merge piles until only one pile remains, reversing to ascending order
 std::vector<int> mergeDescendingPilesToAscending(std::vector<std::vector<int>>& piles) {
+    // Check for early return
+    if (piles.empty()) {
+        std::vector<int> emptyVector;
+        return emptyVector;
+    }
+
     // Pairwise merge adjacent piles
     // NOTE: First iteration deals with reversed order
     {
@@ -116,6 +122,12 @@ std::vector<int> mergeDescendingPilesToAscending(std::vector<std::vector<int>>& 
 
 // Iteratively merge piles until only one pile remains
 std::vector<int> mergeAscendingPiles(std::vector<std::vector<int>>& piles) {
+    // Check for early return
+    if (piles.empty()) {
+        std::vector<int> emptyVector;
+        return emptyVector;
+    }
+
     // Pairwise merge adjacent piles    
     while (piles.size() > 1) {
         std::vector<std::vector<int>> newPiles;
@@ -141,53 +153,59 @@ std::vector<int> mergeAscendingPiles(std::vector<std::vector<int>>& piles) {
 }
 
 // Helper function to find the first pile where the value can be placed
-int findDescendingPile(std::vector<std::vector<int>>& piles, int value) {
+int findDescendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
     int low = 0, high = piles.size() - 1;
     while (low <= high) {
-        int mid = low + (high - low) / 2;
         if (piles[mid].back() >= value) {
+            // This relies on C++ short-circuit evaluation to prevent out-of-bounds error
+            // if (mid == 0 || piles[mid - 1].back() > value) {
+            //     return mid;
+            // }
             high = mid - 1;
         } else {
             low = mid + 1;
         }
+        mid = low + (high - low) / 2;
     }
     return low;
 }
 
 // Helper function to find the first pile where the value can be placed
-int findAscendingPile(std::vector<std::vector<int>>& piles, int value) {
+int findAscendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
     int low = 0, high = piles.size() - 1;
     while (low <= high) {
-        int mid = low + (high - low) / 2;
         if (piles[mid].back() <= value) {
+            // This relies on C++ short-circuit evaluation to prevent out-of-bounds error
+            // if (mid == 0 || piles[mid - 1].back() < value) {
+            //     return mid;
+            // }
             high = mid - 1;
         } else {
             low = mid + 1;
         }
+        mid = low + (high - low) / 2;
     }
     return low;
 }
 
-void insertValueDescendingPiles(std::vector<std::vector<int>>& piles, int value) {
-    int pileIndex = findDescendingPile(piles, value);
+void insertValueDescendingPiles(std::vector<std::vector<int>>& piles, int& startIndex, int value) {
+    int pileIndex = findDescendingPile(piles, startIndex, value);
     if (pileIndex < piles.size()) {
         piles[pileIndex].push_back(value);  // Add to the appropriate pile
     } else {
         piles.emplace_back().reserve(32);
         piles.back().push_back(value);  // Create a new pile
     }
-    //return piles;
 }
 
-void insertValueAscendingPiles(std::vector<std::vector<int>>& piles, int value) {
-    int pileIndex = findAscendingPile(piles, value);
+void insertValueAscendingPiles(std::vector<std::vector<int>>& piles, int& startIndex, int value) {
+    int pileIndex = findAscendingPile(piles, startIndex, value);
     if (pileIndex < piles.size()) {
         piles[pileIndex].push_back(value);  // Add to the appropriate pile
     } else {
         piles.emplace_back().reserve(32);
         piles.back().push_back(value);  // Create a new pile
     }
-    //return piles;
 }
 
 // JesseSort
@@ -201,29 +219,32 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     std::vector<std::vector<int>> pilesAscending;
     pilesAscending.reserve(2);
     std::vector<std::vector<int>>* whichHalfRainbow = &pilesAscending;
-    int last_value_processed = 0;
+    int lastValueProcessed = 0;
     // TODO: Track last indices to potentially insert in O(n) time
-    // int lastPileIndexAscending = 0;
-    // int lastPileIndexDescending = 0;
+    int lastPileIndexAscending = 0;
+    int lastPileIndexDescending = 0;
+    int* whichIndex = &lastPileIndexAscending;
     // Declare a function pointer for which sort
-    void (*whichPatienceSort)(std::vector<std::vector<int>>&, int) = insertValueAscendingPiles;
+    void (*whichPatienceSort)(std::vector<std::vector<int>>&, int&, int) = insertValueAscendingPiles;
 
 
     // Play Patience, send values to optimal game based on natural run order
     for (int value : arr) {
 
-        if (value > last_value_processed) {
+        if (value > lastValueProcessed) {
             whichPatienceSort = &insertValueAscendingPiles;
             whichHalfRainbow = &pilesAscending;
-        } else if (value < last_value_processed){
+            whichIndex = &lastPileIndexAscending;
+        } else if (value < lastValueProcessed) {
             whichPatienceSort = &insertValueDescendingPiles;
             whichHalfRainbow = &pilesDescending;
+            whichIndex = &lastPileIndexDescending;
         }
         // else this is a repeated value, so use the same half rainbow as last loop to process this one in O(n)
 
         // Insert value
-        whichPatienceSort(*whichHalfRainbow, value);
-        last_value_processed = value;
+        whichPatienceSort(*whichHalfRainbow, *whichIndex, value);
+        lastValueProcessed = value;
 
         // // Debug: Print piles after every insertion
         // std::cout << "Piles after adding " << value << ":\n";
@@ -248,6 +269,19 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     std::vector<int> sortedArr;
     halfArr1 = mergeDescendingPilesToAscending(pilesDescending);
     halfArr2 = mergeAscendingPiles(pilesAscending);
+
+    // Empty piles edge cases
+    if (halfArr1.empty() && halfArr2.empty()) {
+        return sortedArr;
+    }
+    if (halfArr1.empty()) {
+        return halfArr2;
+    }
+    if (halfArr2.empty()) {
+        return halfArr1;
+    }
+
+    // Merge results from both games
     sortedArr = mergeTwoAscendingPiles(halfArr1, halfArr2);
     
     return sortedArr;
