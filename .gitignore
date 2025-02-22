@@ -6,3 +6,4 @@ build
 cython_debug/
 *.ipynb
 old/
+.vscode/
