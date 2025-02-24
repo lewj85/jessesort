@@ -1,26 +1,33 @@
 # JesseSort
 
-JesseSort is a hybrid sorting algorithm that uses Patience Sort and Powersort merging under the hood.
+JesseSort is a hybrid sorting algorithm that uses 2 Patience Sort insertions (one with descending stacks and one with ascending stacks), followed by Powersort's near-optimal power of 2 merge policy.
 
-# Speed Test
+The runtime of this sorting algorithm is dependent on the number of piles/bands, k, created by the 2 games of Patience. On purely random inputs, k = sqrt(n), leading to a total runtime of O(n log n) after merging. But on inputs with natural runs, repeated values, broken subsequences, etc (all of which are common in real data), k can get significantly smaller, allowing JesseSort to approach as fast as O(n).
 
-JesseSort beats Python's default sorted() on random-value inputs for n > 15000:
+```
+Best    Average     Worst       Memory      Stable      Deterministic
+n       n log k     n log n     2n          No          Yes
+```
+
+## Speed Test
+
+JesseSort beats Python's default sorted() on random-value inputs for n > 15000 (even better than our preprint claim!):
 
 ![Speed Test](images/speedtest_updated.png)
 
 It also beats std::sort() on various inputs with sorted subsequences:
 
 ```
-// Pyramid input (half ascending, half descending)
-JesseSort: 0.266038 seconds
-std::sort: 2.01727 seconds
+// Sawtooth input
+JesseSort: 0.194998 seconds
+std::sort: 0.404267 seconds
 
-// Ascending values with noise (aka nearly sorted)
-JesseSort: 0.256696 seconds
-std::sort: 0.750383 seconds
+// Ascending values with 1% noise (repeated values)
+JesseSort: 0.121161 seconds
+std::sort: 0.466832 seconds
 ```
 
-# Setup
+## Setup
 
 To compile JesseSort, run:
 
@@ -39,7 +46,7 @@ unsorted_array = [random.randint(1,1000) for _ in range(1000)]
 sorted_array = jessesort(unsorted_array)
 ```
 
-# Algorithm Overview
+## Algorithm Overview
 
 JesseSort consists of two main phases:
 
@@ -49,10 +56,12 @@ Play 2 games of Patience, one with descending stacks and one with ascending stac
 
 2. Merge Phase
 
-Merge all stacks until 1 remains. This utilizes Powersort's near-optimal merge strategy. NOTE: Naive adjacent merging is currently implemented and will be refactored.
+Merge all stacks until 1 remains. This currently utilizes Powersort's near-optimal merge strategy of grouping bands for merging by their lengths. We first merge any bands with lengths <= 2^1, then with lengths <= 2^2, 2^3, 2^4, etc.
+
+NOTE: A faster merge policy (Huffman?) may replace this. Testing is underway. We also find naive adjacent merging sometimes surpasses Powersort merging logic, possibly due to the natural pattern of (roughly) sorted lengths produced by Patience Sort.
+
+## Preprint
 
 The full breakdown of the algorithm can be seen in the Preprint here: https://www.researchgate.net/publication/388955884_JesseSort
-
-# Caveat
 
 This is under active development, so the preprint and code here differ slightly. We use 2 half rainbows (Patience Sort's default output structure) instead of 1 split rainbow. This is because split rainbows unnecessarily divide the ranges of the Patience Sort inputs and require suboptimal middle-insertions rather than faster tail-end insertions.
