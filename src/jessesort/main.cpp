@@ -207,8 +207,8 @@ int main() {
     auto arr2 = arr;
 
     auto start = std::chrono::high_resolution_clock::now();
-    std::vector<int> sortedArr = jesseSort(arr);
-    //jesseSort(arr);
+    //std::vector<int> sortedArr = jesseSort(arr);
+    jesseSort(arr);
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << "JesseSort: " << std::chrono::duration<double>(end - start).count() << " seconds" << std::endl;
 

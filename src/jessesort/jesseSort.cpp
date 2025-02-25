@@ -243,6 +243,76 @@ std::vector<int> mergePilesByPowersOf2(
     return pilesAscending[0];
 }
 
+// PowerSort merge policy with reduced copies
+std::vector<int> powerSortMerge(
+    std::vector<std::vector<int>>& pilesDescending,
+    std::vector<std::vector<int>>& pilesAscending) {
+
+    // Empty piles edge case
+    if (pilesDescending.empty() && pilesAscending.empty()) {
+        return pilesDescending[0];
+    }
+
+    // Make room for pilesDescending
+    pilesAscending.reserve(pilesDescending.size());
+    std::vector<std::vector<int>> stack;
+
+    // Merge and reverse descending half rainbow once outside loop, regardless of size
+    for (size_t i = 0; i + 1 < pilesDescending.size(); i += 2) {
+        pilesAscending.push_back(mergeTwoDescendingPiles(pilesDescending[i], pilesDescending[i + 1]));
+    }
+    // Handle odd pile by merging it with the last new pile if possible
+    if (pilesDescending.size() % 2 == 1) {
+        // Reverse order of last pile to make sure it's in ascending order
+        std::reverse(pilesDescending.back().begin(), pilesDescending.back().end());
+        if (!pilesAscending.empty()) {
+            pilesAscending.back() = mergeTwoAscendingPiles(pilesAscending.back(), pilesDescending.back());
+        } else {
+            pilesAscending.push_back(std::move(pilesDescending.back()));
+        }
+    }
+
+    // Empty or size 1 pilesAscending edge case
+    if (pilesAscending.empty()) {
+        return {};
+    }
+    if (pilesAscending.size() == 1) {
+        return pilesAscending[0];
+    }
+
+    for (auto& run : pilesAscending) {
+    // for (auto it = pilesAscending.rbegin(); it != pilesAscending.rend(); ++it) {
+    //     auto& run = *it;
+        stack.push_back(std::move(run));
+
+        // Maintain weak heap property
+        while (stack.size() >= 3) {
+            auto& X = stack[stack.size() - 3];
+            auto& Y = stack[stack.size() - 2];
+            auto& Z = stack[stack.size() - 1];
+
+            if (X.size() <= Y.size() + Z.size()) {
+                // Merge X and Y in-place
+                Y = mergeTwoAscendingPiles(X, Y);
+                stack.erase(stack.end() - 3);  // Remove X
+            } else {
+                break;  // Weak heap property maintained
+            }
+        }
+    }
+
+    // Final merging phase
+    while (stack.size() > 1) {
+        stack[stack.size() - 2] = mergeTwoAscendingPiles(
+            stack[stack.size() - 2], 
+            stack[stack.size() - 1]
+        );
+        stack.pop_back();  // Remove last merged element
+    }
+
+    return stack.empty() ? std::vector<int>{} : std::move(stack[0]);  // Move final sorted array
+}
+
 // Helper function to find the first pile where the value can be placed
 int findDescendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
     int low = 0, high = piles.size() - 1;
@@ -370,7 +440,12 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     // vs
 
     // Merge piles by length based on increasing max lengths in powers of 2
-    return mergePilesByPowersOf2(pilesDescending, pilesAscending);
+    // return mergePilesByPowersOf2(pilesDescending, pilesAscending);
+
+    // vs
+
+    // Powersort logic
+    return powerSortMerge(pilesDescending, pilesAscending);
 
     // vs
 

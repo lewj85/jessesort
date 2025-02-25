@@ -19,12 +19,16 @@ It also beats std::sort() on various inputs with sorted subsequences:
 
 ```
 // Sawtooth input
-JesseSort: 0.194998 seconds
-std::sort: 0.404267 seconds
+JesseSort: 0.165182 seconds
+std::sort: 0.399023 seconds
 
 // Ascending values with 1% noise (repeated values)
-JesseSort: 0.121161 seconds
-std::sort: 0.466832 seconds
+JesseSort: 0.105145 seconds
+std::sort: 0.505686 seconds
+
+// Pyramid values (half ascending, half descending)
+JesseSort: 0.126481 seconds
+std::sort: 0.856716 seconds
 ```
 
 ## Setup
@@ -56,9 +60,9 @@ Play 2 games of Patience, one with descending stacks and one with ascending stac
 
 2. Merge Phase
 
-Merge all stacks until 1 remains. This currently utilizes Powersort's near-optimal merge strategy of grouping bands for merging by their lengths. We first merge any bands with lengths <= 2^1, then with lengths <= 2^2, 2^3, 2^4, etc.
+Merge all stacks until 1 remains. This currently utilizes Powersort's near-optimal merge strategy that considers 3 consecutive subarrays at a time. We check if merging Y and Z is beneficial before merging with X, preventing an unbalanced merge tree.
 
-NOTE: A faster merge policy (Huffman?) may replace this. Testing is underway. We also find naive adjacent merging sometimes surpasses Powersort merging logic, possibly due to the natural pattern of (roughly) sorted lengths produced by Patience Sort.
+NOTE: A faster merge policy (Huffman?) may replace this. Testing is underway!
 
 ## Preprint
 
