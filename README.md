@@ -11,7 +11,7 @@ n       n log k     n log n     2n          No          Yes
 
 ## Speed Test
 
-JesseSort beats Python's default sorted() on random-value inputs for n > 18000 (even better than our preprint claim!):
+JesseSort beats Python's default sorted() on random-value inputs for n > 22000 (even better than our preprint claim!):
 
 ![Speed Test](images/speedtest_updated.png)
 
