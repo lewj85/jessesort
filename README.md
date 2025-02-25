@@ -1,6 +1,6 @@
 # JesseSort
 
-JesseSort is a hybrid sorting algorithm that uses 2 Patience Sort insertions (one with descending stacks and one with ascending stacks), followed by Powersort's near-optimal power of 2 merge policy.
+JesseSort is a hybrid sorting algorithm that uses 2 Patience Sort insertions (one with descending stacks and one with ascending stacks), followed by Powersort's near-optimal merge policy.
 
 The runtime of this sorting algorithm is dependent on the number of piles/bands, k, created by the 2 games of Patience. On purely random inputs, k = sqrt(n), leading to a total runtime of O(n log n) after merging. But on inputs with natural runs, repeated values, broken subsequences, etc (all of which are common in real data), k can get significantly smaller, allowing JesseSort to approach as fast as O(n).
 
@@ -11,7 +11,7 @@ n       n log k     n log n     2n          No          Yes
 
 ## Speed Test
 
-JesseSort beats Python's default sorted() on random-value inputs for n > 15000 (even better than our preprint claim!):
+JesseSort beats Python's default sorted() on random-value inputs for n > 18000 (even better than our preprint claim!):
 
 ![Speed Test](images/speedtest_updated.png)
 
@@ -60,7 +60,7 @@ Play 2 games of Patience, one with descending stacks and one with ascending stac
 
 2. Merge Phase
 
-Merge all stacks until 1 remains. This currently utilizes Powersort's near-optimal merge strategy that considers 3 consecutive subarrays at a time. We check if merging Y and Z is beneficial before merging with X, preventing an unbalanced merge tree.
+Merge all stacks until 1 remains. This currently utilizes Powersort's near-optimal merge strategy that prevents an unbalanced merge tree.
 
 NOTE: A faster merge policy (Huffman?) may replace this. Testing is underway!
 
