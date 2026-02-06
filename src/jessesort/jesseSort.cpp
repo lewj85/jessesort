@@ -410,59 +410,178 @@ std::vector<int> powersAndBestMerge(
     return pilesAscending[0];
 }
 
+// // Helper function to find the first pile where the value can be placed
+// int findDescendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
+//     // To process natural runs in O(1), we check the current index and one adjacent
+//     // band prior to the binary search loop
+//     if (piles[mid].back() >= value){
+//         if (mid == 0 || piles[mid-1].back() < value){
+//             return mid;
+//         } else {
+//             if (mid-1 == 0 || piles[mid-2].back() < value){
+//                 return mid-1;
+//             }
+//         }
+//     }
+
+//     // Binary search
+//     int low = 0, high = piles.size();
+//     while (low < high) {
+//         mid = low + ((high - low) >> 1);
+//         if (piles[mid].back() < value)
+//             high = mid;
+//         else
+//             low = mid + 1;
+//     }
+//     return low;
+// }
+
+// // Helper function to find the first pile where the value can be placed
+// int findAscendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
+//     // To process natural runs in O(1), we check the current index and one adjacent
+//     // band prior to the binary search loop
+//     if (piles[mid].back() <= value){
+//         if (mid == 0 || piles[mid-1].back() > value){
+//             return mid;
+//         } else {
+//             if (mid-1 == 0 || piles[mid-2].back() > value){
+//                 return mid-1;
+//             }
+//         }
+//     }
+
+//     // Binary search
+//     int low = 0, high = piles.size();
+//     while (low < high) {
+//         mid = low + ((high - low) >> 1);
+//         if (piles[mid].back() > value)
+//             low = mid + 1;
+//         else
+//             high = mid;
+//     }
+//     return low;
+// }
+
 // Helper function to find the first pile where the value can be placed
-int findDescendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
-    int low = 0, high = piles.size() - 1;
-    while (low <= high) {
-        if (piles[mid].back() >= value) {
-            // This relies on C++ short-circuit evaluation to prevent out-of-bounds error
-            if (mid == 0 || piles[mid - 1].back() < value) {
-                return mid;
-            }
-            high = mid - 1;
+int findDescendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int value) {
+    // Base array is ascending:
+    //   [1, 2 ... 7, 8]
+    // We want to find where:
+    //   baseArray[mid - 1] < value <= baseArray[mid]
+
+    // To process natural runs in O(1), we check the current index and one adjacent
+    // band prior to the binary search loop
+    if (baseArray[mid] >= value){
+        if (mid == 0 || baseArray[mid-1] < value){
+            return mid;
         } else {
-            low = mid + 1;
+            if (mid-1 == 0 || baseArray[mid-2] < value){
+                return mid-1;
+            }
         }
-        mid = low + (high - low) / 2;
+    }
+
+    // Binary search
+    int low = 0, high = baseArray.size();
+    while (low < high) {
+        mid = low + ((high - low) >> 1);
+        if (baseArray[mid] < value)
+            high = mid;
+        else
+            low = mid + 1;
     }
     return low;
 }
 
 // Helper function to find the first pile where the value can be placed
-int findAscendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
-    int low = 0, high = piles.size() - 1;
-    while (low <= high) {
-        if (piles[mid].back() <= value) {
-            // This relies on C++ short-circuit evaluation to prevent out-of-bounds error
-            if (mid == 0 || piles[mid - 1].back() > value) {
-                return mid;
-            }
-            high = mid - 1;
+int findAscendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int value) {
+    // Base array is descending:
+    //   [9, 8 ... 3, 2]
+    // We want to find where:
+    //   baseArray[mid - 1] > value >= baseArray[mid]
+
+    // To process natural runs in O(1), we check the current index and one adjacent
+    // band prior to the binary search loop
+    if (baseArray[mid] <= value){
+        if (mid == 0 || baseArray[mid-1] > value){
+            return mid;
         } else {
-            low = mid + 1;
+            if (mid-1 == 0 || baseArray[mid-2] > value){
+                return mid-1;
+            }
         }
-        mid = low + (high - low) / 2;
+    }
+
+    // Binary search
+    int low = 0, high = baseArray.size();
+    while (low < high) {
+        mid = low + ((high - low) >> 1);
+        if (baseArray[mid] > value)
+            low = mid + 1;
+        else
+            high = mid;
     }
     return low;
 }
 
-void insertValueDescendingPiles(std::vector<std::vector<int>>& piles, int& startIndex, int value) {
-    int pileIndex = findDescendingPile(piles, startIndex, value);
-    if (pileIndex < piles.size()) {
+void insertValueDescendingPiles(std::vector<std::vector<int>>& piles, std::vector<int>& baseArray, int& startIndex, int value) {
+    // Descending piles are ordered by ascending tail values:
+    //   [
+    //     [9, 8, ... 1],
+    //     [9, 8, ... 2],
+    //     ...
+    //     [9, 8, ... 7],
+    //     [8] <- A new high value would start a pile at the back
+    //   ]
+    // The lowest tail values should be at the lowest indices.
+    // Base array is therefore ascending:
+    //   [1, 2 ... 7, 8]
+    int pileIndex = 0;
+    if (baseArray.size() > 0){
+        //pileIndex = findDescendingPile(piles, startIndex, value);
+        pileIndex = findDescendingPileWithBaseArray(baseArray, startIndex, value);
+    }
+    if (pileIndex < (int)baseArray.size()) {
         piles[pileIndex].push_back(value);  // Add to the appropriate pile
+        baseArray[pileIndex] = value;  // Update the base array
+        startIndex = pileIndex;
     } else {
-        piles.emplace_back().reserve(32);
+        piles.emplace_back();
+        piles.back().reserve(32);
         piles.back().push_back(value);  // Create a new pile
+        baseArray.push_back(value); // Update base array
+        startIndex = (int)piles.size() - 1;
     }
 }
 
-void insertValueAscendingPiles(std::vector<std::vector<int>>& piles, int& startIndex, int value) {
-    int pileIndex = findAscendingPile(piles, startIndex, value);
-    if (pileIndex < piles.size()) {
+
+void insertValueAscendingPiles(std::vector<std::vector<int>>& piles, std::vector<int>& baseArray, int& startIndex, int value) {
+    // Ascending piles are ordered by descending tail values:
+    //   [
+    //         [1, 2, ... 9],
+    //         [1, 2, ... 8],
+    //         ...
+    //         [1, 2, ... 3],
+    //         [2] <- A new low value would start a pile at the back
+    //   ]
+    // The highest tail values should be at the lowest indices.
+    // Base array is therefore descending:
+    //   [9, 8 ... 3, 2]
+    int pileIndex = 0;
+    if (baseArray.size() > 0){
+        //pileIndex = findAscendingPile(piles, startIndex, value);
+        pileIndex = findAscendingPileWithBaseArray(baseArray, startIndex, value);
+    }
+    if (pileIndex < (int)baseArray.size()) {
         piles[pileIndex].push_back(value);  // Add to the appropriate pile
+        baseArray[pileIndex] = value;  // Update the base array
+        startIndex = pileIndex;
     } else {
-        piles.emplace_back().reserve(32);
+        piles.emplace_back();
+        piles.back().reserve(32);
         piles.back().push_back(value);  // Create a new pile
+        baseArray.push_back(value); // Update base array
+        startIndex = (int)piles.size() - 1;
     }
 }
 
@@ -487,19 +606,21 @@ void showPiles(std::vector<std::vector<int>> pilesDescending, std::vector<std::v
 //    Send values to optimal game based on natural run order.
 // 2. Merge stacks/bands until 1 remains.
 std::vector<int> jesseSort(std::vector<int>& arr) {
+
     // Initialize both half rainbows
-    std::vector<std::vector<int>> pilesDescending;
+    std::vector<std::vector<int>> pilesDescending; // Ordered by ascending tail values
     pilesDescending.reserve(2);
-    std::vector<std::vector<int>> pilesAscending;
+    std::vector<std::vector<int>> pilesAscending; // Ordered by descending tail values
     pilesAscending.reserve(2);
-    std::vector<std::vector<int>>* whichHalfRainbow = &pilesAscending;
+
+    // Initialize base array copies, used for faster search
+    std::vector<int> pilesDescendingBaseArray; // Holds just the ascending tail values
+    std::vector<int> pilesAscendingBaseArray; // Holds just the descending tail values
+
     int lastValueProcessed = 0;
-    // TODO: Track last indices to potentially insert in O(n) time
     int lastPileIndexAscending = 0;
     int lastPileIndexDescending = 0;
-    int* whichIndex = &lastPileIndexAscending;
-    // Declare a function pointer for which sort
-    void (*whichPatienceSort)(std::vector<std::vector<int>>&, int&, int) = insertValueAscendingPiles;
+    bool ascendingMode = true;
 
     ////////////////////////////////////////////////
     // Phase 1: Insertion
@@ -512,18 +633,19 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
         //       There may be a more optimal way to check for natural runs without influencing
         //       the ranges of these 2 Patience games.
         if (value > lastValueProcessed) {
-            whichPatienceSort = &insertValueAscendingPiles;
-            whichHalfRainbow = &pilesAscending;
-            whichIndex = &lastPileIndexAscending;
+            ascendingMode = true;
         } else if (value < lastValueProcessed) {
-            whichPatienceSort = &insertValueDescendingPiles;
-            whichHalfRainbow = &pilesDescending;
-            whichIndex = &lastPileIndexDescending;
+            ascendingMode = false;
         }
-        // else this is a repeated value, so use the same half rainbow as last loop to process this one in O(n)
+        // else this is a repeated value, so use the same ascendingMode as last loop to process this one in O(1)
 
         // Insert value
-        whichPatienceSort(*whichHalfRainbow, *whichIndex, value);
+        if (ascendingMode) {
+            insertValueAscendingPiles(pilesAscending, pilesAscendingBaseArray, lastPileIndexAscending, value);
+        } else {
+            insertValueDescendingPiles(pilesDescending, pilesDescendingBaseArray, lastPileIndexDescending, value);
+        }
+
         lastValueProcessed = value;
     }
 
@@ -550,4 +672,10 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     // return powersAndBestMerge(pilesDescending, pilesAscending);
 
     // TODO: Huffman smallest 2 piles iteratively
+
+    // TODO: Early freezing (@62%?) of piles/baseArray lengths, so values that would
+    //       make new bands instead get thrown into a new unsorted array for sorting
+    //       separately. This prevents many new small bands at the suboptimal ends,
+    //       which may speed up the merge phase because we're not doing so many memory
+    //       lookups/trying to merge many small arrays.
 }
