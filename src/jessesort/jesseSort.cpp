@@ -463,63 +463,65 @@ std::vector<int> powersAndBestMerge(
 // }
 
 // Helper function to find the first pile where the value can be placed
-int findDescendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int value) {
-    // Base array is ascending:
-    //   [1, 2 ... 7, 8]
-    // We want to find where:
-    //   baseArray[mid - 1] < value <= baseArray[mid]
+int findDescendingPileWithBaseArray(
+    const std::vector<int>& baseArray,
+    int mid,
+    int value
+) {
+    const int n = (int)baseArray.size();
+    if (n == 0) return 0;
 
-    // To process natural runs in O(1), we check the current index and one adjacent
-    // band prior to the binary search loop
-    if (baseArray[mid] >= value){
-        if (mid == 0 || baseArray[mid-1] < value){
+    // Fast path: check mid and mid-1 neighborhood
+    if (mid >= 0 && mid < n && baseArray[mid] >= value) {
+        if (mid == 0 || baseArray[mid - 1] < value)
             return mid;
-        } else {
-            if (mid-1 == 0 || baseArray[mid-2] < value){
-                return mid-1;
-            }
+        if (mid > 0 && baseArray[mid - 1] >= value) {
+            int m = mid - 1;
+            if (m == 0 || baseArray[m - 1] < value)
+                return m;
         }
     }
 
-    // Binary search
-    int low = 0, high = baseArray.size();
+    // Binary search: lower_bound on ascending array
+    int low = 0, high = n;
     while (low < high) {
-        mid = low + ((high - low) >> 1);
-        if (baseArray[mid] < value)
-            high = mid;
+        int m = low + ((high - low) >> 1);
+        if (baseArray[m] < value)
+            low = m + 1;
         else
-            low = mid + 1;
+            high = m;
     }
     return low;
 }
 
 // Helper function to find the first pile where the value can be placed
-int findAscendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int value) {
-    // Base array is descending:
-    //   [9, 8 ... 3, 2]
-    // We want to find where:
-    //   baseArray[mid - 1] > value >= baseArray[mid]
+int findAscendingPileWithBaseArray(
+    const std::vector<int>& baseArray,
+    int mid,
+    int value
+) {
+    const int n = (int)baseArray.size();
+    if (n == 0) return 0;
 
-    // To process natural runs in O(1), we check the current index and one adjacent
-    // band prior to the binary search loop
-    if (baseArray[mid] <= value){
-        if (mid == 0 || baseArray[mid-1] > value){
+    // Fast path: check mid and mid-1 neighborhood
+    if (mid >= 0 && mid < n && baseArray[mid] <= value) {
+        if (mid == 0 || baseArray[mid - 1] > value)
             return mid;
-        } else {
-            if (mid-1 == 0 || baseArray[mid-2] > value){
-                return mid-1;
-            }
+        if (mid > 0 && baseArray[mid - 1] <= value) {
+            int m = mid - 1;
+            if (m == 0 || baseArray[m - 1] > value)
+                return m;
         }
     }
 
-    // Binary search
-    int low = 0, high = baseArray.size();
+    // Binary search on descending array
+    int low = 0, high = n;
     while (low < high) {
-        mid = low + ((high - low) >> 1);
-        if (baseArray[mid] > value)
-            low = mid + 1;
+        int m = low + ((high - low) >> 1);
+        if (baseArray[m] > value)
+            low = m + 1;
         else
-            high = mid;
+            high = m;
     }
     return low;
 }
