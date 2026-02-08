@@ -243,7 +243,7 @@ std::vector<int> mergePilesByPowersOf2(
     return pilesAscending[0];
 }
 
-// Timsort merge policy
+// Timsort-inspired best 2 of 3 merge policy
 std::vector<int> timsortMerge(
     std::vector<std::vector<int>>& pilesDescending,
     std::vector<std::vector<int>>& pilesAscending) {
@@ -463,67 +463,119 @@ std::vector<int> powersAndBestMerge(
 // }
 
 // Helper function to find the first pile where the value can be placed
-int findDescendingPileWithBaseArray(
-    const std::vector<int>& baseArray,
-    int mid,
-    int value
-) {
-    const int n = (int)baseArray.size();
-    if (n == 0) return 0;
+int findDescendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int value) {
+    // Base array is ascending:
+    //   [1, 2 ... 7, 8]
+    // We want to find where:
+    //   baseArray[mid - 1] < value <= baseArray[mid]
 
-    // Fast path: check mid and mid-1 neighborhood
-    if (mid >= 0 && mid < n && baseArray[mid] >= value) {
-        if (mid == 0 || baseArray[mid - 1] < value)
+    // To process natural runs in O(1), we check the current index and one adjacent
+    // band prior to the binary search loop
+    if (baseArray[mid] >= value){
+        if (mid == 0 || baseArray[mid-1] < value){
+
             return mid;
-        if (mid > 0 && baseArray[mid - 1] >= value) {
-            int m = mid - 1;
-            if (m == 0 || baseArray[m - 1] < value)
-                return m;
+        } else {
+            if (mid-1 == 0 || baseArray[mid-2] < value){
+                return mid-1;
+            }
         }
     }
 
-    // Binary search: lower_bound on ascending array
-    int low = 0, high = n;
+    // Binary search
+    int low = 0, high = baseArray.size();
     while (low < high) {
-        int m = low + ((high - low) >> 1);
-        if (baseArray[m] < value)
-            low = m + 1;
+        mid = low + ((high - low) >> 1);
+        if (baseArray[mid] < value)
+            low = mid + 1;
         else
-            high = m;
+            high = mid;
     }
     return low;
 }
 
 // Helper function to find the first pile where the value can be placed
-int findAscendingPileWithBaseArray(
-    const std::vector<int>& baseArray,
-    int mid,
-    int value
-) {
-    const int n = (int)baseArray.size();
-    if (n == 0) return 0;
+int findAscendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int value) {
+    // Base array is descending:
+    //   [9, 8 ... 3, 2]
+    // We want to find where:
+    //   baseArray[mid - 1] > value >= baseArray[mid]
 
-    // Fast path: check mid and mid-1 neighborhood
-    if (mid >= 0 && mid < n && baseArray[mid] <= value) {
-        if (mid == 0 || baseArray[mid - 1] > value)
+    // To process natural runs in O(1), we check the current index and one adjacent
+    // band prior to the binary search loop
+    if (baseArray[mid] <= value){
+        if (mid == 0 || baseArray[mid-1] > value){
+
             return mid;
-        if (mid > 0 && baseArray[mid - 1] <= value) {
-            int m = mid - 1;
-            if (m == 0 || baseArray[m - 1] > value)
-                return m;
+        } else {
+            if (mid-1 == 0 || baseArray[mid-2] > value){
+                return mid-1;
+            }
         }
     }
 
-    // Binary search on descending array
-    int low = 0, high = n;
+    // Binary search
+    int low = 0, high = baseArray.size();
     while (low < high) {
-        int m = low + ((high - low) >> 1);
-        if (baseArray[m] > value)
-            low = m + 1;
+        mid = low + ((high - low) >> 1);
+        if (baseArray[mid] > value)
+            low = mid + 1;
         else
-            high = m;
+            high = mid;
     }
     return low;
+}
+
+void insertValueDescendingSimulated(
+    std::vector<int>& baseArray,
+    std::vector<int>& pileSizes,
+    int& startIndex,
+    int value,
+    int& outPile,
+    int& outIndex
+) {
+    int pileIndex = 0;
+    if (!baseArray.empty()) {
+        pileIndex = findDescendingPileWithBaseArray(baseArray, startIndex, value);
+    }
+
+    if (pileIndex < (int)baseArray.size()) {
+        baseArray[pileIndex] = value;
+    } else {
+        baseArray.push_back(value);
+        pileSizes.push_back(0);
+    }
+
+    outPile  = pileIndex;
+    outIndex = pileSizes[pileIndex]++;
+
+    startIndex = pileIndex;
+}
+
+void insertValueAscendingSimulated(
+    std::vector<int>& baseArray,
+    std::vector<int>& pileSizes,
+    int& startIndex,
+    int value,
+    int& outPile,
+    int& outIndex
+) {
+    int pileIndex = 0;
+    if (!baseArray.empty()) {
+        pileIndex = findAscendingPileWithBaseArray(baseArray, startIndex, value);
+    }
+
+    if (pileIndex < (int)baseArray.size()) {
+        baseArray[pileIndex] = value;
+    } else {
+        baseArray.push_back(value);
+        pileSizes.push_back(0);
+    }
+
+    outPile  = pileIndex;
+    outIndex = pileSizes[pileIndex]++;
+
+    startIndex = pileIndex;
 }
 
 void insertValueDescendingPiles(std::vector<std::vector<int>>& piles, std::vector<int>& baseArray, int& startIndex, int value) {
@@ -650,6 +702,69 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
 
         lastValueProcessed = value;
     }
+
+    // // New code for simulating games to avoid physical memory chasing
+    // // Initialize base array copies, used for faster search
+    // std::vector<int> pilesDescendingBaseArray; // Holds just the ascending tail values
+    // std::vector<int> pilesAscendingBaseArray; // Holds just the descending tail values
+
+    // int lastValueProcessed = 0;
+    // int lastPileIndexAscending = 0;
+    // int lastPileIndexDescending = 0;
+    // bool ascendingMode = true;
+
+    // struct Placement {
+    //     int game;      // 0 = descending, 1 = ascending
+    //     int pile;      // pile index within that game
+    //     int index;     // index within pile
+    // };
+
+    // std::vector<Placement> placements;
+    // placements.reserve(arr.size());
+
+    // // Track next index-within-pile for each pile in each game
+    // std::vector<int> ascendingPileSizes;
+    // std::vector<int> descendingPileSizes;
+
+    // // Phase 1: Insertion (SIMULATED)
+    // for (int value : arr) {
+
+    //     if (value > lastValueProcessed) {
+    //         ascendingMode = true;
+    //     } else if (value < lastValueProcessed) {
+    //         ascendingMode = false;
+    //     }
+
+    //     Placement p;
+
+    //     if (ascendingMode) {
+    //         p.game = 1; // ascending
+    //         insertValueAscendingSimulated(
+    //             pilesAscendingBaseArray,
+    //             ascendingPileSizes,
+    //             lastPileIndexAscending,
+    //             value,
+    //             p.pile,
+    //             p.index
+    //         );
+    //     } else {
+    //         p.game = 0; // descending
+    //         insertValueDescendingSimulated(
+    //             pilesDescendingBaseArray,
+    //             descendingPileSizes,
+    //             lastPileIndexDescending,
+    //             value,
+    //             p.pile,
+    //             p.index
+    //         );
+    //     }
+
+    //     placements.push_back(p);
+    //     lastValueProcessed = value;
+    // }
+
+    // Only use this for Phase 1 timing tests, returns arr with unmerged bands
+    // return arr;
 
     ////////////////////////////////////////////////
     // Phase 2: Merging
