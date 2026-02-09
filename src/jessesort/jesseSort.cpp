@@ -2,10 +2,150 @@
 #include <iostream>
 #include <algorithm>
 #include <vector>
+#include <cstddef>
+#include <cstdlib>
+
+
+// Flatten piles into arr and make all runs ascending
+void vectorsToFlatArrMerge(
+    std::vector<int>& arr,
+    const std::vector<std::vector<int>>& pilesDescending,
+    const std::vector<std::vector<int>>& pilesAscending,
+    std::vector<size_t>& run_starts,
+    std::vector<size_t>& run_lengths
+) {
+    size_t pos = 0;
+    run_starts.clear();
+    run_lengths.clear();
+
+    // Merge ascending piles
+    for (const auto& pile : pilesAscending) {
+        run_starts.push_back(pos);
+        run_lengths.push_back(pile.size());
+        for (int val : pile) {
+            arr[pos++] = val;
+        }
+    }
+
+    // Merge descending piles, reverse each to ascending
+    for (const auto& pile : pilesDescending) {
+        run_starts.push_back(pos);
+        run_lengths.push_back(pile.size());
+        for (auto it = pile.rbegin(); it != pile.rend(); ++it) {
+            arr[pos++] = *it; // reversed copy -> now ascending
+        }
+    }
+}
+
+// Bottom-up in-place merge of flattened runs
+std::vector<int>& bottomUpMerge(
+    std::vector<int>& arr,
+    const std::vector<size_t>& run_starts,
+    const std::vector<size_t>& run_lengths
+) {
+    std::vector<size_t> starts = run_starts;
+    std::vector<size_t> lengths = run_lengths;
+
+    while (starts.size() > 1) {
+        std::vector<size_t> new_starts;
+        std::vector<size_t> new_lengths;
+
+        for (size_t i = 0; i + 1 < starts.size(); i += 2) {
+            size_t left_start = starts[i];
+            size_t left_len   = lengths[i];
+            size_t right_start = starts[i+1];
+            size_t right_len   = lengths[i+1];
+
+            // Merge adjacent runs
+            std::inplace_merge(
+                arr.begin() + left_start,
+                arr.begin() + right_start,
+                arr.begin() + right_start + right_len
+            );
+
+            // New merged run
+            new_starts.push_back(left_start);
+            new_lengths.push_back(left_len + right_len);
+        }
+
+        // If odd number of runs, carry over last one
+        if (starts.size() % 2 != 0) {
+            new_starts.push_back(starts.back());
+            new_lengths.push_back(lengths.back());
+        }
+
+        starts = std::move(new_starts);
+        lengths = std::move(new_lengths);
+    }
+    return arr;
+}
+
+std::vector<int>& bottomUpMergeWithTemp(
+    std::vector<int>& arr,
+    std::vector<size_t>& run_starts,
+    std::vector<size_t>& run_lengths
+) {
+    if (run_starts.empty()) return arr;
+
+    while (run_starts.size() > 1) {
+        std::vector<size_t> new_starts;
+        std::vector<size_t> new_lengths;
+
+        // Compute max left run for this iteration
+        size_t max_run = 0;
+        for (size_t len : run_lengths) if (len > max_run) max_run = len;
+        std::vector<int> temp(max_run);
+
+        for (size_t i = 0; i + 1 < run_starts.size(); i += 2) {
+            size_t left_start  = run_starts[i];
+            size_t left_len    = run_lengths[i];
+            size_t right_start = run_starts[i+1];
+            size_t right_len   = run_lengths[i+1];
+
+            // Skip empty runs
+            if (left_len == 0 && right_len == 0) continue;
+            if (left_len == 0) {
+                new_starts.push_back(right_start);
+                new_lengths.push_back(right_len);
+                continue;
+            }
+            if (right_len == 0) {
+                new_starts.push_back(left_start);
+                new_lengths.push_back(left_len);
+                continue;
+            }
+
+            // Copy left run into temp
+            std::copy(arr.begin() + left_start,
+                      arr.begin() + left_start + left_len,
+                      temp.begin());
+
+            // Merge back into arr
+            size_t l = 0, r = right_start, dest = left_start;
+            while (l < left_len && r < right_start + right_len) {
+                arr[dest++] = (temp[l] <= arr[r]) ? temp[l++] : arr[r++];
+            }
+            while (l < left_len) arr[dest++] = temp[l++]; // leftover left run
+
+            new_starts.push_back(left_start);
+            new_lengths.push_back(left_len + right_len);
+        }
+
+        // Carry over last run if odd number
+        if (run_starts.size() % 2 != 0) {
+            new_starts.push_back(run_starts.back());
+            new_lengths.push_back(run_lengths.back());
+        }
+
+        run_starts = std::move(new_starts);
+        run_lengths = std::move(new_lengths);
+    }
+    return arr;
+}
 
 // Merge two sorted std::vectors into one sorted std::vector
 // NOTE: This returns an ascending pile, reversing the order
-std::vector<int> mergeTwoDescendingPiles(std::vector<int>& pile1, std::vector<int>& pile2) {
+std::vector<int> mergeTwoDescendingPilesToAscending(std::vector<int>& pile1, std::vector<int>& pile2) {
     std::vector<int> merged;
     merged.reserve(pile1.size() + pile2.size());
 
@@ -50,30 +190,30 @@ std::vector<int> mergeTwoAscendingPiles(std::vector<int>& pile1, std::vector<int
     return merged;
 }
 
-// void reverseDescendingPiles(
-//     std::vector<int>& arr,
-//     const std::vector<int>& pileSizes,
-//     const std::vector<int>& cumsumPileIndexStarts,
-//     int ascPileCount,
-//     int descPileCount,
-//     int descGameStartIndex
-// ) {
-//     const int firstDescPile = ascPileCount;
-//     const int lastDescPile  = ascPileCount + descPileCount;
+void reverseDescendingPiles(
+    std::vector<int>& arr,
+    const std::vector<int>& pileSizes,
+    const std::vector<int>& cumsumPileIndexStarts,
+    int ascPileCount,
+    int descPileCount,
+    int descGameStartIndex
+) {
+    const int firstDescPile = ascPileCount;
+    const int lastDescPile  = ascPileCount + descPileCount;
 
-//     for (int p = firstDescPile; p < lastDescPile; ++p) {
-//         int pileStart =
-//             descGameStartIndex +
-//             cumsumPileIndexStarts[p];
+    for (int p = firstDescPile; p < lastDescPile; ++p) {
+        int pileStart =
+            descGameStartIndex +
+            cumsumPileIndexStarts[p];
 
-//         int pileSize = pileSizes[p];
+        int pileSize = pileSizes[p];
 
-//         std::reverse(
-//             arr.begin() + pileStart,
-//             arr.begin() + pileStart + pileSize
-//         );
-//     }
-// }
+        std::reverse(
+            arr.begin() + pileStart,
+            arr.begin() + pileStart + pileSize
+        );
+    }
+}
 
 // Iteratively merge piles until only one pile remains, reversing to ascending order
 std::vector<int> mergeDescendingPilesToAscending(std::vector<std::vector<int>>& piles) {
@@ -89,7 +229,7 @@ std::vector<int> mergeDescendingPilesToAscending(std::vector<std::vector<int>>& 
         newPiles.reserve(piles.size() / 2 + piles.size() % 2);
 
         for (size_t i = 0; i + 1 < piles.size(); i += 2) {
-            newPiles.push_back(mergeTwoDescendingPiles(piles[i], piles[i + 1]));
+            newPiles.push_back(mergeTwoDescendingPilesToAscending(piles[i], piles[i + 1]));
         }
         // Handle odd pile by merging it with the last new pile if possible
         if (piles.size() % 2 == 1) {
@@ -199,7 +339,7 @@ std::vector<int> mergePilesByPowersOf2(
 
     // Merge and reverse descending half rainbow once outside loop, regardless of size
     for (size_t i = 0; i + 1 < pilesDescending.size(); i += 2) {
-        newPiles.push_back(mergeTwoDescendingPiles(pilesDescending[i], pilesDescending[i + 1]));
+        newPiles.push_back(mergeTwoDescendingPilesToAscending(pilesDescending[i], pilesDescending[i + 1]));
     }
     // Handle odd pile by merging it with the last new pile if possible
     if (pilesDescending.size() % 2 == 1) {
@@ -284,7 +424,7 @@ std::vector<int> timsortMerge(
 
     // Merge and reverse descending half rainbow once outside loop, regardless of size
     for (size_t i = 0; i + 1 < pilesDescending.size(); i += 2) {
-        pilesAscending.push_back(mergeTwoDescendingPiles(pilesDescending[i], pilesDescending[i + 1]));
+        pilesAscending.push_back(mergeTwoDescendingPilesToAscending(pilesDescending[i], pilesDescending[i + 1]));
     }
     // Handle odd pile by merging it with the last new pile if possible
     if (pilesDescending.size() % 2 == 1) {
@@ -354,7 +494,7 @@ std::vector<int> powersAndBestMerge(
 
     // Merge and reverse descending half rainbow once outside loop, regardless of size
     for (size_t i = 0; i + 1 < pilesDescending.size(); i += 2) {
-        pilesAscending.push_back(mergeTwoDescendingPiles(pilesDescending[i], pilesDescending[i + 1]));
+        pilesAscending.push_back(mergeTwoDescendingPilesToAscending(pilesDescending[i], pilesDescending[i + 1]));
     }
     // Handle odd pile by merging it with the last new pile if possible
     if (pilesDescending.size() % 2 == 1) {
@@ -435,59 +575,56 @@ std::vector<int> powersAndBestMerge(
     return pilesAscending[0];
 }
 
-// // Helper function to find the first pile where the value can be placed
-// int findDescendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
-//     // To process natural runs in O(1), we check the current index and one adjacent
-//     // band prior to the binary search loop
-//     if (piles[mid].back() >= value){
-//         if (mid == 0 || piles[mid-1].back() < value){
-//             return mid;
-//         } else {
-//             if (mid-1 == 0 || piles[mid-2].back() < value){
-//                 return mid-1;
-//             }
-//         }
-//     }
+int findDescendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
+    // To process natural runs in O(1), we check the current index and one adjacent
+    // band prior to the binary search loop
+    if (piles[mid].back() >= value){
+        if (mid == 0 || piles[mid-1].back() < value){
+            return mid;
+        } else {
+            if (mid-1 == 0 || piles[mid-2].back() < value){
+                return mid-1;
+            }
+        }
+    }
 
-//     // Binary search
-//     int low = 0, high = piles.size();
-//     while (low < high) {
-//         mid = low + ((high - low) >> 1);
-//         if (piles[mid].back() < value)
-//             high = mid;
-//         else
-//             low = mid + 1;
-//     }
-//     return low;
-// }
+    // Binary search
+    int low = 0, high = piles.size();
+    while (low < high) {
+        mid = low + ((high - low) >> 1);
+        if (piles[mid].back() < value)
+            high = mid;
+        else
+            low = mid + 1;
+    }
+    return low;
+}
 
-// // Helper function to find the first pile where the value can be placed
-// int findAscendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
-//     // To process natural runs in O(1), we check the current index and one adjacent
-//     // band prior to the binary search loop
-//     if (piles[mid].back() <= value){
-//         if (mid == 0 || piles[mid-1].back() > value){
-//             return mid;
-//         } else {
-//             if (mid-1 == 0 || piles[mid-2].back() > value){
-//                 return mid-1;
-//             }
-//         }
-//     }
+int findAscendingPile(std::vector<std::vector<int>>& piles, int& mid, int value) {
+    // To process natural runs in O(1), we check the current index and one adjacent
+    // band prior to the binary search loop
+    if (piles[mid].back() <= value){
+        if (mid == 0 || piles[mid-1].back() > value){
+            return mid;
+        } else {
+            if (mid-1 == 0 || piles[mid-2].back() > value){
+                return mid-1;
+            }
+        }
+    }
 
-//     // Binary search
-//     int low = 0, high = piles.size();
-//     while (low < high) {
-//         mid = low + ((high - low) >> 1);
-//         if (piles[mid].back() > value)
-//             low = mid + 1;
-//         else
-//             high = mid;
-//     }
-//     return low;
-// }
+    // Binary search
+    int low = 0, high = piles.size();
+    while (low < high) {
+        mid = low + ((high - low) >> 1);
+        if (piles[mid].back() > value)
+            low = mid + 1;
+        else
+            high = mid;
+    }
+    return low;
+}
 
-// Helper function to find the first pile where the value can be placed
 int findDescendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int value) {
     // Base array is ascending:
     //   [1, 2 ... 7, 8]
@@ -518,7 +655,6 @@ int findDescendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int v
     return low;
 }
 
-// Helper function to find the first pile where the value can be placed
 int findAscendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int value) {
     // Base array is descending:
     //   [9, 8 ... 3, 2]
@@ -928,8 +1064,13 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     // Phase 2: Merging
     ////////////////////////////////////////////////
 
-    // Merge adjacent piles
+    // Merge adjacent piles (vectors of vectors)
     // return mergeAdjacentPiles(pilesDescending, pilesAscending);
+    // Merge adjacent piles (flat concat)
+    std::vector<size_t> run_starts, run_lengths;
+    vectorsToFlatArrMerge(arr, pilesDescending, pilesAscending, run_starts, run_lengths);
+    return bottomUpMerge(arr, run_starts, run_lengths);
+    //return bottomUpMergeWithTemp(arr, run_starts, run_lengths);
 
     // vs
 
@@ -938,8 +1079,8 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
 
     // vs
 
-    // Timsort merge logic, best 2 out of 3, (X + Y) + Z vs X + (Y + Z)
-    return timsortMerge(pilesDescending, pilesAscending);
+    // Timsort-inspired merge logic, best 2 out of 3, (X + Y) + Z vs X + (Y + Z)
+    // return timsortMerge(pilesDescending, pilesAscending);
 
     // vs
 
@@ -953,4 +1094,12 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     //       separately. This prevents many new small bands at the suboptimal ends,
     //       which may speed up the merge phase because we're not doing so many memory
     //       lookups/trying to merge many small arrays.
+
+    // TODO: After Phase 1, do a single pass over pilesAscending and pilesDescending
+    //       and write them sequentially to arr. Keep track of starting indices of each
+    //       pile in flat memory (or just use cumulative sums). Run Phase 2 merging
+    //       directly on this flat array, no more memory chasing overhead. This will
+    //       likely improve cache performance in Phase 2 and could bring it below
+    //       std::sort on large random inputs, where Phase 2 dominates. Done for
+    //       adjacent pairs, can try flattening before other less naive merge methods.
 }

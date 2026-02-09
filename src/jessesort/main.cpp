@@ -198,7 +198,7 @@ int main() {
 
                 // JesseSort
                 start = std::chrono::high_resolution_clock::now();
-                jesseSort(arr);
+                arr = jesseSort(arr);
                 end = std::chrono::high_resolution_clock::now();
                 jesse_times.push_back(
                     std::chrono::duration<double>(end - start).count()
@@ -211,6 +211,10 @@ int main() {
                 std_times.push_back(
                     std::chrono::duration<double>(end - start).count()
                 );
+
+                if (!std::equal(arr.begin(), arr.end(), arr2.begin())) {
+                    std::cerr << "Error: arrays differ! JesseSort did not match reference sort.\n";
+                }
             }
 
             double jesse_mean =
