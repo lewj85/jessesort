@@ -1,1 +1,0 @@
-g++ -O3 main.cpp patienceSort.cpp -o patienceSortTest
