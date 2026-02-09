@@ -50,6 +50,31 @@ std::vector<int> mergeTwoAscendingPiles(std::vector<int>& pile1, std::vector<int
     return merged;
 }
 
+// void reverseDescendingPiles(
+//     std::vector<int>& arr,
+//     const std::vector<int>& pileSizes,
+//     const std::vector<int>& cumsumPileIndexStarts,
+//     int ascPileCount,
+//     int descPileCount,
+//     int descGameStartIndex
+// ) {
+//     const int firstDescPile = ascPileCount;
+//     const int lastDescPile  = ascPileCount + descPileCount;
+
+//     for (int p = firstDescPile; p < lastDescPile; ++p) {
+//         int pileStart =
+//             descGameStartIndex +
+//             cumsumPileIndexStarts[p];
+
+//         int pileSize = pileSizes[p];
+
+//         std::reverse(
+//             arr.begin() + pileStart,
+//             arr.begin() + pileStart + pileSize
+//         );
+//     }
+// }
+
 // Iteratively merge piles until only one pile remains, reversing to ascending order
 std::vector<int> mergeDescendingPilesToAscending(std::vector<std::vector<int>>& piles) {
     // Check for early return
@@ -473,7 +498,6 @@ int findDescendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int v
     // band prior to the binary search loop
     if (baseArray[mid] >= value){
         if (mid == 0 || baseArray[mid-1] < value){
-
             return mid;
         } else {
             if (mid-1 == 0 || baseArray[mid-2] < value){
@@ -505,7 +529,6 @@ int findAscendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int va
     // band prior to the binary search loop
     if (baseArray[mid] <= value){
         if (mid == 0 || baseArray[mid-1] > value){
-
             return mid;
         } else {
             if (mid-1 == 0 || baseArray[mid-2] > value){
@@ -714,13 +737,27 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     // bool ascendingMode = true;
 
     // struct Placement {
-    //     int game;      // 0 = descending, 1 = ascending
+    //     int val;       // value in array
+    //     int game;      // 0 = ascending, 1 = descending
     //     int pile;      // pile index within that game
     //     int index;     // index within pile
     // };
 
     // std::vector<Placement> placements;
-    // placements.reserve(arr.size());
+    // placements.reserve(arr.size()); // make sure arr.size() is correct
+
+    // // struct {
+    // //     std::vector<int> game;
+    // //     std::vector<int> pile;
+    // //     std::vector<int> index;
+    // //     std::vector<int> val;
+    // // } placements;
+
+    // // size_t n = arr.size();
+    // // placements.game.reserve(n);
+    // // placements.pile.reserve(n);
+    // // placements.index.reserve(n);
+    // // placements.val.reserve(n);
 
     // // Track next index-within-pile for each pile in each game
     // std::vector<int> ascendingPileSizes;
@@ -738,7 +775,7 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     //     Placement p;
 
     //     if (ascendingMode) {
-    //         p.game = 1; // ascending
+    //         p.game = 0; // ascending
     //         insertValueAscendingSimulated(
     //             pilesAscendingBaseArray,
     //             ascendingPileSizes,
@@ -748,7 +785,7 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     //             p.index
     //         );
     //     } else {
-    //         p.game = 0; // descending
+    //         p.game = 1; // descending
     //         insertValueDescendingSimulated(
     //             pilesDescendingBaseArray,
     //             descendingPileSizes,
@@ -759,9 +796,130 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     //         );
     //     }
 
+    //     p.val = value;
     //     placements.push_back(p);
     //     lastValueProcessed = value;
     // }
+
+    // // Phase 1: Insertion (SIMULATED)
+    // for (int value : arr) {
+
+    //     if (value > lastValueProcessed) {
+    //         ascendingMode = true;
+    //     } else if (value < lastValueProcessed) {
+    //         ascendingMode = false;
+    //     }
+
+    //     int game;
+    //     int pile;
+    //     int index;
+
+    //     if (ascendingMode) {
+    //         game = 0; // ascending
+    //         insertValueAscendingSimulated(
+    //             pilesAscendingBaseArray,
+    //             ascendingPileSizes,
+    //             lastPileIndexAscending,
+    //             value,
+    //             pile,
+    //             index
+    //         );
+    //     } else {
+    //         game = 1; // descending
+    //         insertValueDescendingSimulated(
+    //             pilesDescendingBaseArray,
+    //             descendingPileSizes,
+    //             lastPileIndexDescending,
+    //             value,
+    //             pile,
+    //             index
+    //         );
+    //     }
+
+    //     placements.game.push_back(game);
+    //     placements.pile.push_back(pile);
+    //     placements.index.push_back(index);
+    //     placements.val.push_back(value);
+
+    //     lastValueProcessed = value;
+    // }
+
+    // // Tracker variables required when we replace physical placement in simulated games
+    // int numAscendingPiles = ascendingPileSizes.size();
+    // int numDescendingPiles = descendingPileSizes.size();
+    // std::vector<int> cumsumPileIndexStartsAscending;
+    // std::vector<int> cumsumPileIndexStartsDescending;
+    // std::vector<int> cumsumPileIndexStarts;
+    // std::vector<int> gameStartIndices;
+
+    // // Calculate and concat cumsum pile sizes into 1 array to simplify placement
+    // cumsumPileIndexStarts.reserve(numAscendingPiles + numDescendingPiles);
+
+    // // Ascending piles
+    // int totalAscending = 0;
+    // for (int sz : ascendingPileSizes) {
+    //     cumsumPileIndexStarts.push_back(totalAscending);
+    //     totalAscending += sz;
+    // }
+
+    // // Descending piles
+    // int totalDescending = 0;
+    // for (int sz : descendingPileSizes) {
+    //     cumsumPileIndexStarts.push_back(totalDescending);
+    //     totalDescending += sz;
+    // }
+
+    // // Concat pile sizes into 1 array to simplify placement
+    // std::vector<int> pileSizes;
+    // pileSizes.reserve(numAscendingPiles + numDescendingPiles);
+
+    // // Ascending piles
+    // pileSizes.insert(
+    //     pileSizes.end(),
+    //     ascendingPileSizes.begin(),
+    //     ascendingPileSizes.end()
+    // );
+
+    // // Descending piles
+    // pileSizes.insert(
+    //     pileSizes.end(),
+    //     descendingPileSizes.begin(),
+    //     descendingPileSizes.end()
+    // );
+
+    // // gameStartIndices.resize(2);
+    // // gameStartIndices[0] = 0;
+    // // gameStartIndices[1] = totalAscending;
+
+    // // // Build physical piles, but flattened into one n-size array
+    // // // NOTE: We overwrite arr to save n space in memory, can free base arrays/other variables now too if it will free cache and speed things up
+    // // for (Placement p : placements){
+    // //     arr[
+    // //         gameStartIndices[p.game] 
+    // //         + cumsumPileIndexStarts[
+    // //             (p.game == 0) ? p.pile : (numAscendingPiles + p.pile)
+    // //         ] 
+    // //     + p.index
+    // //     ] = p.val;
+    // // }
+
+    // // Build physical piles, flattened into one n-size array
+    // for (size_t i = 0; i < placements.val.size(); ++i) {
+
+    //     int game  = placements.game[i];
+    //     int pile  = placements.pile[i];
+    //     int index = placements.index[i];
+    //     int value = placements.val[i];
+
+    //     if (game == 0){
+    //         arr[cumsumPileIndexStarts[pile] + index] = value;
+    //     } else {
+    //         arr[totalAscending + cumsumPileIndexStarts[numAscendingPiles + pile] + index] = value;
+    //     }
+    // }
+
+    // // Reverse descending stacks in postprocessing (faster than offset placement?)
+    // reverseDescendingPiles(arr, pileSizes, cumsumPileIndexStarts, numAscendingPiles, numDescendingPiles, totalAscending);
 
     // Only use this for Phase 1 timing tests, returns arr with unmerged bands
     // return arr;
