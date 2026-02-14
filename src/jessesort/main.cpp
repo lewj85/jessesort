@@ -150,6 +150,7 @@ int main() {
     std::vector<size_t> sizes = {
         1'000, 10'000, 100'000, 1'000'000, 10'000'000
     };
+    int trials = 20;
 
     std::vector<InputType> inputs = {
         InputType::Random,
@@ -182,7 +183,6 @@ int main() {
         std::cout << std::left << std::setw(22) << input_name(input);
 
         for (auto n : sizes) {
-            int trials = 20;
 
             std::vector<double> jesse_times;
             std::vector<double> std_times;
@@ -215,6 +215,27 @@ int main() {
                 if (!std::equal(arr.begin(), arr.end(), arr2.begin())) {
                     std::cerr << "Error: arrays differ! JesseSort did not match reference sort.\n";
                 }
+                // auto mismatch = std::mismatch(arr.begin(), arr.end(), arr2.begin());
+
+                // if (mismatch.first != arr.end()) {
+                //     size_t idx = std::distance(arr.begin(), mismatch.first);
+
+                //     std::cerr << "Error: arrays differ at index " << idx << "\n";
+                //     std::cerr << "JesseSort: " << arr[idx]
+                //             << " | Reference: " << arr2[idx] << "\n";
+
+                //     // Print small neighborhood for context
+                //     size_t start = (idx >= 3) ? idx - 3 : 0;
+                //     size_t end   = std::min(idx + 4, arr.size());
+
+                //     std::cerr << "\nContext (JesseSort):\n";
+                //     for (size_t i = start; i < end; ++i)
+                //         std::cerr << "[" << i << "]=" << arr[i] << " ";
+                //     std::cerr << "\n\nContext (Reference):\n";
+                //     for (size_t i = start; i < end; ++i)
+                //         std::cerr << "[" << i << "]=" << arr2[i] << " ";
+                //     std::cerr << "\n";
+                // }
             }
 
             double jesse_mean =

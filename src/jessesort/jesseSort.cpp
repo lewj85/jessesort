@@ -6,6 +6,56 @@
 #include <cstdlib>
 
 
+static inline void cmp_swap(int& a, int& b) {
+    int minv = std::min(a, b);
+    int maxv = std::max(a, b);
+    a = minv;
+    b = maxv;
+}
+
+void sort4_branchless(int& a, int& b, int& c, int& d) {
+    cmp_swap(a, b);
+    cmp_swap(c, d);
+    cmp_swap(a, c);
+    cmp_swap(b, d);
+    cmp_swap(b, c);
+}
+
+void sort8_branchless(int& a, int& b, int& c, int& d, int& e, int& f, int& g, int& h) {
+    // Stage 1
+    cmp_swap(a, b);
+    cmp_swap(c, d);
+    cmp_swap(e, f);
+    cmp_swap(g, h);
+
+    // Stage 2
+    cmp_swap(a, c);
+    cmp_swap(b, d);
+    cmp_swap(e, g);
+    cmp_swap(f, h);
+
+    // Stage 3
+    cmp_swap(b, c);
+    cmp_swap(f, g);
+    cmp_swap(a, e);
+    cmp_swap(d, h);
+
+    // Stage 4
+    cmp_swap(b, f);
+    cmp_swap(c, g);
+
+    // Stage 5
+    cmp_swap(b, e);
+    cmp_swap(d, g);
+
+    // Stage 6
+    cmp_swap(c, e);
+    cmp_swap(d, f);
+
+    // Stage 7
+    cmp_swap(d, e);
+}
+
 // Flatten piles into arr and make all runs ascending
 void vectorsToFlatArrMerge(
     std::vector<int>& arr,
@@ -626,13 +676,17 @@ int findAscendingPile(std::vector<std::vector<int>>& piles, int& mid, int value)
 }
 
 int findDescendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int value) {
+    // Pile arrays are descending:
+    //   [4, 3, 2, 1]
     // Base array is ascending:
-    //   [1, 2 ... 7, 8]
+    //   [1, 2, 3, 4]
     // We want to find where:
     //   baseArray[mid - 1] < value <= baseArray[mid]
 
     // To process natural runs in O(1), we check the current index and one adjacent
     // band prior to the binary search loop
+    int low = 0;
+    int high = baseArray.size();
     if (baseArray[mid] >= value){
         if (mid == 0 || baseArray[mid-1] < value){
             return mid;
@@ -641,10 +695,13 @@ int findDescendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int v
                 return mid-1;
             }
         }
+        high = mid;
+    } else {
+        low = mid + 1;
     }
 
     // Binary search
-    int low = 0, high = baseArray.size();
+    //int low = 0, high = baseArray.size();
     while (low < high) {
         mid = low + ((high - low) >> 1);
         if (baseArray[mid] < value)
@@ -652,17 +709,22 @@ int findDescendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int v
         else
             high = mid;
     }
-    return low;
+    mid = low;
+    return mid;
 }
 
 int findAscendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int value) {
+    // Pile arrays are ascending:
+    //   [1, 2, 3, 4]
     // Base array is descending:
-    //   [9, 8 ... 3, 2]
+    //   [4, 3, 2, 1]
     // We want to find where:
     //   baseArray[mid - 1] > value >= baseArray[mid]
 
     // To process natural runs in O(1), we check the current index and one adjacent
     // band prior to the binary search loop
+    int low = 0;
+    int high = baseArray.size();
     if (baseArray[mid] <= value){
         if (mid == 0 || baseArray[mid-1] > value){
             return mid;
@@ -671,10 +733,13 @@ int findAscendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int va
                 return mid-1;
             }
         }
+        high = mid;
+    } else {
+        low = mid + 1;
     }
 
     // Binary search
-    int low = 0, high = baseArray.size();
+    //jesse fix this logic. you can reuse if check above to update low or high. test with/without O(1) checks above. best times came from cutting it
     while (low < high) {
         mid = low + ((high - low) >> 1);
         if (baseArray[mid] > value)
@@ -682,7 +747,8 @@ int findAscendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int va
         else
             high = mid;
     }
-    return low;
+    mid = low;
+    return mid;
 }
 
 void insertValueDescendingSimulated(
@@ -839,28 +905,76 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     // Phase 1: Insertion
     ////////////////////////////////////////////////
 
-    // Play Patience, send values to optimal game based on natural run order
-    for (int value : arr) {
-        // NOTE: This if-statement encourages higher values to go to insertValueAscendingPiles
-        //       and lower values to go to insertValueDescendingPiles, similar to a split rainbow.
-        //       There may be a more optimal way to check for natural runs without influencing
-        //       the ranges of these 2 Patience games.
-        if (value > lastValueProcessed) {
-            ascendingMode = true;
-        } else if (value < lastValueProcessed) {
-            ascendingMode = false;
-        }
-        // else this is a repeated value, so use the same ascendingMode as last loop to process this one in O(1)
+    // // Play Patience, send values to optimal game based on natural run order
+    // for (int value : arr) {
+    //     // NOTE: This if-statement encourages higher values to go to insertValueAscendingPiles
+    //     //       and lower values to go to insertValueDescendingPiles, similar to a split rainbow.
+    //     //       There may be a more optimal way to check for natural runs without influencing
+    //     //       the ranges of these 2 Patience games.
+    //     if (value > lastValueProcessed) {
+    //         ascendingMode = true;
+    //     } else if (value < lastValueProcessed) {
+    //         ascendingMode = false;
+    //     }
+    //     // else this is a repeated value, so use the same ascendingMode as last loop to process this one in O(1)
 
-        // Insert value
-        if (ascendingMode) {
-            insertValueAscendingPiles(pilesAscending, pilesAscendingBaseArray, lastPileIndexAscending, value);
+    //     // Insert value
+    //     if (ascendingMode) {
+    //         insertValueAscendingPiles(pilesAscending, pilesAscendingBaseArray, lastPileIndexAscending, value);
+    //     } else {
+    //         insertValueDescendingPiles(pilesDescending, pilesDescendingBaseArray, lastPileIndexDescending, value);
+    //     }
+
+    //     lastValueProcessed = value;
+    // }
+
+    int i = 0;
+    int s4 = arr.size() - 8;
+    while (i < s4){
+        int c0 = (arr[i] <= arr[i+1]);
+        int c1 = (arr[i+1] <= arr[i+2]);
+        int c2 = (arr[i+2] <= arr[i+3]);
+        int c3 = (arr[i+3] <= arr[i+4]);
+        bool asc = (c0 + c1 + c2 + c3) == 4;
+        bool desc = (c0 + c1 + c2 + c3) == 0;
+
+        // Check for random first, already fast on asc/desc
+        //if (__builtin_expect(!(asc | desc), 1)) {
+        if (!(asc | desc)) {
+            asc = true;
+            //sort4_branchless(arr[i], arr[i+1], arr[i+2], arr[i+3]);
+            sort8_branchless(arr[i], arr[i+1], arr[i+2], arr[i+3], arr[i+4], arr[i+5], arr[i+6], arr[i+7]);
+        }
+        // Check ascending or descending
+        if (asc == true) {
+            //while (arr[i] <= arr[i+1]){ // out of bounds
+            while (i + 1 < arr.size() && arr[i] <= arr[i+1]) {
+                insertValueAscendingPiles(pilesAscending, pilesAscendingBaseArray, lastPileIndexAscending, arr[i]);
+                ++i;
+            }
         } else {
-            insertValueDescendingPiles(pilesDescending, pilesDescendingBaseArray, lastPileIndexDescending, value);
+            //while (arr[i] >= arr[i+1]){ // out of bounds
+            while (i + 1 < arr.size() && arr[i] >= arr[i+1]) {
+                insertValueDescendingPiles(pilesDescending, pilesDescendingBaseArray, lastPileIndexDescending, arr[i]);
+                ++i;
+            }
         }
-
-        lastValueProcessed = value;
     }
+
+    // Finish last few values if there are any
+    while (i < arr.size()){
+        if (arr[i] >= arr[i-1]){
+            insertValueAscendingPiles(pilesAscending, pilesAscendingBaseArray, lastPileIndexAscending, arr[i]);
+            ++i;
+        } else {
+            insertValueDescendingPiles(pilesDescending, pilesDescendingBaseArray, lastPileIndexDescending, arr[i]);
+            ++i;
+        }
+    }
+
+
+
+
 
     // // New code for simulating games to avoid physical memory chasing
     // // Initialize base array copies, used for faster search
