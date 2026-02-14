@@ -7,3 +7,7 @@ cython_debug/
 *.ipynb
 old/
 .vscode/
+*jesseSortTest
+*arr.txt
+notes.txt
+jessesort.cpp

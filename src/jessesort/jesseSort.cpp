@@ -739,7 +739,6 @@ int findAscendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int va
     }
 
     // Binary search
-    //jesse fix this logic. you can reuse if check above to update low or high. test with/without O(1) checks above. best times came from cutting it
     while (low < high) {
         mid = low + ((high - low) >> 1);
         if (baseArray[mid] > value)
@@ -973,10 +972,8 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     }
 
 
-
-
-
     // // New code for simulating games to avoid physical memory chasing
+    // // NOTE: This still requires memory chasing during reconstruction, so rethink reconstruction strategy
     // // Initialize base array copies, used for faster search
     // std::vector<int> pilesDescendingBaseArray; // Holds just the ascending tail values
     // std::vector<int> pilesAscendingBaseArray; // Holds just the descending tail values
@@ -1174,46 +1171,52 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     // Only use this for Phase 1 timing tests, returns arr with unmerged bands
     // return arr;
 
+
     ////////////////////////////////////////////////
     // Phase 2: Merging
     ////////////////////////////////////////////////
 
-    // Merge adjacent piles (vectors of vectors)
-    // return mergeAdjacentPiles(pilesDescending, pilesAscending);
     // Merge adjacent piles (flat concat)
     std::vector<size_t> run_starts, run_lengths;
     vectorsToFlatArrMerge(arr, pilesDescending, pilesAscending, run_starts, run_lengths);
     return bottomUpMerge(arr, run_starts, run_lengths);
     //return bottomUpMergeWithTemp(arr, run_starts, run_lengths);
 
-    // vs
-
+    // Legacy merges for non-flat vectors of vectors
+    // Merge adjacent piles (vectors of vectors)
+    // return mergeAdjacentPiles(pilesDescending, pilesAscending);
     // Merge piles by length based on increasing max lengths in powers of 2
     // return mergePilesByPowersOf2(pilesDescending, pilesAscending);
-
-    // vs
-
     // Timsort-inspired merge logic, best 2 out of 3, (X + Y) + Z vs X + (Y + Z)
     // return timsortMerge(pilesDescending, pilesAscending);
-
-    // vs
-
     // Powers of 2 and best 2 out of 3
     // return powersAndBestMerge(pilesDescending, pilesAscending);
 
-    // TODO: Huffman smallest 2 piles iteratively
 
-    // TODO: Early freezing (@62%?) of piles/baseArray lengths, so values that would
+    ////////////////////////////////////////////////
+    // TODO
+    ////////////////////////////////////////////////
+    // - Look into why Reversed input is so slow. There may be a bug in the binary
+    //       search logic. Speed should be very close to Sorted times, so fixing
+    //       this could speed up almost every row in the testbed!
+    // - Refactor less naive merge methods to work with the new flat array.
+    // - Once random input is determined, try a larger bitonic sort or insertion sort.
+    //       This is leaning into Timsort-style 32-value insertion sort runs, but it
+    //       would be interesting to see if it's faster to still inject these values
+    //       over existing piles or treat them as completed piles and set them aside
+    //       until Phase 2 merging.
+    // - Implement Huffman merging, smallest 2 piles iteratively. Overhead may be slower
+    //       than naive methods because of cache misses vs 2 adjacent runs already in cache.
+    // - Early freezing (@62%?) of piles/baseArray lengths, so values that would
     //       make new bands instead get thrown into a new unsorted array for sorting
     //       separately. This prevents many new small bands at the suboptimal ends,
     //       which may speed up the merge phase because we're not doing so many memory
-    //       lookups/trying to merge many small arrays.
-
-    // TODO: After Phase 1, do a single pass over pilesAscending and pilesDescending
-    //       and write them sequentially to arr. Keep track of starting indices of each
-    //       pile in flat memory (or just use cumulative sums). Run Phase 2 merging
-    //       directly on this flat array, no more memory chasing overhead. This will
-    //       likely improve cache performance in Phase 2 and could bring it below
-    //       std::sort on large random inputs, where Phase 2 dominates. Done for
-    //       adjacent pairs, can try flattening before other less naive merge methods.
+    //       lookups/trying to merge many small arrays. Could stream directly to introsort/
+    //       pdqsort for the remainder?
+    // - Start new games from scratch when base array reaches some length (sqrt(n)?).
+    //       Similar to freezing but instead of setting anything aside, you're just
+    //       building piles again, but with a smaller search space. Overhead worth it?
+    // - Revisit simulated piles after the many recent and upcoming changes. Leaving
+    //       the simulated game code commented out for now, but it should get cleaned
+    //       up if we're not using simulations due to cache misses during reconstruction.
 }

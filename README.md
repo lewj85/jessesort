@@ -11,27 +11,29 @@ n       n log k     n log n     2n          No          Yes
 
 ## Speed Test
 
-JesseSort beats Python's default sorted() on random-value inputs for n > 22000 (even better than our preprint claim!):
-
-![Speed Test](images/speedtest_updated.png)
-
-It also beats std::sort() on various inputs with sorted subsequences. Values below are ratios of JesseSort / std::sort, so a value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower). 20 trials were run for each cell below and averaged.
+JesseSort beats std::sort() on various inputs with sorted subsequences. Values below are ratios of JesseSort / std::sort. A value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower). 20 trials were run for each cell below and averaged.
 
 ```
                       Number of Input Values
 Input Type            1000          10000         100000        1000000       10000000
 --------------------------------------------------------------------------------------------
-Random                1.636         1.475         1.428         1.488         1.604
-Sorted                1.492         1.166         1.071         0.955         1.092
-Reverse               2.144         1.652         1.563         1.390         1.468
-NearlySorted(5%)      1.975         1.549         1.396         1.364         1.565
-Duplicates(5%)        1.669         1.498         1.550         1.562         1.675
-Alternating           2.611         1.205         0.757         0.766         1.043
-Sawtooth              1.749         0.456         0.371         0.357         0.377
-BlockSorted           14.274        1.486         1.425         1.430         1.584
-OrganPipe             0.555         0.159         0.115         0.109         0.133
-Rotated               0.530         0.455         0.355         0.272         0.478
+Random                1.587         1.477         1.433         1.484         1.596
+Sorted                1.554         1.117         1.031         0.897         1.063
+Reverse               2.260         1.602         1.416         1.352         1.414
+Sorted+Noise(5%)      1.868         1.278         1.357         1.368         1.546
+Random+Repeats(50%)   1.443         1.144         1.097         1.085         1.177
+Jitter                1.492         1.133         0.980         0.901         1.173
+Alternating           2.809         1.066         0.748         0.796         1.062
+Sawtooth              1.576         0.439         0.361         0.372         0.376
+BlockSorted           0.830         0.355         0.250         0.276         0.285
+OrganPipe             0.288         0.164         0.112         0.107         0.106
+Rotated               0.498         0.455         0.350         0.277         0.378
+Signal                15.093        0.792         0.615         0.619         0.652
 ```
+
+JesseSort also beats Python's default sorted() on random-value inputs for n > 20000 (>10x faster than our preprint claim!):
+
+![Speed Test](images/speedtest_updated.png)
 
 ## Setup
 
@@ -39,7 +41,7 @@ To compile and test JesseSort, run:
 
 ```
 cd src/jessesort
-g++ -O3 -march=native -DNDEBUG -std=c++17 main.cpp jesseSort.cpp -o jesseSortTest
+g++ -O3 -march=native -DNDEBUG -std=c++17 main.cpp jesseSort.cpp -lfftw3 -lfftw3_threads -lm -o jesseSortTest
 ./jesseSortTest
 ```
 
