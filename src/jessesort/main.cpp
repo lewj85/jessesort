@@ -387,7 +387,7 @@ void generate_input(std::vector<int>& arr,
 // Main
 int main() {
     std::vector<size_t> sizes = {
-        1'000, 10'000, 100'000, 1'000'000, 10'000'000
+        1'000, 10'000, 100'000, 1'000'000//, 10'000'000
     };
     int trials = 20;
 

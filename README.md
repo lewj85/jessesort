@@ -31,7 +31,27 @@ Rotated               0.498         0.455         0.350         0.277         0.
 Signal                15.093        0.792         0.615         0.619         0.652
 ```
 
-JesseSort also beats Python's default sorted() on random-value inputs for n > 20000 (>10x faster than our preprint claim!):
+On a laptop with limited RAM and a different CPU (AMD Ryzen 7 7445HS), JesseSort appears faster on some inputs. The limited memory also leads to a few large time jumps from 100k to 1mil inputs:
+
+```
+                      Number of Input Values
+Input Type            1000          10000         100000        1000000
+-------------------------------------------------------------------------------
+Random                1.834         1.442         1.522         1.663
+Sorted                1.031         0.672         0.582         1.382?
+Reverse               1.452         0.933         0.879         2.047?
+Sorted+Noise(5%)      1.947         1.554         1.480         1.470
+Random+Repeats(50%)   1.468         1.218         1.171         1.284
+Jitter                1.010         0.620         0.605         0.544
+Alternating           2.458         1.566         0.958         1.574?
+Sawtooth              1.702         0.411         0.384         0.356
+BlockSorted           0.818         0.487         0.365         0.326
+OrganPipe             0.429         0.228         0.140         0.127
+Rotated               0.630         0.485         0.354         0.298
+Signal                1.498         0.825         0.624         0.578
+```
+
+JesseSort also beats Python's default sorted() on random-value inputs for n > 20000 (>10x faster than our preprint claim):
 
 ![Speed Test](images/speedtest_updated.png)
 
@@ -41,7 +61,7 @@ To compile and test JesseSort, run:
 
 ```
 cd src/jessesort
-g++ -O3 -march=native -DNDEBUG -std=c++17 main.cpp jesseSort.cpp -lfftw3 -lfftw3_threads -lm -o jesseSortTest
+g++ -O3 -march=native -DNDEBUG -std=c++23 main.cpp jesseSort.cpp -lfftw3 -lfftw3_threads -lm -o jesseSortTest
 ./jesseSortTest
 ```
 
@@ -76,10 +96,10 @@ Merge all stacks until 1 remains. This currently utilizes either a Timsort-inspi
 
 ## Preprint
 
-The full breakdown of the algorithm can be seen in the Preprint here: https://www.researchgate.net/publication/388955884_JesseSort
+A breakdown of the original algorithm can be seen in the Preprint here: https://www.researchgate.net/publication/388955884_JesseSort
 
-This is under active development, so the preprint and code here differ. We now use 2 half rainbows (Patience Sort's default output structure) instead of 1 split rainbow. This is because split rainbows unnecessarily divide the ranges of the Patience Sort inputs and require suboptimal middle-insertions rather than faster tail-end insertions.
+This is under active development, so the preprint and code here differ. At the time of writing, I had not heard of Patience Sort--a lot has changed since then. We now use 2 half rainbows (Patience Sort's default output structure) instead of 1 split rainbow. This is because split rainbows unnecessarily divide the ranges of the Patience Sort inputs and require suboptimal middle-insertions rather than faster tail-end insertions.
 
 ## Final Thoughts
 
-My PhD has pulled me away from this project for a bit. I've actually come up with a couple other sorting algorithms that will have to wait as well! I will continue to update this in my free time whenever possible, but progress will be slower than before. Merge phase optimization is the last missing piece. Finally, I want to thank you all for your support and feedback--a special thank you to Sebastian Wild, Kenan Millet, and my beloved wife. Sorting is not my area of expertise, so I appreciate all your *patience*. 😉
+My PhD has pulled me away from this project for a bit. I've actually come up with a couple other sorting algorithms that will have to wait as well! I will continue to update this in my free time whenever possible, but progress will be slower than before. Finally, I want to thank you all for your support and feedback--a special thank you to Sebastian Wild, Kenan Millet, and my beloved wife. Sorting is not my area of expertise, so I appreciate all your *patience*. 😉
