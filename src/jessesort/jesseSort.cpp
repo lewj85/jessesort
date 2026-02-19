@@ -8,6 +8,114 @@
 #include <cstring>
 
 
+static void mergeRuns(
+    std::vector<int>& arr,
+    size_t left,
+    size_t mid,
+    size_t right,
+    std::vector<int>& temp
+) {
+    size_t left_len  = mid - left;
+    size_t right_len = right - mid;
+
+    // Copy smaller side into temp
+    if (left_len <= right_len) {
+        std::memcpy(temp.data(), &arr[left], left_len * sizeof(int));
+
+        size_t i = 0;
+        size_t j = mid;
+        size_t k = left;
+
+        while (i < left_len && j < right) {
+            if (temp[i] <= arr[j])
+                arr[k++] = temp[i++];
+            else
+                arr[k++] = arr[j++];
+        }
+
+        if (i < left_len)
+            std::memcpy(&arr[k], &temp[i], (left_len - i) * sizeof(int));
+    }
+    else {
+        std::memcpy(temp.data(), &arr[mid], right_len * sizeof(int));
+
+        ptrdiff_t i = static_cast<ptrdiff_t>(mid) - 1;
+        ptrdiff_t j = static_cast<ptrdiff_t>(right_len) - 1;
+        ptrdiff_t k = static_cast<ptrdiff_t>(right) - 1;
+        ptrdiff_t left_bound = static_cast<ptrdiff_t>(left);
+
+        while (j >= 0 && i >= left_bound) {
+            if (arr[i] > temp[j])
+                arr[k--] = arr[i--];
+            else
+                arr[k--] = temp[j--];
+        }
+
+        if (j >= 0)
+            std::memcpy(&arr[left], &temp[0], (j + 1) * sizeof(int));
+    }
+}
+
+std::vector<int>& best2of3(
+    std::vector<int>& arr,
+    const std::vector<size_t>& run_starts,
+    const std::vector<size_t>& run_lengths
+) {
+    struct Run {
+        size_t start;
+        size_t length;
+    };
+
+    std::vector<Run> stack;
+    stack.reserve(run_starts.size());
+
+    std::vector<int> temp(arr.size() / 2);
+
+    auto mergeAt = [&](size_t i) {
+        Run& A = stack[i];
+        Run& B = stack[i + 1];
+
+        mergeRuns(
+            arr,
+            A.start,
+            B.start,
+            B.start + B.length,
+            temp
+        );
+
+        A.length += B.length;
+        stack.erase(stack.begin() + i + 1);
+    };
+
+    for (size_t i = 0; i < run_starts.size(); ++i) {
+        stack.push_back({ run_starts[i], run_lengths[i] });
+
+        // Enforce TimSort-style invariants
+        while (stack.size() >= 3) {
+            size_t n = stack.size();
+
+            size_t A = stack[n-3].length;
+            size_t B = stack[n-2].length;
+            size_t C = stack[n-1].length;
+
+            if (A <= B + C || B <= C) {
+                if (A < C)
+                    mergeAt(n-3);
+                else
+                    mergeAt(n-2);
+            } else {
+                break;
+            }
+        }
+    }
+
+    while (stack.size() > 1) {
+        mergeAt(stack.size() - 2);
+    }
+
+    return arr;
+}
+
 void reserve_structure(std::vector<std::vector<int>>& buckets, size_t n) {
     constexpr double SQRT8 = 2.8284271247461903;
 
@@ -1202,6 +1310,7 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
                 run_lengths.push_back(arr.size() - i);
                 return bottomUpMerge(arr, run_starts, run_lengths);
                 //return bottomUpMergeWithTemp(arr, run_starts, run_lengths);
+                //return best2of3(arr, run_starts, run_lengths);
 
                 //std::sort(arr.begin(), arr.end());
                 //return arr;
@@ -1453,6 +1562,7 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     vectorsToFlatArrMerge(arr, pilesDescending, pilesAscending, run_starts, run_lengths);
     return bottomUpMerge(arr, run_starts, run_lengths);
     //return bottomUpMergeWithTemp(arr, run_starts, run_lengths);
+    //return best2of3(arr, run_starts, run_lengths);
 
     // Legacy merges for non-flat vectors of vectors
     // Merge adjacent piles (vectors of vectors)
