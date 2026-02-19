@@ -4,7 +4,66 @@
 #include <vector>
 #include <cstddef>
 #include <cstdlib>
+#include <cmath>
+#include <cstring>
 
+
+void reserve_structure(std::vector<std::vector<int>>& buckets, size_t n) {
+    constexpr double SQRT8 = 2.8284271247461903;
+
+    size_t sqrt_n = static_cast<size_t>(std::sqrt(static_cast<double>(n)));
+
+    double buffer = 1.1;
+    size_t num_games = 2; // Each game requires less space
+    size_t outer = static_cast<size_t>(buffer * (SQRT8 * sqrt_n) / num_games);
+    size_t inner = static_cast<size_t>(buffer * (sqrt_n / SQRT8) / num_games);
+
+    buckets.clear();
+    buckets.reserve(outer);
+
+    for (size_t i = 0; i < outer; ++i) {
+        buckets.emplace_back();
+        buckets.back().reserve(inner);
+    }
+}
+
+// Sort 32 elements starting at index `start`
+//template<typename T>
+void insertion_sort_32(std::vector<int>& v, int start) {
+    constexpr int BLOCK_SIZE = 32;
+
+    for (int i = start + 1; i < start + BLOCK_SIZE; ++i) {
+        int key = v[i];
+        int j = i;
+
+        while (j > start && v[j - 1] > key) {
+            v[j] = v[j - 1];
+            --j;
+        }
+
+        v[j] = key;
+    }
+}
+
+void insertion_sort_32s(int* base) {
+    // Put smallest at index 0
+    for (int i = 31; i > 0; --i) {
+        if (base[i] < base[i - 1])
+            std::swap(base[i], base[i - 1]);
+    }
+
+    for (int i = 2; i < 32; ++i) {
+        int key = base[i];
+        int j = i;
+
+        while (base[j - 1] > key) {
+            base[j] = base[j - 1];
+            --j;
+        }
+
+        base[j] = key;
+    }
+}
 
 static inline void cmp_swap(int& a, int& b) {
     int minv = std::min(a, b);
@@ -13,13 +72,22 @@ static inline void cmp_swap(int& a, int& b) {
     b = maxv;
 }
 
-// void sort4_branchless(int& a, int& b, int& c, int& d) {
-//     cmp_swap(a, b);
-//     cmp_swap(c, d);
-//     cmp_swap(a, c);
-//     cmp_swap(b, d);
-//     cmp_swap(b, c);
+// static inline void cmp_swap(int& a, int& b) {
+//     int diff = b - a;
+//     int mask = diff >> 31;
+//     int minv = b + (diff & mask);
+//     int maxv = a - (diff & mask);
+//     a = minv;
+//     b = maxv;
 // }
+
+void sort4_branchless(int& a, int& b, int& c, int& d) {
+    cmp_swap(a, c);
+    cmp_swap(b, d);
+    cmp_swap(a, b);
+    cmp_swap(c, d);
+    cmp_swap(b, c);
+}
 
 void sort8_branchless(int& a, int& b, int& c, int& d, int& e, int& f, int& g, int& h) {
     // Stage 1
@@ -56,6 +124,116 @@ void sort8_branchless(int& a, int& b, int& c, int& d, int& e, int& f, int& g, in
     cmp_swap(d, e);
 }
 
+void sort16_branchless(int* x) {
+    #define CS(i,j) cmp_swap(x[i], x[j])
+
+    CS(0,1); CS(2,3); CS(4,5); CS(6,7);
+    CS(8,9); CS(10,11); CS(12,13); CS(14,15);
+
+    CS(0,2); CS(1,3); CS(4,6); CS(5,7);
+    CS(8,10); CS(9,11); CS(12,14); CS(13,15);
+
+    CS(1,2); CS(5,6); CS(9,10); CS(13,14);
+
+    CS(0,4); CS(1,5); CS(2,6); CS(3,7);
+    CS(8,12); CS(9,13); CS(10,14); CS(11,15);
+
+    CS(2,4); CS(3,5); CS(6,8); CS(7,9);
+    CS(10,12); CS(11,13);
+
+    CS(1,4); CS(3,6); CS(5,8); CS(7,10);
+    CS(9,12); CS(11,14);
+
+    CS(1,2); CS(3,4); CS(5,6); CS(7,8);
+    CS(9,10); CS(11,12); CS(13,14);
+
+    CS(2,3); CS(4,5); CS(6,7); CS(8,9);
+    CS(10,11); CS(12,13);
+
+    CS(3,4); CS(5,6); CS(7,8); CS(9,10);
+    CS(11,12);
+
+    CS(6,7); CS(8,9);
+
+    #undef CS
+}
+
+void sort32_branchless(int* x) {
+#define CS(i,j) cmp_swap(x[i], x[j])
+
+    // Sort first 16
+    sort16_branchless(x);
+
+    // Sort second 16
+    sort16_branchless(x + 16);
+
+    // Bitonic merge 32
+
+    for (int i = 0; i < 16; ++i) CS(i, i+16);
+    for (int i = 0; i < 8; ++i)  { CS(i, i+8); CS(i+16, i+24); }
+    for (int i = 0; i < 4; ++i)  {
+        CS(i, i+4); CS(i+8, i+12);
+        CS(i+16, i+20); CS(i+24, i+28);
+    }
+    for (int i = 0; i < 2; ++i)  {
+        CS(i, i+2); CS(i+4, i+6);
+        CS(i+8, i+10); CS(i+12, i+14);
+        CS(i+16, i+18); CS(i+20, i+22);
+        CS(i+24, i+26); CS(i+28, i+30);
+    }
+    for (int i = 0; i < 32; i += 2) CS(i, i+1);
+
+#undef CS
+}
+
+// void sort32_branchless(int* x) {
+//     #define CS(i,j) cmp_swap(x[i], x[j])
+
+//     // Sort first 16
+//     sort16_branchless(x);
+
+//     // Sort second 16
+//     sort16_branchless(x + 16);
+
+//     // Bitonic merge 32
+
+//     // Stage 1
+//     for (int i = 0; i < 16; ++i)
+//         CS(i, i + 16);
+
+//     // Stage 2
+//     for (int i = 0; i < 8; ++i) {
+//         CS(i, i + 8);
+//         CS(i + 16, i + 24);
+//     }
+
+//     // Stage 3
+//     for (int i = 0; i < 4; ++i) {
+//         CS(i, i + 4);
+//         CS(i + 8, i + 12);
+//         CS(i + 16, i + 20);
+//         CS(i + 24, i + 28);
+//     }
+
+//     // Stage 4
+//     for (int i = 0; i < 2; ++i) {
+//         CS(i, i + 2);
+//         CS(i + 4, i + 6);
+//         CS(i + 8, i + 10);
+//         CS(i + 12, i + 14);
+//         CS(i + 16, i + 18);
+//         CS(i + 20, i + 22);
+//         CS(i + 24, i + 26);
+//         CS(i + 28, i + 30);
+//     }
+
+//     // Stage 5
+//     for (int i = 0; i < 32; i += 2)
+//         CS(i, i + 1);
+
+//     #undef CS
+// }
+
 // Flatten piles into arr and make all runs ascending
 void vectorsToFlatArrMerge(
     std::vector<int>& arr,
@@ -87,6 +265,59 @@ void vectorsToFlatArrMerge(
     }
 }
 
+static void mergeAdjacent(
+    std::vector<int>& arr,
+    size_t left,
+    size_t mid,
+    size_t right
+) {
+    size_t left_len  = mid - left;
+    size_t right_len = right - mid;
+
+    if (left_len <= right_len) {
+        std::vector<int> buffer(left_len);
+        std::memcpy(buffer.data(), &arr[left], left_len * sizeof(int));
+
+        size_t i = 0;
+        size_t j = mid;
+        size_t k = left;
+
+        while (i < left_len && j < right) {
+            if (buffer[i] <= arr[j])
+                arr[k++] = buffer[i++];
+            else
+                arr[k++] = arr[j++];
+        }
+
+        if (i < left_len)
+            std::memcpy(&arr[k], &buffer[i], (left_len - i) * sizeof(int));
+    }
+    else {
+        std::vector<int> buffer(right_len);
+        std::memcpy(buffer.data(), &arr[mid], right_len * sizeof(int));
+
+        ptrdiff_t i = static_cast<ptrdiff_t>(mid) - 1;
+        ptrdiff_t j = static_cast<ptrdiff_t>(right_len) - 1;
+        ptrdiff_t k = static_cast<ptrdiff_t>(right) - 1;
+        ptrdiff_t left_bound = static_cast<ptrdiff_t>(left);
+
+        while (j >= 0 && i >= left_bound) {
+            if (arr[i] > buffer[j])
+                arr[k--] = arr[i--];
+            else
+                arr[k--] = buffer[j--];
+        }
+
+        if (j >= 0) {
+            std::memcpy(
+                &arr[left],
+                &buffer[0],
+                (j + 1) * sizeof(int)
+            );
+        }
+    }
+}
+
 // Bottom-up in-place merge of flattened runs
 std::vector<int>& bottomUpMerge(
     std::vector<int>& arr,
@@ -112,6 +343,7 @@ std::vector<int>& bottomUpMerge(
                 arr.begin() + right_start,
                 arr.begin() + right_start + right_len
             );
+            // mergeAdjacent(arr, left_start, right_start, right_start + right_len);
 
             // New merged run
             new_starts.push_back(left_start);
@@ -130,68 +362,68 @@ std::vector<int>& bottomUpMerge(
     return arr;
 }
 
-// std::vector<int>& bottomUpMergeWithTemp(
-//     std::vector<int>& arr,
-//     std::vector<size_t>& run_starts,
-//     std::vector<size_t>& run_lengths
-// ) {
-//     if (run_starts.empty()) return arr;
+std::vector<int>& bottomUpMergeWithTemp(
+    std::vector<int>& arr,
+    std::vector<size_t>& run_starts,
+    std::vector<size_t>& run_lengths
+) {
+    if (run_starts.empty()) return arr;
 
-//     while (run_starts.size() > 1) {
-//         std::vector<size_t> new_starts;
-//         std::vector<size_t> new_lengths;
+    while (run_starts.size() > 1) {
+        std::vector<size_t> new_starts;
+        std::vector<size_t> new_lengths;
 
-//         // Compute max left run for this iteration
-//         size_t max_run = 0;
-//         for (size_t len : run_lengths) if (len > max_run) max_run = len;
-//         std::vector<int> temp(max_run);
+        // Compute max left run for this iteration
+        size_t max_run = 0;
+        for (size_t len : run_lengths) if (len > max_run) max_run = len;
+        std::vector<int> temp(max_run);
 
-//         for (size_t i = 0; i + 1 < run_starts.size(); i += 2) {
-//             size_t left_start  = run_starts[i];
-//             size_t left_len    = run_lengths[i];
-//             size_t right_start = run_starts[i+1];
-//             size_t right_len   = run_lengths[i+1];
+        for (size_t i = 0; i + 1 < run_starts.size(); i += 2) {
+            size_t left_start  = run_starts[i];
+            size_t left_len    = run_lengths[i];
+            size_t right_start = run_starts[i+1];
+            size_t right_len   = run_lengths[i+1];
 
-//             // Skip empty runs
-//             if (left_len == 0 && right_len == 0) continue;
-//             if (left_len == 0) {
-//                 new_starts.push_back(right_start);
-//                 new_lengths.push_back(right_len);
-//                 continue;
-//             }
-//             if (right_len == 0) {
-//                 new_starts.push_back(left_start);
-//                 new_lengths.push_back(left_len);
-//                 continue;
-//             }
+            // Skip empty runs
+            if (left_len == 0 && right_len == 0) continue;
+            if (left_len == 0) {
+                new_starts.push_back(right_start);
+                new_lengths.push_back(right_len);
+                continue;
+            }
+            if (right_len == 0) {
+                new_starts.push_back(left_start);
+                new_lengths.push_back(left_len);
+                continue;
+            }
 
-//             // Copy left run into temp
-//             std::copy(arr.begin() + left_start,
-//                       arr.begin() + left_start + left_len,
-//                       temp.begin());
+            // Copy left run into temp
+            std::copy(arr.begin() + left_start,
+                      arr.begin() + left_start + left_len,
+                      temp.begin());
 
-//             // Merge back into arr
-//             size_t l = 0, r = right_start, dest = left_start;
-//             while (l < left_len && r < right_start + right_len) {
-//                 arr[dest++] = (temp[l] <= arr[r]) ? temp[l++] : arr[r++];
-//             }
-//             while (l < left_len) arr[dest++] = temp[l++]; // leftover left run
+            // Merge back into arr
+            size_t l = 0, r = right_start, dest = left_start;
+            while (l < left_len && r < right_start + right_len) {
+                arr[dest++] = (temp[l] <= arr[r]) ? temp[l++] : arr[r++];
+            }
+            while (l < left_len) arr[dest++] = temp[l++]; // leftover left run
 
-//             new_starts.push_back(left_start);
-//             new_lengths.push_back(left_len + right_len);
-//         }
+            new_starts.push_back(left_start);
+            new_lengths.push_back(left_len + right_len);
+        }
 
-//         // Carry over last run if odd number
-//         if (run_starts.size() % 2 != 0) {
-//             new_starts.push_back(run_starts.back());
-//             new_lengths.push_back(run_lengths.back());
-//         }
+        // Carry over last run if odd number
+        if (run_starts.size() % 2 != 0) {
+            new_starts.push_back(run_starts.back());
+            new_lengths.push_back(run_lengths.back());
+        }
 
-//         run_starts = std::move(new_starts);
-//         run_lengths = std::move(new_lengths);
-//     }
-//     return arr;
-// }
+        run_starts = std::move(new_starts);
+        run_lengths = std::move(new_lengths);
+    }
+    return arr;
+}
 
 // // Merge two sorted std::vectors into one sorted std::vector
 // // NOTE: This returns an ascending pile, reversing the order
@@ -864,8 +1096,10 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     // Initialize both half rainbows
     std::vector<std::vector<int>> pilesDescending; // Ordered by ascending tail values
     pilesDescending.reserve(2);
+    //reserve_structure(pilesDescending, arr.size());
     std::vector<std::vector<int>> pilesAscending; // Ordered by descending tail values
     pilesAscending.reserve(2);
+    //reserve_structure(pilesAscending, arr.size());
 
     // Initialize base array copies, used for faster search
     std::vector<int> pilesDescendingBaseArray; // Holds just the ascending tail values
@@ -874,7 +1108,7 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     int lastValueProcessed = 0;
     int lastPileIndexAscending = 0;
     int lastPileIndexDescending = 0;
-    bool ascendingMode = true;
+    bool descendingMode = false;
 
     ////////////////////////////////////////////////
     // Phase 1: Insertion
@@ -887,27 +1121,34 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     //     //       There may be a more optimal way to check for natural runs without influencing
     //     //       the ranges of these 2 Patience games.
     //     if (value > lastValueProcessed) {
-    //         ascendingMode = true;
+    //         descendingMode = false;
     //     } else if (value < lastValueProcessed) {
-    //         ascendingMode = false;
+    //         descendingMode = true;
     //     }
-    //     // else this is a repeated value, so use the same ascendingMode as last loop to process this one in O(1)
+    //     // else this is a repeated value, so use the same descendingMode as last loop to process this one in O(1)
 
     //     // Insert value
-    //     if (ascendingMode) {
-    //         insertValueAscendingPiles(pilesAscending, pilesAscendingBaseArray, lastPileIndexAscending, value);
-    //     } else {
+    //     if (descendingMode) {
     //         insertValueDescendingPiles(pilesDescending, pilesDescendingBaseArray, lastPileIndexDescending, value);
+    //     } else {
+    //         insertValueAscendingPiles(pilesAscending, pilesAscendingBaseArray, lastPileIndexAscending, value);
     //     }
 
     //     lastValueProcessed = value;
     // }
 
+
+
+
     int i = 0;
     int n_minus_1 = arr.size() - 1;
-    int n_minus_8 = arr.size() - 8; // We potentially do a sort8_branchless so stop early
+    int x = 8;
+    int n_minus_x = arr.size() - x; // We potentially do a sort8_branchless so stop early
+    size_t entropy_counter = 0;
+    // size_t entropy_threshold = 100;
+    size_t entropy_threshold = arr.size() / (x * 100); // should scale with n (and x?)
 
-    while (i < n_minus_8){
+    while (i < n_minus_x){
         // Probability of 5 ascending/descending values in a row with random input is:
         //   (1 asc + 1 desc)/(5!) = 2/120 = 0.01667 = 1.7%
         // So even though we later sort more than 5 values (e.g. sort8_branchless),
@@ -932,8 +1173,39 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
         // Check for random first, already fast on asc/desc
         if (!(asc | desc)) {
             asc = true;
-            //sort4_branchless(arr[i], arr[i+1], arr[i+2], arr[i+3]);
-            sort8_branchless(arr[i], arr[i+1], arr[i+2], arr[i+3], arr[i+4], arr[i+5], arr[i+6], arr[i+7]);
+
+            if (entropy_counter < entropy_threshold) {
+                // Increment each time we reach this block
+                entropy_counter++;
+
+                // Optimization testing below
+                //sort4_branchless(arr[i], arr[i+1], arr[i+2], arr[i+3]);
+                sort8_branchless(arr[i], arr[i+1], arr[i+2], arr[i+3], arr[i+4], arr[i+5], arr[i+6], arr[i+7]);
+                //sort16_branchless(&arr[i]);
+                //sort32_branchless(&arr[i]);
+                //std::sort(arr.begin(), arr.end());
+                //std::sort(&arr[i], &arr[i+x]);
+                //std::sort(arr.begin() + i, arr.end());
+                //sort4_branchless(arr[i+28], arr[i+29], arr[i+30], arr[i+31]);
+                //sort8_branchless(arr[i+24], arr[i+25], arr[i+26], arr[i+27], arr[i+28], arr[i+29], arr[i+30], arr[i+31]);
+                //insertion_sort_32(arr, i);
+                //insertion_sort_32s(&arr[i]);
+                //return arr;
+            } else {
+                // If entropy threshold is met, input is too random so just introsort the rest
+                std::sort(arr.begin() + i, arr.end());
+
+                // Merge adjacent piles (flat concat)
+                std::vector<size_t> run_starts, run_lengths;
+                vectorsToFlatArrMerge(arr, pilesDescending, pilesAscending, run_starts, run_lengths);
+                run_starts.push_back(i);
+                run_lengths.push_back(arr.size() - i);
+                return bottomUpMerge(arr, run_starts, run_lengths);
+                //return bottomUpMergeWithTemp(arr, run_starts, run_lengths);
+
+                //std::sort(arr.begin(), arr.end());
+                //return arr;
+            }
         }
 
 
@@ -967,7 +1239,12 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
     }
 
 
-    // // New code for simulating games to avoid physical memory chasing
+
+
+
+
+
+    // // Code for simulating games to avoid physical memory chasing
     // // NOTE: This still requires memory chasing during reconstruction, so rethink reconstruction strategy
     // // Initialize base array copies, used for faster search
     // std::vector<int> pilesDescendingBaseArray; // Holds just the ascending tail values

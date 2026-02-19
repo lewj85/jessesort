@@ -11,7 +11,29 @@ n       n log k     n log n     2n          No          Yes
 
 ## Speed Test
 
-JesseSort beats std::sort() on various inputs with sorted subsequences. Values below are ratios of JesseSort / std::sort. A value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower). 20 trials were run for each cell below and averaged.
+JesseSort beats std::sort() on various inputs with sorted subsequences. Values below are median (not mean) ratios of JesseSort / std::sort. A value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower). 100 trials were run for each cell below and averaged.
+
+With a AMD Ryzen 7 7445HS CPU:
+
+```
+                      Number of Input Values
+Input Type            1000          10000         100000        1000000
+------------------------------------------------------------------------------
+Random                0.984         1.032         1.042         1.088
+Sorted                1.022         0.679         0.583         1.448?
+Reverse               1.636         1.076         0.900         2.101?
+Sorted+Noise(5%)      1.048         1.041         1.079         1.201
+Random+Repeats(50%)   1.037         1.032         1.031         1.089
+Jitter                1.012         0.674         0.586         1.443?
+Alternating           0.829         1.011         0.974         1.018
+Sawtooth              1.121         0.960         0.978         1.072
+BlockSorted           1.046         0.950         0.928         1.153
+OrganPipe             0.446         0.232         0.138         0.268
+Rotated               0.596         0.522         0.396         0.716
+Signal                1.402         0.828         0.659         0.582
+```
+
+With an Intel Core i9 13900K CPU:
 
 ```
                       Number of Input Values
@@ -29,26 +51,6 @@ BlockSorted           0.830         0.355         0.250         0.276         0.
 OrganPipe             0.288         0.164         0.112         0.107         0.106
 Rotated               0.498         0.455         0.350         0.277         0.378
 Signal                15.093        0.792         0.615         0.619         0.652
-```
-
-On a laptop with limited RAM and a different CPU (AMD Ryzen 7 7445HS), JesseSort appears faster on some inputs. The limited memory also leads to a few large time jumps from 100k to 1mil inputs:
-
-```
-                      Number of Input Values
-Input Type            1000          10000         100000        1000000
--------------------------------------------------------------------------------
-Random                1.834         1.442         1.522         1.663
-Sorted                1.031         0.672         0.582         1.382?
-Reverse               1.452         0.933         0.879         2.047?
-Sorted+Noise(5%)      1.947         1.554         1.480         1.470
-Random+Repeats(50%)   1.468         1.218         1.171         1.284
-Jitter                1.010         0.620         0.605         0.544
-Alternating           2.458         1.566         0.958         1.574?
-Sawtooth              1.702         0.411         0.384         0.356
-BlockSorted           0.818         0.487         0.365         0.326
-OrganPipe             0.429         0.228         0.140         0.127
-Rotated               0.630         0.485         0.354         0.298
-Signal                1.498         0.825         0.624         0.578
 ```
 
 JesseSort also beats Python's default sorted() on random-value inputs for n > 20000 (>10x faster than our preprint claim):

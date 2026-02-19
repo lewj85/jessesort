@@ -158,14 +158,18 @@ void generate_input(std::vector<int>& arr,
             break;
 
         case InputType::NearlySorted: {
-            // 5% chance to be a random value
-            std::sort(arr.begin(), arr.end());
-            size_t swaps = static_cast<size_t>(0.05 * n);
-            std::uniform_int_distribution<size_t> idx(0, n - 1);
-            for (size_t i = 0; i < swaps; ++i) {
-                std::swap(arr[idx(rng)], arr[idx(rng)]);
+            // Start strictly sorted 0 to n-1
+            for (size_t i = 0; i < n; ++i) {
+                arr[i] = static_cast<int>(i);
             }
-            //visualize(arr);
+            std::uniform_real_distribution<double> prob(0.0, 1.0);
+            std::uniform_int_distribution<int> rand_val(0, static_cast<int>(n - 1));
+            for (size_t i = 0; i < n; ++i) {
+                // 5% chance to be a random value
+                if (prob(rng) < 0.05) {
+                    arr[i] = rand_val(rng);
+                }
+            }
             break;
         }
 
@@ -389,7 +393,7 @@ int main() {
     std::vector<size_t> sizes = {
         1'000, 10'000, 100'000, 1'000'000//, 10'000'000
     };
-    int trials = 20;
+    int trials = 100;
 
     std::vector<InputType> inputs = {
         InputType::Random,
@@ -487,8 +491,14 @@ int main() {
                 std::accumulate(std_times.begin(), std_times.end(), 0.0)
                 / trials;
 
+            std::sort(jesse_times.begin(), jesse_times.end());
+            std::sort(std_times.begin(), std_times.end());
+            double jesse_median = jesse_times[trials/2];
+            double std_median = std_times[trials/2];
+
             // Print JesseSort / std::sort ratio (compact + interpretable)
-            double ratio = jesse_mean / std_mean;
+            //double ratio = jesse_mean / std_mean;
+            double ratio = jesse_median / std_median;
             std::cout << std::setw(14) << std::fixed << std::setprecision(3)
                       << ratio;
         }
