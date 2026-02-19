@@ -34,23 +34,19 @@ Signal                1.402         0.828         0.659         0.582
 ```
 
 With an Intel Core i9 13900K CPU:
+Note: These ratios are using outdated code. Keeping them to demonstrate how the new input adaptive logic greatly sped up the Random input case but at the cost of faster structured inputs.
 
 ```
                       Number of Input Values
 Input Type            1000          10000         100000        1000000       10000000
 --------------------------------------------------------------------------------------------
 Random                1.587         1.477         1.433         1.484         1.596
-Sorted                1.554         1.117         1.031         0.897         1.063
-Reverse               2.260         1.602         1.416         1.352         1.414
-Sorted+Noise(5%)      1.868         1.278         1.357         1.368         1.546
-Random+Repeats(50%)   1.443         1.144         1.097         1.085         1.177
-Jitter                1.492         1.133         0.980         0.901         1.173
+...
 Alternating           2.809         1.066         0.748         0.796         1.062
 Sawtooth              1.576         0.439         0.361         0.372         0.376
 BlockSorted           0.830         0.355         0.250         0.276         0.285
 OrganPipe             0.288         0.164         0.112         0.107         0.106
 Rotated               0.498         0.455         0.350         0.277         0.378
-Signal                15.093        0.792         0.615         0.619         0.652
 ```
 
 JesseSort also beats Python's default sorted() on random-value inputs for n > 20000 (>10x faster than our preprint claim):
