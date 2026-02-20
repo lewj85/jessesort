@@ -11,7 +11,7 @@ n       n log k     n log n     2n          No          Yes
 
 ## Speed Test
 
-JesseSort beats std::sort() on various inputs with sorted subsequences. Values below are median (not mean) ratios of JesseSort / std::sort. A value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower). 100 trials were run for each cell below and averaged.
+JesseSort beats std::sort() on various inputs with sorted subsequences. Values below are median (not mean) ratios of JesseSort / std::sort over 100 trials. A value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower).
 
 With a AMD Ryzen 7 7445HS CPU:
 
@@ -19,18 +19,18 @@ With a AMD Ryzen 7 7445HS CPU:
                       Number of Input Values
 Input Type            1000          10000         100000        1000000
 ------------------------------------------------------------------------------
-Random                0.984         1.032         1.042         1.088
-Sorted                1.022         0.679         0.583         1.448?
-Reverse               1.636         1.076         0.900         2.101?
-Sorted+Noise(5%)      1.048         1.041         1.079         1.201
-Random+Repeats(50%)   1.037         1.032         1.031         1.089
-Jitter                1.012         0.674         0.586         1.443?
-Alternating           0.829         1.011         0.974         1.018
-Sawtooth              1.121         0.960         0.978         1.072
-BlockSorted           1.046         0.950         0.928         1.153
-OrganPipe             0.446         0.232         0.138         0.268
-Rotated               0.596         0.522         0.396         0.716
-Signal                1.402         0.828         0.659         0.582
+Random                1.019         1.017         1.014         1.072
+Sorted                1.071         0.688         0.587         1.472?
+Reverse               1.625         1.084         0.904         2.130?
+Sorted+Noise(5%)      1.050         1.045         1.058         1.190
+Random+Repeats(50%)   1.035         1.027         1.020         1.079
+Jitter                1.051         0.690         0.588         1.478?
+Alternating           0.808         0.952         0.841         0.987
+Sawtooth              1.126         0.967         0.980         1.081
+BlockSorted           1.021         0.937         0.939         1.164
+OrganPipe             0.447         0.237         0.138         0.273
+Rotated               0.540         0.513         0.371         0.701
+Signal                1.452         0.850         0.668         0.596
 ```
 
 With an Intel Core i9 13900K CPU:
@@ -67,7 +67,7 @@ For use in Python, run:
 
 ```
 pip install cython
-g++ -O3 -shared -std=c++17 -fPIC -o src/jessesort/libjesseSort.so src/jessesort/jesseSort.cpp
+g++ -O3 -shared -std=c++23 -fPIC -o src/jessesort/libjesseSort.so src/jessesort/jesseSort.cpp
 python setup.py build_ext --inplace
 ```
 

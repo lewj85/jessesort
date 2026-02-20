@@ -1306,11 +1306,12 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
                 // Merge adjacent piles (flat concat)
                 std::vector<size_t> run_starts, run_lengths;
                 vectorsToFlatArrMerge(arr, pilesDescending, pilesAscending, run_starts, run_lengths);
+                //bottomUpMerge(arr, run_starts, run_lengths);
                 run_starts.push_back(i);
                 run_lengths.push_back(arr.size() - i);
-                return bottomUpMerge(arr, run_starts, run_lengths);
+                //return bottomUpMerge(arr, run_starts, run_lengths);
                 //return bottomUpMergeWithTemp(arr, run_starts, run_lengths);
-                //return best2of3(arr, run_starts, run_lengths);
+                return best2of3(arr, run_starts, run_lengths);
 
                 //std::sort(arr.begin(), arr.end());
                 //return arr;
