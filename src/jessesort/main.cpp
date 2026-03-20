@@ -16,7 +16,7 @@ enum class InputType {
     Sorted,
     Reverse,
     NearlySorted,
-    DuplicateHeavy,
+    Random100,
     Jitter,
     Adversarial,
     Sawtooth,
@@ -31,8 +31,8 @@ std::string input_name(InputType t) {
         case InputType::Random:         return "Random";
         case InputType::Sorted:         return "Sorted";
         case InputType::Reverse:        return "Reverse";
-        case InputType::NearlySorted:   return "Sorted+Noise(5%)";
-        case InputType::DuplicateHeavy: return "Random+Repeats(50%)";
+        case InputType::NearlySorted:   return "Sorted+Noise(3%)";
+        case InputType::Random100:      return "Random%100";
         case InputType::Jitter:         return "Jitter";
         case InputType::Adversarial:    return "Alternating";
         case InputType::Sawtooth:       return "Sawtooth";
@@ -166,28 +166,35 @@ void generate_input(std::vector<int>& arr,
             std::uniform_int_distribution<int> rand_val(0, static_cast<int>(n - 1));
             for (size_t i = 0; i < n; ++i) {
                 // 5% chance to be a random value
-                if (prob(rng) < 0.05) {
+                if (prob(rng) < 0.03) {
                     arr[i] = rand_val(rng);
                 }
             }
             break;
         }
 
-        case InputType::DuplicateHeavy: {
-            // 50% chance to repeat previous value
-            std::uniform_int_distribution<int> val_dist(0, static_cast<int>(n));
-            std::uniform_real_distribution<double> repeat_chance(0.0, 1.0);
+        // case InputType::DuplicateHeavy: {
+        //     // 50% chance to repeat previous value
+        //     std::uniform_int_distribution<int> val_dist(0, static_cast<int>(n));
+        //     std::uniform_real_distribution<double> repeat_chance(0.0, 1.0);
 
-            int prev = val_dist(rng);
-            arr[0] = prev;
+        //     int prev = val_dist(rng);
+        //     arr[0] = prev;
 
-            for (size_t i = 1; i < n; ++i) {
-                if (repeat_chance(rng) < 0.50) {
-                    arr[i] = prev;
-                } else {
-                    prev = val_dist(rng);
-                    arr[i] = prev;
-                }
+        //     for (size_t i = 1; i < n; ++i) {
+        //         if (repeat_chance(rng) < 0.50) {
+        //             arr[i] = prev;
+        //         } else {
+        //             prev = val_dist(rng);
+        //             arr[i] = prev;
+        //         }
+        //     }
+        //     //visualize(arr);
+        //     break;
+        // }
+        case InputType::Random100: {
+            for (int& v : arr) {
+                v = v % 100;  // modify in place
             }
             //visualize(arr);
             break;
@@ -400,7 +407,7 @@ int main() {
         InputType::Sorted,
         InputType::Reverse,
         InputType::NearlySorted,
-        InputType::DuplicateHeavy,
+        InputType::Random100,
         InputType::Jitter,
         InputType::Adversarial,
         InputType::Sawtooth,

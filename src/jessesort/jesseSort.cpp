@@ -1023,7 +1023,7 @@ int findDescendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int v
             return mid;
         } else {
             if (mid-1 == 0 || baseArray[mid-2] < value){
-                return mid-1;
+                return --mid;
             }
         }
         high = mid;
@@ -1060,7 +1060,7 @@ int findAscendingPileWithBaseArray(std::vector<int>& baseArray, int& mid, int va
             return mid;
         } else {
             if (mid-1 == 0 || baseArray[mid-2] > value){
-                return mid-1;
+                return --mid;
             }
         }
         high = mid;
@@ -1260,7 +1260,7 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
         // Probability of 5 ascending/descending values in a row with random input is:
         //   (1 asc + 1 desc)/(5!) = 2/120 = 0.01667 = 1.7%
         // So even though we later sort more than 5 values (e.g. sort8_branchless),
-        // only 5 comparisons are actually needed to decide if the input is random
+        // only 4 comparisons are actually needed to decide if the input is random
         int a0 = (arr[i] <= arr[i+1]);
         int a1 = (arr[i+1] <= arr[i+2]);
         int a2 = (arr[i+2] <= arr[i+3]);

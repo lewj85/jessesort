@@ -1,6 +1,6 @@
 # JesseSort
 
-JesseSort is a sorting algorithm that uses 2 Patience Sort insertions (one with descending stacks and one with ascending stacks), followed by a merge phase.
+JesseSort is a new sorting algorithm that introduces dual Patience--one game with descending piles and one game with ascending piles--as a core insertion strategy. The exact implementation is still evolving, with ongoing exploration of adaptivity to input type, possible fallback strategies, optimal merge methods, game simulation, improved branch prediction, etc. Even in its current unoptimized state, JesseSort is one of the fastest sorting algorithms to date.
 
 The runtime of this sorting algorithm is dependent on the number of piles/bands, k, created by the 2 games of Patience. On purely random inputs, k = sqrt(n), leading to a total runtime of O(n log n) after merging. But on inputs with natural runs, repeated values, broken subsequences, etc (all of which are common in real data), k can get significantly smaller, allowing JesseSort to approach as fast as O(n).
 
@@ -11,7 +11,7 @@ n       n log k     n log n     2n          No          Yes
 
 ## Speed Test
 
-JesseSort beats std::sort() on various inputs with sorted subsequences. Values below are median (not mean) ratios of JesseSort / std::sort over 100 trials. A value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower).
+JesseSort beats std::sort() on various semi-sorted inputs. Values below are median (not mean) ratios of JesseSort / std::sort over 100 trials. A value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower). **Values below 1 mean JesseSort is faster.**
 
 With a AMD Ryzen 7 7445HS CPU:
 
@@ -19,21 +19,22 @@ With a AMD Ryzen 7 7445HS CPU:
                       Number of Input Values
 Input Type            1000          10000         100000        1000000
 ------------------------------------------------------------------------------
-Random                1.019         1.017         1.014         1.072
-Sorted                1.071         0.688         0.587         1.472?
-Reverse               1.625         1.084         0.904         2.130?
-Sorted+Noise(5%)      1.050         1.045         1.058         1.190
-Random+Repeats(50%)   1.035         1.027         1.020         1.079
-Jitter                1.051         0.690         0.588         1.478?
-Alternating           0.808         0.952         0.841         0.987
-Sawtooth              1.126         0.967         0.980         1.081
-BlockSorted           1.021         0.937         0.939         1.164
-OrganPipe             0.447         0.237         0.138         0.273
-Rotated               0.540         0.513         0.371         0.701
-Signal                1.452         0.850         0.668         0.596
+Random                1.018         1.033         1.022         1.073
+Sorted                1.069         0.699         0.590         1.484
+Reverse               1.645         1.099         0.900         2.199
+Sorted+Noise(3%)      1.049         1.036         1.048         1.201
+Random%100            1.033         1.041         1.040         1.141
+Jitter                1.072         0.699         0.600         1.489
+Alternating           0.834         1.023         0.843         0.973
+Sawtooth              1.083         0.954         0.975         1.074
+BlockSorted           1.020         0.937         0.934         1.164
+OrganPipe             0.453         0.240         0.138         0.270
+Rotated               0.529         0.488         0.353         0.709
+Signal                1.424         0.831         0.642         0.573
 ```
 
 With an Intel Core i9 13900K CPU:
+
 Note: These ratios are using outdated code. Keeping them to demonstrate how the new input adaptive logic greatly sped up the Random input case but at the cost of faster structured inputs.
 
 ```
@@ -90,7 +91,7 @@ Play 2 games of Patience, one with descending stacks and one with ascending stac
 
 2. Merge Phase
 
-Merge all stacks until 1 remains. This currently utilizes either a Timsort-inspired "best 2 out of 3" policy or the basic "increasing powers of 2" merge strategy (see the comments in the code). Testing is underway, so a faster merge policy (Huffman?) may replace this.
+Merge all stacks until 1 remains. This currently utilizes a Timsort-inspired "best 2 out of 3" policy. Testing is underway, so a faster merge policy may replace this.
 
 ## Preprint
 
@@ -100,4 +101,6 @@ This is under active development, so the preprint and code here differ. At the t
 
 ## Final Thoughts
 
-My PhD has pulled me away from this project for a bit. I've actually come up with a couple other sorting algorithms that will have to wait as well! I will continue to update this in my free time whenever possible, but progress will be slower than before. Finally, I want to thank you all for your support and feedback--a special thank you to Sebastian Wild, Kenan Millet, and my beloved wife. Sorting is not my area of expertise, so I appreciate all your *patience*. 😉
+My PhD has pulled me away from this project for a bit. I've actually come up with a couple other sorting algorithms that will have to wait as well! I will continue to update this in my free time whenever possible, but progress will be slower than before. I welcome any contributions folks want to make to this project.
+
+Finally, I want to thank you all for your support and feedback--a special thank you to Sebastian Wild, Kenan Millet, and my beloved wife. Sorting is not my area of expertise, so I appreciate all your *patience*. 😉
