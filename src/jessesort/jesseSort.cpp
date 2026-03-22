@@ -1317,6 +1317,9 @@ std::vector<int> jesseSort(std::vector<int>& arr) {
                 //return arr;
             }
         }
+        //  else {
+        //     entropy_counter = 0;
+        // }
 
 
 

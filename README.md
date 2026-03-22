@@ -13,7 +13,7 @@ n       n log k     n log n     2n          No          Yes
 
 JesseSort beats std::sort() on various semi-sorted inputs. Values below are median (not mean) ratios of JesseSort / std::sort over 100 trials. A value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower). **Values below 1 mean JesseSort is faster.**
 
-With a AMD Ryzen 7 7445HS CPU:
+With a AMD Ryzen 7 7445HS CPU, compiled with GCC (libstdc++):
 
 ```
                       Number of Input Values
@@ -32,6 +32,24 @@ OrganPipe             0.453         0.240         0.138         0.270
 Rotated               0.529         0.488         0.353         0.709
 Signal                1.424         0.831         0.642         0.573
 ```
+
+Same CPU, compiled with clang (libc++):
+
+                      Number of Input Values
+Input Type            1000          10000         100000        1000000
+------------------------------------------------------------------------------
+Random                1.080         1.078         1.058         1.141
+Sorted                1.064         0.595         0.550         1.487
+Reverse               1.223         0.894         0.736         1.998
+Sorted+Noise(3%)      1.113         1.095         1.133         1.261
+Random%100            1.080         1.095         1.120         1.251
+Jitter                1.061         0.697         0.555         1.501
+Alternating           1.256         1.086         0.921         1.254
+Sawtooth              1.523         1.067         1.075         1.160
+BlockSorted           1.216         0.992         0.987         1.189
+OrganPipe             0.590         0.162         0.117         0.225
+Rotated               0.577         0.539         0.420         0.739
+Signal                1.289         0.766         0.628         0.566
 
 With an Intel Core i9 13900K CPU:
 
@@ -64,6 +82,14 @@ g++ -O3 -march=native -DNDEBUG -std=c++23 main.cpp jesseSort.cpp -lfftw3 -lfftw3
 ./jesseSortTest
 ```
 
+Or if you want to use clang and libc++, run:
+
+```
+cd src/jessesort
+clang++ -O3 -march=native -DNDEBUG main.cpp jesseSort.cpp -lfftw3 -lfftw3_threads -lm -o jesseSortTest
+./jesseSortTest
+```
+
 For use in Python, run:
 
 ```
@@ -91,13 +117,13 @@ Play 2 games of Patience, one with descending stacks and one with ascending stac
 
 2. Merge Phase
 
-Merge all stacks until 1 remains. This currently utilizes a Timsort-inspired "best 2 out of 3" policy. Testing is underway, so a faster merge policy may replace this.
+Merge all stacks until 1 remains. This currently utilizes either a Timsort-inspired "best 2 out of 3" policy or naive adjacent runs. Testing is underway, so a faster merge policy may replace this.
 
 ## Preprint
 
 A breakdown of the original algorithm can be seen in the Preprint here: https://www.researchgate.net/publication/388955884_JesseSort
 
-This is under active development, so the preprint and code here differ. At the time of writing, I had not heard of Patience Sort--a lot has changed since then. We now use 2 half rainbows (Patience Sort's default output structure) instead of 1 split rainbow. This is because split rainbows unnecessarily divide the ranges of the Patience Sort inputs and require suboptimal middle-insertions rather than faster tail-end insertions.
+This is under active development, so the preprint and code here differ. At the time of writing, I had not heard of Patience Sort--a lot has changed since then. I now use 2 half rainbows (Patience Sort's default output structure) instead of 1 split rainbow. This is because split rainbows unnecessarily divide the ranges of the Patience Sort inputs and require suboptimal middle-insertions rather than faster tail-end insertions.
 
 ## Final Thoughts
 
