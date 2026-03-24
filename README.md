@@ -35,6 +35,7 @@ Signal                1.424         0.831         0.642         0.573
 
 Same CPU, compiled with clang (libc++):
 
+```
                       Number of Input Values
 Input Type            1000          10000         100000        1000000
 ------------------------------------------------------------------------------
@@ -50,6 +51,7 @@ BlockSorted           1.216         0.992         0.987         1.189
 OrganPipe             0.590         0.162         0.117         0.225
 Rotated               0.577         0.539         0.420         0.739
 Signal                1.289         0.766         0.628         0.566
+```
 
 With an Intel Core i9 13900K CPU:
 
