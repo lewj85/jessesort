@@ -165,8 +165,9 @@ void generate_input(std::vector<int>& arr,
             std::uniform_real_distribution<double> prob(0.0, 1.0);
             std::uniform_int_distribution<int> rand_val(0, static_cast<int>(n - 1));
             for (size_t i = 0; i < n; ++i) {
-                // 5% chance to be a random value
-                if (prob(rng) < 0.03) {
+                // Small chance to be a random value
+                double prob_rand = 0.03;
+                if (prob(rng) < prob_rand) {
                     arr[i] = rand_val(rng);
                 }
             }
@@ -218,7 +219,7 @@ void generate_input(std::vector<int>& arr,
             int lo = 0;
             int hi = static_cast<int>(n);
             for (size_t i = 0; i < n; ++i) {
-                arr[i] = (i % 2 == 0) ? lo++ : hi--;
+                arr[i] = (i % 2 == 0) ? lo-- : hi++;
             }
             //visualize(arr);
             break;

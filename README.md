@@ -1,12 +1,12 @@
 # JesseSort
 
-JesseSort is a new sorting algorithm that introduces dual Patience--one game with descending piles and one game with ascending piles--as a core insertion strategy. The exact implementation is still evolving, with ongoing exploration of adaptivity to input type, possible fallback strategies, optimal merge methods, game simulation, improved branch prediction, etc. Even in its current unoptimized state, JesseSort is one of the fastest sorting algorithms to date.
+JesseSort is a new sorting algorithm that introduces dual Patience--one game with descending piles and one game with ascending piles--as a core insertion strategy. Variations and optimizations are actively being explored, including experiments in adaptivity to input type, possible fallback strategies, optimal merge methods, game simulation, improved branch prediction, AVX2/AVX512 usage, etc. Even in its current unoptimized state, JesseSort is one of the fastest sorting algorithms to date.
 
 The runtime of this sorting algorithm is dependent on the number of piles/bands, k, created by the 2 games of Patience. On purely random inputs, k = sqrt(n), leading to a total runtime of O(n log n) after merging. But on inputs with natural runs, repeated values, broken subsequences, etc (all of which are common in real data), k can get significantly smaller, allowing JesseSort to approach as fast as O(n).
 
 ```
 Best    Average     Worst       Memory      Stable      Deterministic
-n       n log k     n log n     2n          No          Yes
+n       n log k     n log n     3n          No          Yes
 ```
 
 ## Speed Test
@@ -19,18 +19,18 @@ With a AMD Ryzen 7 7445HS CPU, compiled with GCC (libstdc++):
                       Number of Input Values
 Input Type            1000          10000         100000        1000000
 ------------------------------------------------------------------------------
-Random                1.018         1.033         1.022         1.073
-Sorted                1.069         0.699         0.590         1.484
-Reverse               1.645         1.099         0.900         2.199
-Sorted+Noise(3%)      1.049         1.036         1.048         1.201
-Random%100            1.033         1.041         1.040         1.141
-Jitter                1.072         0.699         0.600         1.489
-Alternating           0.834         1.023         0.843         0.973
-Sawtooth              1.083         0.954         0.975         1.074
-BlockSorted           1.020         0.937         0.934         1.164
-OrganPipe             0.453         0.240         0.138         0.270
-Rotated               0.529         0.488         0.353         0.709
-Signal                1.424         0.831         0.642         0.573
+Random                1.607         1.164         1.150         1.191
+Sorted                1.070         0.684         0.576         0.554
+Reverse               1.660         0.949         0.895         0.804
+Sorted+Noise(3%)      0.931         0.751         0.721         0.796
+Random%100            1.444         1.170         0.905         1.050
+Jitter                1.056         0.688         0.658         1.511
+Alternating           0.869         0.536         0.237         0.528
+Sawtooth              1.948         0.613         0.278         0.477
+BlockSorted           0.693         0.361         0.278         0.518
+OrganPipe             0.374         0.190         0.116         0.245
+Rotated               0.536         0.430         0.321         0.686
+Signal                1.493         0.839         0.614         0.531
 ```
 
 Same CPU, compiled with clang (libc++):
@@ -39,38 +39,22 @@ Same CPU, compiled with clang (libc++):
                       Number of Input Values
 Input Type            1000          10000         100000        1000000
 ------------------------------------------------------------------------------
-Random                1.080         1.078         1.058         1.141
-Sorted                1.064         0.595         0.550         1.487
-Reverse               1.223         0.894         0.736         1.998
-Sorted+Noise(3%)      1.113         1.095         1.133         1.261
-Random%100            1.080         1.095         1.120         1.251
-Jitter                1.061         0.697         0.555         1.501
-Alternating           1.256         1.086         0.921         1.254
-Sawtooth              1.523         1.067         1.075         1.160
-BlockSorted           1.216         0.992         0.987         1.189
-OrganPipe             0.590         0.162         0.117         0.225
-Rotated               0.577         0.539         0.420         0.739
-Signal                1.289         0.766         0.628         0.566
+Random                1.848         1.489         1.407         1.480
+Sorted                1.265         0.829         0.598         0.621
+Reverse               1.924         1.352         1.120         1.047
+Sorted+Noise(3%)      1.131         1.046         1.108         1.225
+Random%100            1.817         1.739         1.560         1.740
+Jitter                1.266         0.832         0.787         2.058
+Alternating           0.883         0.564         0.247         0.502
+Sawtooth              1.831         0.583         0.354         0.561
+BlockSorted           0.895         0.401         0.254         0.477
+OrganPipe             0.462         0.120         0.084         0.193
+Rotated               0.549         0.421         0.308         0.662
+Signal                1.538         0.886         0.679         0.602
 ```
 
-With an Intel Core i9 13900K CPU:
-
-Note: These ratios are using outdated code. Keeping them to demonstrate how the new input adaptive logic greatly sped up the Random input case but at the cost of faster structured inputs.
-
-```
-                      Number of Input Values
-Input Type            1000          10000         100000        1000000       10000000
---------------------------------------------------------------------------------------------
-Random                1.587         1.477         1.433         1.484         1.596
-...
-Alternating           2.809         1.066         0.748         0.796         1.062
-Sawtooth              1.576         0.439         0.361         0.372         0.376
-BlockSorted           0.830         0.355         0.250         0.276         0.285
-OrganPipe             0.288         0.164         0.112         0.107         0.106
-Rotated               0.498         0.455         0.350         0.277         0.378
-```
-
-JesseSort also beats Python's default sorted() on random-value inputs for n > 20000 (>10x faster than our preprint claim):
+JesseSort also beats Python's default sorted() on random-value inputs for n > 20000 (>10x faster than our preprint claim):  
+NOTE: This chart was made with outdated code, JesseSort is faster now.
 
 ![Speed Test](images/speedtest_updated.png)
 
@@ -129,6 +113,8 @@ This is under active development, so the preprint and code here differ. At the t
 
 ## Final Thoughts
 
-My PhD has pulled me away from this project for a bit. I've actually come up with a couple other sorting algorithms that will have to wait as well! I will continue to update this in my free time whenever possible, but progress will be slower than before. I welcome any contributions folks want to make to this project.
+I welcome any contributions folks want to make to this project.
+
+My PhD has pulled me away from this project for a bit. I've actually come up with a couple other sorting algorithms that will have to wait as well! I will continue to update this in my free time whenever possible, but progress will be slower than before.
 
 Finally, I want to thank you all for your support and feedback--a special thank you to Sebastian Wild, Kenan Millet, and my beloved wife. Sorting is not my area of expertise, so I appreciate all your *patience*. 😉
