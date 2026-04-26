@@ -6,12 +6,12 @@ The runtime of this sorting algorithm is dependent on the number of piles/bands,
 
 ```
 Best    Average     Worst       Memory      Stable      Deterministic
-n       n log k     n log n     3n          No          Yes
+n       n log k     n log n     2n + k      No          Yes
 ```
 
 ## Speed Test
 
-JesseSort beats std::sort() on various semi-sorted inputs. Values below are median (not mean) ratios of JesseSort / std::sort over 100 trials. A value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower). **Values below 1 mean JesseSort is faster.**
+JesseSort beats std::sort() on various semi-sorted inputs. Values below are median (not mean) ratios of JesseSort / std::sort over 100 trials. A value of 0.5 means JesseSort takes half as much time (2x faster), while a value of 2.0 means JesseSort takes twice as much time (2x slower). **Values <1 mean JesseSort is faster.**
 
 With a AMD Ryzen 7 7445HS CPU, compiled with GCC (libstdc++):
 
@@ -19,38 +19,18 @@ With a AMD Ryzen 7 7445HS CPU, compiled with GCC (libstdc++):
                       Number of Input Values
 Input Type            1000          10000         100000        1000000
 ------------------------------------------------------------------------------
-Random                1.607         1.164         1.150         1.191
-Sorted                1.070         0.684         0.576         0.554
-Reverse               1.660         0.949         0.895         0.804
-Sorted+Noise(3%)      0.931         0.751         0.721         0.796
-Random%100            1.444         1.170         0.905         1.050
-Jitter                1.056         0.688         0.658         1.511
-Alternating           0.869         0.536         0.237         0.528
-Sawtooth              1.948         0.613         0.278         0.477
-BlockSorted           0.693         0.361         0.278         0.518
-OrganPipe             0.374         0.190         0.116         0.245
-Rotated               0.536         0.430         0.321         0.686
-Signal                1.493         0.839         0.614         0.531
-```
-
-Same CPU, compiled with clang (libc++):
-
-```
-                      Number of Input Values
-Input Type            1000          10000         100000        1000000
-------------------------------------------------------------------------------
-Random                1.848         1.489         1.407         1.480
-Sorted                1.265         0.829         0.598         0.621
-Reverse               1.924         1.352         1.120         1.047
-Sorted+Noise(3%)      1.131         1.046         1.108         1.225
-Random%100            1.817         1.739         1.560         1.740
-Jitter                1.266         0.832         0.787         2.058
-Alternating           0.883         0.564         0.247         0.502
-Sawtooth              1.831         0.583         0.354         0.561
-BlockSorted           0.895         0.401         0.254         0.477
-OrganPipe             0.462         0.120         0.084         0.193
-Rotated               0.549         0.421         0.308         0.662
-Signal                1.538         0.886         0.679         0.602
+Random                1.263         1.203         1.150         1.104
+Sorted                0.629         0.415         0.355         0.646
+Reverse               0.953         0.660         0.557         0.988
+Sorted+Noise(3%)      0.743         0.641         0.671         1.028
+Random%100            1.237         1.052         0.813         0.986
+Jitter                0.632         0.416         0.630         1.338
+Alternating           0.786         0.482         0.209         0.500
+Sawtooth              1.757         0.672         0.280         0.533
+BlockSorted           0.623         0.363         0.277         0.495
+OrganPipe             0.360         0.179         0.108         0.250
+Rotated               0.438         0.392         0.272         0.553
+Signal                1.251         0.800         0.628         0.548
 ```
 
 JesseSort also beats Python's default sorted() on random-value inputs for n > 20000 (>10x faster than our preprint claim):  
@@ -65,14 +45,6 @@ To compile and test JesseSort, run:
 ```
 cd src/jessesort
 g++ -O3 -march=native -DNDEBUG -std=c++23 main.cpp jesseSort.cpp -lfftw3 -lfftw3_threads -lm -o jesseSortTest
-./jesseSortTest
-```
-
-Or if you want to use clang and libc++, run:
-
-```
-cd src/jessesort
-clang++ -O3 -march=native -DNDEBUG main.cpp jesseSort.cpp -lfftw3 -lfftw3_threads -lm -o jesseSortTest
 ./jesseSortTest
 ```
 

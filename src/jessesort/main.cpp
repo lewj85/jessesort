@@ -451,7 +451,7 @@ int main() {
 
                 // JesseSort
                 start = std::chrono::high_resolution_clock::now();
-                arr = jesseSort(arr);
+                jesseSort(arr);
                 end = std::chrono::high_resolution_clock::now();
                 jesse_times.push_back(
                     std::chrono::duration<double>(end - start).count()
@@ -468,27 +468,6 @@ int main() {
                 if (!std::equal(arr.begin(), arr.end(), arr2.begin())) {
                     std::cerr << "Error: arrays differ! JesseSort did not match reference sort.\n";
                 }
-                // auto mismatch = std::mismatch(arr.begin(), arr.end(), arr2.begin());
-
-                // if (mismatch.first != arr.end()) {
-                //     size_t idx = std::distance(arr.begin(), mismatch.first);
-
-                //     std::cerr << "Error: arrays differ at index " << idx << "\n";
-                //     std::cerr << "JesseSort: " << arr[idx]
-                //             << " | Reference: " << arr2[idx] << "\n";
-
-                //     // Print small neighborhood for context
-                //     size_t start = (idx >= 3) ? idx - 3 : 0;
-                //     size_t end   = std::min(idx + 4, arr.size());
-
-                //     std::cerr << "\nContext (JesseSort):\n";
-                //     for (size_t i = start; i < end; ++i)
-                //         std::cerr << "[" << i << "]=" << arr[i] << " ";
-                //     std::cerr << "\n\nContext (Reference):\n";
-                //     for (size_t i = start; i < end; ++i)
-                //         std::cerr << "[" << i << "]=" << arr2[i] << " ";
-                //     std::cerr << "\n";
-                // }
             }
 
             double jesse_mean =
