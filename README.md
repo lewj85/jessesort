@@ -44,7 +44,7 @@ To compile and test JesseSort, run:
 
 ```
 cd src/jessesort
-g++ -O3 -march=native -DNDEBUG -std=c++23 main.cpp jesseSort.cpp -lfftw3 -lfftw3_threads -lm -o jesseSortTest
+g++ -O3 -march=native -DNDEBUG -std=c++23 main.cpp -lfftw3 -lfftw3_threads -lm -o jesseSortTest
 ./jesseSortTest
 ```
 
