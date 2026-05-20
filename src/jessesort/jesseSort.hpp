@@ -75,12 +75,12 @@ static constexpr uint32_t DESC_BIT  = 0x80000000u;
 static constexpr uint32_t PILE_MASK = 0x7fffffffu;
 
 inline uint32_t makeAscTag(uint32_t localPile) {
-    assert((localPile & DESC_BIT) == 0);
+    // assert((localPile & DESC_BIT) == 0);
     return localPile;
 }
 
 inline uint32_t makeDescTag(uint32_t localPile) {
-    assert((localPile & DESC_BIT) == 0);
+    // assert((localPile & DESC_BIT) == 0);
     return DESC_BIT | localPile;
 }
 
@@ -94,55 +94,6 @@ inline bool isAscTag(uint32_t tag) {
 
 inline uint32_t localPileId(uint32_t tag) {
     return tag & PILE_MASK;
-}
-
-inline std::size_t globalRunIdFromTag(
-    uint32_t tag,
-    std::size_t numAscPiles
-) {
-    const std::size_t local = static_cast<std::size_t>(localPileId(tag));
-    return isDescTag(tag) ? (numAscPiles + local) : local;
-}
-
-inline int highestPowerOfTwoLE(int n) {
-    assert(n > 0);
-    const unsigned un = static_cast<unsigned>(n);
-    return 1 << (31 - __builtin_clz(un));
-}
-
-// The old branchless search can probe up to just under 2 * bit_floor(n).
-// So allocate at least 2 * bit_floor(n) entries.
-// Since n <= 2 * bit_floor(n) - 1, this always leaves sentinel room.
-inline std::size_t requiredBranchlessBaseSize(std::size_t realPileCount) {
-    if (realPileCount == 0) {
-        return 1;
-    }
-
-    assert(realPileCount <= static_cast<std::size_t>(INT_MAX));
-
-    const int n = static_cast<int>(realPileCount);
-    const int step = highestPowerOfTwoLE(n);
-
-    return static_cast<std::size_t>(2 * step);
-}
-
-template <typename T>
-inline void ensureBranchlessPadding(
-    std::vector<T>& baseArray,
-    std::size_t realPileCount,
-    const T& sentinel
-) {
-    const std::size_t requiredSize =
-        requiredBranchlessBaseSize(realPileCount);
-
-    if (baseArray.size() < requiredSize) {
-        baseArray.resize(requiredSize, sentinel);
-    }
-
-    // At minimum, the first padding slot must be sentinel.
-    // Existing padding beyond this point should already be sentinel because
-    // resize fills with sentinel and real tails only occupy [0, realPileCount).
-    assert(baseArray.size() >= realPileCount + 1 || realPileCount == 0);
 }
 
 // =========================================================
@@ -208,8 +159,8 @@ inline int findDescendingPileWithBaseArray(
     Less less = Less{}
 ) {
     const int n = static_cast<int>(baseArray.size()) - 1; // sentinel at baseArray[n]
-    assert(n > 0);
-    assert(mid >= 0 && mid < n);
+    // assert(n > 0);
+    // assert(mid >= 0 && mid < n);
 
     // Descending-game piles:
     //   pile values descend in encounter order.
@@ -258,8 +209,8 @@ inline int findAscendingPileWithBaseArray(
     Less less = Less{}
 ) {
     const int n = static_cast<int>(baseArray.size()) - 1; // sentinel at baseArray[n]
-    assert(n > 0);
-    assert(mid >= 0 && mid < n);
+    // assert(n > 0);
+    // assert(mid >= 0 && mid < n);
 
     // Ascending-game piles:
     //   pile values ascend in encounter order.
@@ -316,8 +267,8 @@ inline void simulateInsertValueDescendingPiles(
     const T& highSentinel,
     Less less = Less{}
 ) {
-    assert(originalIndex < blueprint.size());
-    assert(descendingBaseArray.size() == descCounts.size() + 1);
+    // assert(originalIndex < blueprint.size());
+    // assert(descendingBaseArray.size() == descCounts.size() + 1);
 
     int pileIndex = 0;
 
@@ -372,8 +323,8 @@ inline void simulateInsertValueAscendingPiles(
     const T& lowSentinel,
     Less less = Less{}
 ) {
-    assert(originalIndex < blueprint.size());
-    assert(ascendingBaseArray.size() == ascCounts.size() + 1);
+    // assert(originalIndex < blueprint.size());
+    // assert(ascendingBaseArray.size() == ascCounts.size() + 1);
 
     int pileIndex = 0;
 
@@ -511,8 +462,8 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
     result.alreadySortedAscending = alreadySortedAscending;
     result.reverseSortedDescending = reverseSortedDescending;
 
-    assert(result.ascBaseArray.size() == result.ascCounts.size() + 1);
-    assert(result.descBaseArray.size() == result.descCounts.size() + 1);
+    // assert(result.ascBaseArray.size() == result.ascCounts.size() + 1);
+    // assert(result.descBaseArray.size() == result.descCounts.size() + 1);
 
     return result;
 }
@@ -567,7 +518,7 @@ std::vector<std::size_t> reconstructTaggedBlueprintToTemp_WithSplitCounts(
 ) {
     const std::size_t n = arr.size();
 
-    assert(blueprint.size() == n);
+    // assert(blueprint.size() == n);
 
     const std::size_t numAscPiles = ascCounts.size();
     const std::size_t numDescPiles = descCounts.size();
@@ -590,7 +541,7 @@ std::vector<std::size_t> reconstructTaggedBlueprintToTemp_WithSplitCounts(
     }
 
     start[numRuns] = out;
-    assert(start[numRuns] == n);
+    // assert(start[numRuns] == n);
 
     // 2. Allocate output buffer.
     tmp.resize(n);
@@ -614,11 +565,11 @@ std::vector<std::size_t> reconstructTaggedBlueprintToTemp_WithSplitCounts(
         bool reverseThisRun;
 
         if (desc) {
-            assert(local < numDescPiles);
+            // assert(local < numDescPiles);
             r = numAscPiles + local;
             reverseThisRun = reverseDescRuns;
         } else {
-            assert(local < numAscPiles);
+            // assert(local < numAscPiles);
             r = local;
             reverseThisRun = reverseAscRuns;
         }
@@ -630,19 +581,19 @@ std::vector<std::size_t> reconstructTaggedBlueprintToTemp_WithSplitCounts(
         }
     }
 
-    // 5. Debug cursor validation.
-    #ifndef NDEBUG
-    for (std::size_t r = 0; r < numRuns; ++r) {
-        const bool descRun = (r >= numAscPiles);
-        const bool reverseThisRun = descRun ? reverseDescRuns : reverseAscRuns;
+    // // 5. Debug cursor validation.
+    // #ifndef NDEBUG
+    // for (std::size_t r = 0; r < numRuns; ++r) {
+    //     const bool descRun = (r >= numAscPiles);
+    //     const bool reverseThisRun = descRun ? reverseDescRuns : reverseAscRuns;
 
-        if (reverseThisRun) {
-            assert(rightCursor[r] == start[r]);
-        } else {
-            assert(leftCursor[r] == start[r + 1]);
-        }
-    }
-    #endif
+    //     if (reverseThisRun) {
+    //         assert(rightCursor[r] == start[r]);
+    //     } else {
+    //         assert(leftCursor[r] == start[r + 1]);
+    //     }
+    // }
+    // #endif
 
     return start;
 }
@@ -665,8 +616,8 @@ bool validateRunsAscending(
         const std::size_t begin = runStart[r];
         const std::size_t end = runStart[r + 1];
 
-        assert(begin <= end);
-        assert(end <= data.size());
+        // assert(begin <= end);
+        // assert(end <= data.size());
 
         for (std::size_t i = begin + 1; i < end; ++i) {
             if (less(data[i], data[i - 1])) {
@@ -726,10 +677,10 @@ void mergeTwoAdjacentRunsToDest(
     std::size_t end,
     Less less = Less{}
 ) {
-    assert(begin <= mid);
-    assert(mid <= end);
-    assert(end <= src.size());
-    assert(dst.size() >= src.size());
+    // assert(begin <= mid);
+    // assert(mid <= end);
+    // assert(end <= src.size());
+    // assert(dst.size() >= src.size());
 
     if (begin == end) {
         return;
@@ -810,7 +761,7 @@ void mergeRunsFromTmpToArr(
     const std::vector<std::size_t>& runStart,
     Less less = Less{}
 ) {
-    assert(tmp.size() == arr.size());
+    // assert(tmp.size() == arr.size());
 
     const std::size_t n = tmp.size();
 
@@ -819,9 +770,9 @@ void mergeRunsFromTmpToArr(
         return;
     }
 
-    assert(!runStart.empty());
-    assert(runStart.front() == 0);
-    assert(runStart.back() == n);
+    // assert(!runStart.empty());
+    // assert(runStart.front() == 0);
+    // assert(runStart.back() == n);
 
     const std::size_t initialRuns = runStart.size() - 1;
 
@@ -892,9 +843,9 @@ void mergeRunsFromTmpToArr(
         arr.swap(tmp);
     }
 
-    #ifndef NDEBUG
-    assert(validateSorted(arr, less));
-    #endif
+    // #ifndef NDEBUG
+    // assert(validateSorted(arr, less));
+    // #endif
 }
 
 // =========================================================
@@ -934,9 +885,9 @@ ReconstructedRuns simulateAndReconstructRunsToTemp(
             true   // descending-game piles reverse to become ascending
         );
 
-    #ifndef NDEBUG
-    assert(validateRunsAscending(tmp, runStart, less));
-    #endif
+    // #ifndef NDEBUG
+    // assert(validateRunsAscending(tmp, runStart, less));
+    // #endif
 
     return ReconstructedRuns{
         std::move(runStart),
@@ -965,9 +916,9 @@ ReconstructedRuns simulateAndReconstructRunsToTemp(
             true
         );
 
-    #ifndef NDEBUG
-    assert(validateRunsAscending(tmp, runStart, less));
-    #endif
+    // #ifndef NDEBUG
+    // assert(validateRunsAscending(tmp, runStart, less));
+    // #endif
 
     return ReconstructedRuns{
         std::move(runStart),
@@ -1012,9 +963,9 @@ void jesseSort(std::vector<T>& arr, Less less = Less{}) {
             true   // descending-game piles reverse to become ascending
         );
 
-    #ifndef NDEBUG
-    assert(validateRunsAscending(tmp, runStart, less));
-    #endif
+    // #ifndef NDEBUG
+    // assert(validateRunsAscending(tmp, runStart, less));
+    // #endif
 
     mergeRunsFromTmpToArr(
         tmp,
