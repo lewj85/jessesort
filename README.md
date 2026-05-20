@@ -1,5 +1,13 @@
 # JesseSort
 
+<p align="center" width="80%">
+<video src="src/viz/simulated/jessesort_simulated_video.mp4" width="1280" height="300" controls></video>
+</p>
+
+<p align="center" width="80%">
+<video src="src/viz/simulated_freezing/jessesort_simulated_freezing_video.mp4" width="1280" height="300" controls></video>
+</p>
+
 JesseSort is a new sorting algorithm that introduces dual Patience--one game with descending piles and one game with ascending piles--as a core insertion strategy. Variations and optimizations are actively being explored, including experiments in adaptivity to input type, possible fallback strategies, optimal merge methods, game simulation, improved branch prediction, AVX2/AVX512 usage, etc. Even in its current unoptimized state, JesseSort is one of the fastest sorting algorithms to date.
 
 The runtime of this sorting algorithm is dependent on the number of piles/bands, k, created by the 2 games of Patience. On purely random inputs, k = sqrt(n), leading to a total runtime of O(n log n) after merging. But on inputs with natural runs, repeated values, broken subsequences, etc (all of which are common in real data), k can get significantly smaller, allowing JesseSort to approach as fast as O(n).
