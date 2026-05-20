@@ -2,7 +2,7 @@
 
 [src/viz/simulated/jessesort_simulated_video.mp4](https://github.com/user-attachments/assets/2c3b6781-8f99-4318-b0f7-0450ee4f45a4)
 
-[src/viz/simulated/jessesort_simulated_freezing_video.mp4](https://github.com/user-attachments/assets/93cfa558-95d7-4663-ba87-727df66b7ac4)
+[src/viz/simulated/jessesort_simulated_freezing_video.mp4](https://github.com/user-attachments/assets/a97c5e20-7e8d-4ab8-873f-342bf3a3bc43)
 
 JesseSort is a new sorting algorithm that introduces dual Patience--one game with descending piles and one game with ascending piles--as a core insertion strategy. Variations and optimizations are actively being explored, including experiments in adaptivity to input type, possible fallback strategies, optimal merge methods, game simulation, improved branch prediction, AVX2/AVX512 usage, etc. Even in its current unoptimized state, JesseSort is one of the fastest sorting algorithms to date.
 
