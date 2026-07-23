@@ -1,10 +1,9 @@
-#ifndef JESSESORT_HPP  // Include guard
-#define JESSESORT_HPP
+#ifndef JESSESORT_SIMULATED_HPP
+#define JESSESORT_SIMULATED_HPP
 
 #include <vector>
 #include <cstdint>
 #include <cstddef>
-#include <cassert>
 #include <cmath>
 #include <algorithm>
 #include <limits>
@@ -13,6 +12,8 @@
 #include <utility>
 #include <climits>
 
+
+namespace jessesort::simulated {
 // =========================================================
 // Simulated Jessesort patience insertion + reconstruction + merge
 // =========================================================
@@ -73,14 +74,13 @@
 
 static constexpr uint32_t DESC_BIT  = 0x80000000u;
 static constexpr uint32_t PILE_MASK = 0x7fffffffu;
+static constexpr uint32_t OVERFLOW_TAG = 0xffffffffu;
 
 inline uint32_t makeAscTag(uint32_t localPile) {
-    // assert((localPile & DESC_BIT) == 0);
     return localPile;
 }
 
 inline uint32_t makeDescTag(uint32_t localPile) {
-    // assert((localPile & DESC_BIT) == 0);
     return DESC_BIT | localPile;
 }
 
@@ -159,8 +159,6 @@ inline int findDescendingPileWithBaseArray(
     Less less = Less{}
 ) {
     const int n = static_cast<int>(baseArray.size()) - 1; // sentinel at baseArray[n]
-    // assert(n > 0);
-    // assert(mid >= 0 && mid < n);
 
     // Descending-game piles:
     //   pile values descend in encounter order.
@@ -209,8 +207,6 @@ inline int findAscendingPileWithBaseArray(
     Less less = Less{}
 ) {
     const int n = static_cast<int>(baseArray.size()) - 1; // sentinel at baseArray[n]
-    // assert(n > 0);
-    // assert(mid >= 0 && mid < n);
 
     // Ascending-game piles:
     //   pile values ascend in encounter order.
@@ -267,8 +263,6 @@ inline void simulateInsertValueDescendingPiles(
     const T& highSentinel,
     Less less = Less{}
 ) {
-    // assert(originalIndex < blueprint.size());
-    // assert(descendingBaseArray.size() == descCounts.size() + 1);
 
     int pileIndex = 0;
 
@@ -323,8 +317,6 @@ inline void simulateInsertValueAscendingPiles(
     const T& lowSentinel,
     Less less = Less{}
 ) {
-    // assert(originalIndex < blueprint.size());
-    // assert(ascendingBaseArray.size() == ascCounts.size() + 1);
 
     int pileIndex = 0;
 
@@ -462,9 +454,6 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
     result.alreadySortedAscending = alreadySortedAscending;
     result.reverseSortedDescending = reverseSortedDescending;
 
-    // assert(result.ascBaseArray.size() == result.ascCounts.size() + 1);
-    // assert(result.descBaseArray.size() == result.descCounts.size() + 1);
-
     return result;
 }
 
@@ -518,8 +507,6 @@ std::vector<std::size_t> reconstructTaggedBlueprintToTemp_WithSplitCounts(
 ) {
     const std::size_t n = arr.size();
 
-    // assert(blueprint.size() == n);
-
     const std::size_t numAscPiles = ascCounts.size();
     const std::size_t numDescPiles = descCounts.size();
     const std::size_t numRuns = numAscPiles + numDescPiles;
@@ -541,7 +528,6 @@ std::vector<std::size_t> reconstructTaggedBlueprintToTemp_WithSplitCounts(
     }
 
     start[numRuns] = out;
-    // assert(start[numRuns] == n);
 
     // 2. Allocate output buffer.
     tmp.resize(n);
@@ -565,11 +551,9 @@ std::vector<std::size_t> reconstructTaggedBlueprintToTemp_WithSplitCounts(
         bool reverseThisRun;
 
         if (desc) {
-            // assert(local < numDescPiles);
             r = numAscPiles + local;
             reverseThisRun = reverseDescRuns;
         } else {
-            // assert(local < numAscPiles);
             r = local;
             reverseThisRun = reverseAscRuns;
         }
@@ -580,20 +564,6 @@ std::vector<std::size_t> reconstructTaggedBlueprintToTemp_WithSplitCounts(
             tmp[leftCursor[r]++] = arr[i];
         }
     }
-
-    // // 5. Debug cursor validation.
-    // #ifndef NDEBUG
-    // for (std::size_t r = 0; r < numRuns; ++r) {
-    //     const bool descRun = (r >= numAscPiles);
-    //     const bool reverseThisRun = descRun ? reverseDescRuns : reverseAscRuns;
-
-    //     if (reverseThisRun) {
-    //         assert(rightCursor[r] == start[r]);
-    //     } else {
-    //         assert(leftCursor[r] == start[r + 1]);
-    //     }
-    // }
-    // #endif
 
     return start;
 }
@@ -615,9 +585,6 @@ bool validateRunsAscending(
     for (std::size_t r = 0; r < numRuns; ++r) {
         const std::size_t begin = runStart[r];
         const std::size_t end = runStart[r + 1];
-
-        // assert(begin <= end);
-        // assert(end <= data.size());
 
         for (std::size_t i = begin + 1; i < end; ++i) {
             if (less(data[i], data[i - 1])) {
@@ -677,10 +644,6 @@ void mergeTwoAdjacentRunsToDest(
     std::size_t end,
     Less less = Less{}
 ) {
-    // assert(begin <= mid);
-    // assert(mid <= end);
-    // assert(end <= src.size());
-    // assert(dst.size() >= src.size());
 
     if (begin == end) {
         return;
@@ -761,7 +724,6 @@ void mergeRunsFromTmpToArr(
     const std::vector<std::size_t>& runStart,
     Less less = Less{}
 ) {
-    // assert(tmp.size() == arr.size());
 
     const std::size_t n = tmp.size();
 
@@ -769,10 +731,6 @@ void mergeRunsFromTmpToArr(
         arr.clear();
         return;
     }
-
-    // assert(!runStart.empty());
-    // assert(runStart.front() == 0);
-    // assert(runStart.back() == n);
 
     const std::size_t initialRuns = runStart.size() - 1;
 
@@ -843,9 +801,6 @@ void mergeRunsFromTmpToArr(
         arr.swap(tmp);
     }
 
-    // #ifndef NDEBUG
-    // assert(validateSorted(arr, less));
-    // #endif
 }
 
 // =========================================================
@@ -885,10 +840,6 @@ ReconstructedRuns simulateAndReconstructRunsToTemp(
             true   // descending-game piles reverse to become ascending
         );
 
-    // #ifndef NDEBUG
-    // assert(validateRunsAscending(tmp, runStart, less));
-    // #endif
-
     return ReconstructedRuns{
         std::move(runStart),
         true
@@ -916,10 +867,6 @@ ReconstructedRuns simulateAndReconstructRunsToTemp(
             true
         );
 
-    // #ifndef NDEBUG
-    // assert(validateRunsAscending(tmp, runStart, less));
-    // #endif
-
     return ReconstructedRuns{
         std::move(runStart),
         true
@@ -933,7 +880,7 @@ ReconstructedRuns simulateAndReconstructRunsToTemp(
 // This version mutates arr into sorted order and also returns a copy.
 
 template <typename T, typename Less = std::less<T>>
-void jesseSort(std::vector<T>& arr, Less less = Less{}) {
+void sort(std::vector<T>& arr, Less less = Less{}) {
     if (arr.size() < 2) {
         return;
     }
@@ -963,10 +910,6 @@ void jesseSort(std::vector<T>& arr, Less less = Less{}) {
             true   // descending-game piles reverse to become ascending
         );
 
-    // #ifndef NDEBUG
-    // assert(validateRunsAscending(tmp, runStart, less));
-    // #endif
-
     mergeRunsFromTmpToArr(
         tmp,
         arr,
@@ -975,14 +918,6 @@ void jesseSort(std::vector<T>& arr, Less less = Less{}) {
     );
 }
 
-// template <typename T, typename Less = std::less<T>>
-// std::vector<T> jesseSort(std::vector<T> arr, Less less = Less{}) {
-//     jesseSortInPlace(arr, less);
-//     return arr;
-// }
-
-#endif // JESSESORT_HPP
-
 ////////////////////////////////////////////////
 // TODO
 ////////////////////////////////////////////////
@@ -990,12 +925,6 @@ void jesseSort(std::vector<T>& arr, Less less = Less{}) {
 //       Huffman merging, smallest 2 piles iteratively. Overhead may be slower
 //       than naive methods because of cache misses vs 2 adjacent runs already in cache.
 //       As such, the best 2 of 3 adjacent may be better: (X + Y) + Z vs X + (Y + Z).
-// - Early freezing at 1.213*sqrtn piles, reached at 36.8% (1/e) of n input values,
-//       derived by S(a) = n(1 - a + a ln a). 36.8% still get inserted, 26.4% go to
-//       overflow. Values that would make new bands instead get sorted separately. This
-//       prevents many new small bands at the suboptimal ends, which may speed up the
-//       merge phase because we're not doing so many memory lookups/trying to merge
-//       many small arrays. Could stream overflow to std::sort.
 // - Start new games from scratch when base arrays/piles exceed cache size.
 //       Similar to freezing but instead of setting anything aside, you're just
 //       building piles again, but bound to fit in cache. Overhead worth it?
@@ -1015,3 +944,6 @@ void jesseSort(std::vector<T>& arr, Less less = Less{}) {
 //       https://en.algorithmica.org/hpc/data-structures/binary-search/
 //       S+ trees may also speed this up:
 //       https://curiouscoding.nl/posts/static-search-tree/
+
+} // namespace jessesort::simulated
+#endif
