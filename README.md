@@ -88,11 +88,11 @@ Merge all piles until one remains. The current code naively merges adjacent runs
 
 This repository keeps three JesseSort implementations so their storage strategies can be compared directly. Additional implementations are planned.
 
-| Header | Entry point | Description |
-|---|---|---|
-| `include/jessesort/simulated.hpp` | `jessesort::simulated::sort` | Simulates insertion with base arrays and a blueprint, then reconstructs flat runs before merging. |
-| `include/jessesort/simulated_early_freeze.hpp` | `jessesort::simulated_early_freeze::sort` | Simulated insertion with base array length freezing @36.8% (1/e) of the input, plus live insertion sorting for 32-element overflow piles. |
-| `include/jessesort/actual_piles.hpp` | `jessesort::actual_piles::sort` | Physically creates piles during the insertion phase and uses base array copies for search. |
+| Header / Entry point | Description |
+|---|---|
+| `include/jessesort/simulated.hpp` / `jessesort::simulated::sort` | Simulates insertion with base arrays and a blueprint, then reconstructs flat runs before merging. |
+| `include/jessesort/simulated_early_freeze.hpp` / `jessesort::simulated_early_freeze::sort` | Simulated insertion with base array length freezing @36.8% (1/e) of the input, plus live insertion sorting for 32-element overflow piles. |
+| `include/jessesort/actual_piles.hpp` / `jessesort::actual_piles::sort` | Physically creates piles during the insertion phase and uses base array copies for search. |
 
 All variants sort a `std::vector<T>` in place and accept an optional comparator:
 
