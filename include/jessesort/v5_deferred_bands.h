@@ -1,7 +1,7 @@
 #ifndef JESSESORT_SIMULATED_EARLY_FREEZE_HPP
 #define JESSESORT_SIMULATED_EARLY_FREEZE_HPP
 
-#include "v2_simulated.h"
+#include <jessesort/v2_simulated.h>
 
 #include <algorithm>
 #include <array>

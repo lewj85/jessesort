@@ -145,14 +145,13 @@ void mergeRuns(std::vector<T>& src, std::vector<T>& dst,
 
             std::size_t i = left, j = mid, k = left;
             if (branchlessRandomMerge) {
-                auto takeOne = [&] {
-                    const bool takeRight = less(in[j], in[i]);
-                    out[k++] = std::move(takeRight ? in[j] : in[i]);
-                    j += static_cast<std::size_t>(takeRight);
-                    i += static_cast<std::size_t>(!takeRight);
-                };
-                while (i + 3 < mid && j + 3 < right) { takeOne(); takeOne(); takeOne(); takeOne(); }
-                while (i < mid && j < right) takeOne();
+                T* lp = in.data() + left; T* const le = in.data() + mid;
+                T* rp = in.data() + mid; T* const re = in.data() + right;
+                T* op = out.data() + left;
+                auto takeOne = [&] { const bool tr = less(*rp,*lp); *op++ = std::move(tr ? *rp : *lp); rp += (std::ptrdiff_t)tr; lp += (std::ptrdiff_t)!tr; };
+                while (lp + 4 <= le && rp + 4 <= re) { takeOne(); takeOne(); takeOne(); takeOne(); }
+                while (lp < le && rp < re) takeOne();
+                i = (std::size_t)(lp - in.data()); j = (std::size_t)(rp - in.data()); k = (std::size_t)(op - out.data());
             } else {
                 unsigned leftWins = 0, rightWins = 0;
                 const unsigned GALLOP_TRIGGER = gallopTrigger;

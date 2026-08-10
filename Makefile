@@ -3,105 +3,94 @@ CXXFLAGS ?= -std=c++20 -O3 -march=native -DNDEBUG -Wall -Wextra -Wpedantic
 CPPFLAGS ?= -Iinclude
 LDFLAGS ?=
 
-BUILD_DIR := build
-BENCH_SRC := benchmarks/main.cpp
+TARGET := benchmark
+CLANG_TARGET := benchmark-clang
 
-SIM_BIN    := $(BUILD_DIR)/bench_simulated
-FREEZE_BIN := $(BUILD_DIR)/bench_early_freeze
-ACTUAL_BIN := $(BUILD_DIR)/bench_actual_piles
+BENCHMARK_SOURCE := benchmarks/benchmark.cpp
+SOURCES := src/v1_actual_piles.cpp \
+           src/v2_simulated.cpp \
+           src/v3_inplace_simulated.cpp \
+           src/v4_single_overflow.cpp \
+           src/v5_deferred_bands.cpp \
+           src/v6_live_bands.cpp \
+           src/v7_avx2.cpp
 
-SIM_HEADER    := include/jessesort/simulated.hpp
-FREEZE_HEADER := include/jessesort/simulated_early_freeze.hpp
-ACTUAL_HEADER := include/jessesort/actual_piles.hpp
+OBJECTS := $(SOURCES:.cpp=.o) benchmarks/benchmark.o
+CLANG_OBJECTS := $(SOURCES:.cpp=.clang.o) benchmarks/benchmark.clang.o
 
-.PHONY: all variants benchmark \
-        simulated early-freeze actual \
-        run-simulated run-early-freeze run-actual run-all \
-        clang-libstdc++ clang-libc++ \
-        clean help
+HEADERS := include/jessesort/v1_actual_piles.h \
+           include/jessesort/v2_simulated.h \
+           include/jessesort/v3_inplace_simulated.h \
+           include/jessesort/v4_single_overflow.h \
+           include/jessesort/v5_deferred_bands.h \
+           include/jessesort/v6_live_bands.h \
+           include/jessesort/v7_avx2.h
 
-all: variants
+CLANG_CXX := clang++
+CLANG_CXXFLAGS := $(CXXFLAGS) -stdlib=libc++
+CLANG_LDFLAGS := $(LDFLAGS) -stdlib=libc++
 
-benchmark: run-all
+.PHONY: all clang run run500 run-clang run500-clang \
+        bench200 bench500 bench1000 \
+        bench200-clang bench500-clang bench1000-clang \
+        smoke smoke-clang clean clean-results
 
-variants: simulated early-freeze actual
+all: $(TARGET)
 
-simulated: $(SIM_BIN)
-early-freeze: $(FREEZE_BIN)
-actual: $(ACTUAL_BIN)
+clang: $(CLANG_TARGET)
 
-$(BUILD_DIR):
-	mkdir -p $@
+$(TARGET): $(OBJECTS)
+	$(CXX) $(OBJECTS) $(LDFLAGS) -o $@
 
-$(SIM_BIN): $(BENCH_SRC) $(SIM_HEADER) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) \
-		-DJESSESORT_VARIANT_HEADER='"jessesort/simulated.hpp"' \
-		-DJESSESORT_VARIANT_NAMESPACE=jessesort::simulated \
-		-DJESSESORT_VARIANT_NAME='"Simulated JesseSort"' \
-		$< $(LDFLAGS) -o $@
+$(CLANG_TARGET): $(CLANG_OBJECTS)
+	$(CLANG_CXX) $(CLANG_OBJECTS) $(CLANG_LDFLAGS) -o $@
 
-$(FREEZE_BIN): $(BENCH_SRC) $(FREEZE_HEADER) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) \
-		-DJESSESORT_VARIANT_HEADER='"jessesort/simulated_early_freeze.hpp"' \
-		-DJESSESORT_VARIANT_NAMESPACE=jessesort::simulated_early_freeze \
-		-DJESSESORT_VARIANT_NAME='"Early-freeze JesseSort"' \
-		$< $(LDFLAGS) -o $@
+src/%.o: src/%.cpp $(HEADERS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-$(ACTUAL_BIN): $(BENCH_SRC) $(ACTUAL_HEADER) | $(BUILD_DIR)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) \
-		-DJESSESORT_VARIANT_HEADER='"jessesort/actual_piles.hpp"' \
-		-DJESSESORT_VARIANT_NAMESPACE=jessesort::actual_piles \
-		-DJESSESORT_VARIANT_NAME='"Actual-pile JesseSort"' \
-		$< $(LDFLAGS) -o $@
+benchmarks/benchmark.o: $(BENCHMARK_SOURCE) $(HEADERS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-run-simulated: simulated
-	./$(SIM_BIN)
+src/%.clang.o: src/%.cpp $(HEADERS)
+	$(CLANG_CXX) $(CPPFLAGS) $(CLANG_CXXFLAGS) -c $< -o $@
 
-run-early-freeze: early-freeze
-	./$(FREEZE_BIN)
+benchmarks/benchmark.clang.o: $(BENCHMARK_SOURCE) $(HEADERS)
+	$(CLANG_CXX) $(CPPFLAGS) $(CLANG_CXXFLAGS) -c $< -o $@
 
-run-actual: actual
-	./$(ACTUAL_BIN)
+# Canonical benchmark: 500 distinct paired inputs at 1k/10k/100k and 50 at 1m.
+# Every trial uses a new deterministic seed shared by V1-V7 and std::sort.
+run run500 bench500: $(TARGET)
+	./$(TARGET) 500 all 2
 
-# Runs each benchmark as a separate process, one after another.
-run-all: variants
-	./$(SIM_BIN)
-	./$(FREEZE_BIN)
-	./$(ACTUAL_BIN)
+run-clang run500-clang bench500-clang: $(CLANG_TARGET)
+	./$(CLANG_TARGET) 500 all 2
 
-# Rebuild all variants with Clang while retaining libstdc++.
-clang-libstdc++:
-	$(MAKE) clean
-	$(MAKE) variants CXX=clang++
+# Faster/larger sweeps retain the same 10:1 reduction at 1m.
+bench200: $(TARGET)
+	./$(TARGET) 200 all 2
 
-# Rebuild all variants with Clang and libc++.
-# Requires libc++ and libc++abi development packages.
-clang-libc++:
-	$(MAKE) clean
-	$(MAKE) variants CXX=clang++ \
-		CXXFLAGS='$(CXXFLAGS) -stdlib=libc++' \
-		LDFLAGS='$(LDFLAGS) -stdlib=libc++'
+bench1000: $(TARGET)
+	./$(TARGET) 1000 all 2
+
+bench200-clang: $(CLANG_TARGET)
+	./$(CLANG_TARGET) 200 all 2
+
+bench1000-clang: $(CLANG_TARGET)
+	./$(CLANG_TARGET) 1000 all 2
+
+# Quick correctness/build checks; not suitable for performance conclusions.
+smoke: $(TARGET)
+	./$(TARGET) 2 10000 1
+
+smoke-clang: $(CLANG_TARGET)
+	./$(CLANG_TARGET) 2 10000 1
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -f $(TARGET) $(CLANG_TARGET) \
+	      src/*.o benchmarks/*.o \
+	      src/*.clang.o benchmarks/*.clang.o \
+	      *.out *.exe
 
-help:
-	@printf '%s\n' \
-	  'Build targets:' \
-	  '  make variants          Build all three isolated benchmarks' \
-	  '  make simulated         Build simulated-insertion variant' \
-	  '  make early-freeze      Build early-freeze variant' \
-	  '  make actual            Build actual-pile variant' \
-	  '' \
-	  'Run targets:' \
-	  '  make run-simulated' \
-	  '  make run-early-freeze' \
-	  '  make run-actual' \
-	  '  make run-all           Run three separate processes sequentially' \
-	  '' \
-	  'Compiler targets:' \
-	  '  make clang-libstdc++   Build all with Clang + libstdc++' \
-	  '  make clang-libc++      Build all with Clang + libc++' \
-	  '' \
-	  'Other:' \
-	  '  make clean'
+# Benchmark artifacts are deliberately ephemeral and never used as future inputs.
+clean-results:
+	rm -rf results

@@ -1,14 +1,11 @@
-#ifndef JESSESORT_SIMULATED_SIMD_V7_HPP
-#define JESSESORT_SIMULATED_SIMD_V7_HPP
+#ifndef JESSESORT_SIMULATED_HPP
+#define JESSESORT_SIMULATED_HPP
 
 #include <vector>
 #include <cstdint>
 #include <cstddef>
 #include <cmath>
 #include <algorithm>
-#if defined(__AVX2__)
-#include <immintrin.h>
-#endif
 #include <functional>
 #include <type_traits>
 #include <utility>
@@ -17,9 +14,7 @@
 #include <bit>
 
 
-namespace jessesort::simulated_simd_v7 {
-// V7 is the first SIMD-specific variation. It preserves V2's overall pipeline
-// and specializes the exact-eight int32 pile-tail lookup with one AVX2 compare.
+namespace jessesort::simulated {
 // =========================================================
 // Simulated JesseSort patience insertion + reconstruction + merge
 // =========================================================
@@ -171,33 +166,6 @@ inline std::size_t findDescendingPileWithTails(
             (hint == 0 || less(tails[hint - 1], value))) {
             return hint;
         }
-#if defined(__AVX2__)
-#ifndef JESSESORT_V7_SIMD_MAX_PILES
-#define JESSESORT_V7_SIMD_MAX_PILES 64
-#endif
-        if constexpr (std::is_same_v<T, int> && std::is_same_v<Less, std::less<int>>) {
-            if (n == 8) {
-                const __m256i vv = _mm256_set1_epi32(value);
-                std::size_t base = 0;
-                for (; base + 8 <= n; base += 8) {
-                    const __m256i tv = _mm256_loadu_si256(
-                        reinterpret_cast<const __m256i*>(tails.data() + base));
-                    // Descending-game tails are ascending. Find first tail >= value.
-                    const __m256i lt = _mm256_cmpgt_epi32(vv, tv);
-                    const unsigned mask = static_cast<unsigned>(
-                        _mm256_movemask_ps(_mm256_castsi256_ps(lt))) & 0xffu;
-                    if (mask != 0xffu) {
-                        const unsigned first = static_cast<unsigned>(__builtin_ctz((~mask) & 0xffu));
-                        hint = base + first;
-                        return hint;
-                    }
-                }
-                while (base < n && less(tails[base], value)) ++base;
-                hint = base;
-                return hint;
-            }
-        }
-#endif
         int idx = -1;
         const int smallN = static_cast<int>(n);
         int step = 1 << (31 - __builtin_clz(static_cast<unsigned>(smallN)));
@@ -240,30 +208,6 @@ inline std::size_t findAscendingPileWithTails(
             (hint == 0 || less(value, tails[hint - 1]))) {
             return hint;
         }
-#if defined(__AVX2__)
-        if constexpr (std::is_same_v<T, int> && std::is_same_v<Less, std::less<int>>) {
-            if (n == 8) {
-                const __m256i vv = _mm256_set1_epi32(value);
-                std::size_t base = 0;
-                for (; base + 8 <= n; base += 8) {
-                    const __m256i tv = _mm256_loadu_si256(
-                        reinterpret_cast<const __m256i*>(tails.data() + base));
-                    // Ascending-game tails are descending. Find first tail <= value.
-                    const __m256i gt = _mm256_cmpgt_epi32(tv, vv);
-                    const unsigned mask = static_cast<unsigned>(
-                        _mm256_movemask_ps(_mm256_castsi256_ps(gt))) & 0xffu;
-                    if (mask != 0xffu) {
-                        const unsigned first = static_cast<unsigned>(__builtin_ctz((~mask) & 0xffu));
-                        hint = base + first;
-                        return hint;
-                    }
-                }
-                while (base < n && less(value, tails[base])) ++base;
-                hint = base;
-                return hint;
-            }
-        }
-#endif
         int idx = -1;
         const int smallN = static_cast<int>(n);
         int step = 1 << (31 - __builtin_clz(static_cast<unsigned>(smallN)));
@@ -843,25 +787,93 @@ std::vector<std::size_t> reconstructTaggedBlueprintToTemp_WithSplitCounts(
         tmp = arr;
     }
 
-    // Reuse count storage as direction-specific cursors.
-    for (std::size_t p = 0; p < numDescPiles; ++p)
-        descCounts[p] = reverseDescRuns ? start[p + 1] : start[p];
+    // E079: use one global cursor table with a signed per-run step. This removes
+    // the unpredictable ascending/descending branch from the per-element scatter
+    // loop. Random reconstruction is a cache-sensitive counting-sort-style scatter,
+    // so keeping the hot loop to one cursor lookup/update materially reduces cost.
+    std::vector<std::size_t> cursor(numRuns);
+    std::vector<std::ptrdiff_t> step(numRuns, 1);
+    for (std::size_t p = 0; p < numDescPiles; ++p) {
+        cursor[p] = reverseDescRuns ? start[p + 1] - 1 : start[p];
+        step[p] = reverseDescRuns ? -1 : 1;
+    }
     for (std::size_t p = 0; p < numAscPiles; ++p) {
         const std::size_t r = numDescPiles + p;
-        ascCounts[p] = reverseAscRuns ? start[r + 1] : start[r];
+        cursor[r] = reverseAscRuns ? start[r + 1] - 1 : start[r];
+        step[r] = reverseAscRuns ? -1 : 1;
     }
 
     for (std::size_t i = 0; i < n; ++i) {
         const uint32_t tag = blueprint[i];
         const bool desc = isDescTag(tag);
         const std::size_t local = static_cast<std::size_t>(localPileId(tag));
-        if (desc) {
-            if (reverseDescRuns) tmp[--descCounts[local]] = arr[i];
-            else tmp[descCounts[local]++] = arr[i];
-        } else {
-            if (reverseAscRuns) tmp[--ascCounts[local]] = arr[i];
-            else tmp[ascCounts[local]++] = arr[i];
-        }
+        const std::size_t r = desc ? local : numDescPiles + local;
+        const std::size_t pos = cursor[r];
+        cursor[r] = static_cast<std::size_t>(
+            static_cast<std::ptrdiff_t>(cursor[r]) + step[r]);
+        tmp[pos] = arr[i];
+    }
+    return start;
+}
+
+// E081 V2-specific reconstruction path.  The blueprint is moved into this helper
+// so its packed local tags can be normalized in place without another allocation.
+// Other variations keep the generic reconstruction routine unchanged.
+template <typename T>
+std::vector<std::size_t> reconstructTaggedBlueprintNormalizedForV2(
+    const std::vector<T>& arr,
+    std::vector<uint32_t> blueprint,
+    std::vector<std::size_t> ascCounts,
+    std::vector<std::size_t> descCounts,
+    std::vector<T>& tmp,
+    bool reverseAscRuns = false,
+    bool reverseDescRuns = true
+) {
+    const std::size_t n = arr.size();
+    const std::size_t numAscPiles = ascCounts.size();
+    const std::size_t numDescPiles = descCounts.size();
+    const std::size_t numRuns = numAscPiles + numDescPiles;
+
+    std::vector<std::size_t> start(numRuns + 1, 0);
+    std::size_t out = 0;
+    for (std::size_t p = 0; p < numDescPiles; ++p) {
+        start[p] = out;
+        out += descCounts[p];
+    }
+    for (std::size_t p = 0; p < numAscPiles; ++p) {
+        const std::size_t r = numDescPiles + p;
+        start[r] = out;
+        out += ascCounts[p];
+    }
+    start[numRuns] = out;
+    assert(out == n);
+    if constexpr (std::is_default_constructible_v<T>) tmp.resize(n);
+    else tmp = arr;
+
+    std::vector<std::size_t> cursor(numRuns);
+    std::vector<std::ptrdiff_t> step(numRuns, 1);
+    for (std::size_t p = 0; p < numDescPiles; ++p) {
+        cursor[p] = reverseDescRuns ? start[p + 1] - 1 : start[p];
+        step[p] = reverseDescRuns ? -1 : 1;
+    }
+    for (std::size_t p = 0; p < numAscPiles; ++p) {
+        const std::size_t r = numDescPiles + p;
+        cursor[r] = reverseAscRuns ? start[r + 1] - 1 : start[r];
+        step[r] = reverseAscRuns ? -1 : 1;
+    }
+
+    for (std::size_t i = 0; i < n; ++i) {
+        const uint32_t tag = blueprint[i];
+        const std::size_t local = static_cast<std::size_t>(localPileId(tag));
+        blueprint[i] = static_cast<uint32_t>(
+            isDescTag(tag) ? local : numDescPiles + local);
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::size_t r = static_cast<std::size_t>(blueprint[i]);
+        const std::size_t pos = cursor[r];
+        cursor[r] = static_cast<std::size_t>(
+            static_cast<std::ptrdiff_t>(cursor[r]) + step[r]);
+        tmp[pos] = arr[i];
     }
     return start;
 }
@@ -1058,67 +1070,50 @@ void mergeTwoAdjacentRunsToDestBranchless(
     std::size_t end,
     Less less = Less{}
 ) {
-    if (begin == mid) {
-        std::move(src.begin() + static_cast<std::ptrdiff_t>(mid),
-                  src.begin() + static_cast<std::ptrdiff_t>(end),
-                  dst.begin() + static_cast<std::ptrdiff_t>(begin));
+    // E082: use raw contiguous pointers in the high-entropy branchless kernel.
+    // std::vector indexing in this extremely hot loop was measurably more
+    // expensive even after inlining.  The merge decisions, four-selection
+    // unroll, fast paths, stability behavior, and scheduler are unchanged.
+    T* const srcBase = src.data();
+    T* const dstBase = dst.data();
+
+    if (!less(srcBase[mid], srcBase[mid - 1])) {
+        std::move(srcBase + begin, srcBase + end, dstBase + begin);
         return;
     }
-    if (mid == end) {
-        std::move(src.begin() + static_cast<std::ptrdiff_t>(begin),
-                  src.begin() + static_cast<std::ptrdiff_t>(mid),
-                  dst.begin() + static_cast<std::ptrdiff_t>(begin));
-        return;
-    }
-    if (!less(src[mid], src[mid - 1])) {
-        std::move(src.begin() + static_cast<std::ptrdiff_t>(begin),
-                  src.begin() + static_cast<std::ptrdiff_t>(end),
-                  dst.begin() + static_cast<std::ptrdiff_t>(begin));
-        return;
-    }
-    if (!less(src[begin], src[end - 1])) {
+    if (!less(srcBase[begin], srcBase[end - 1])) {
         const std::size_t rightLen = end - mid;
-        std::move(src.begin() + static_cast<std::ptrdiff_t>(mid),
-                  src.begin() + static_cast<std::ptrdiff_t>(end),
-                  dst.begin() + static_cast<std::ptrdiff_t>(begin));
-        std::move(src.begin() + static_cast<std::ptrdiff_t>(begin),
-                  src.begin() + static_cast<std::ptrdiff_t>(mid),
-                  dst.begin() + static_cast<std::ptrdiff_t>(begin + rightLen));
+        std::move(srcBase + mid, srcBase + end, dstBase + begin);
+        std::move(srcBase + begin, srcBase + mid, dstBase + begin + rightLen);
         return;
     }
 
-    std::size_t i = begin;
-    std::size_t j = mid;
-    std::size_t out = begin;
+    T* left = srcBase + begin;
+    T* const leftEnd = srcBase + mid;
+    T* right = srcBase + mid;
+    T* const rightEnd = srcBase + end;
+    T* out = dstBase + begin;
 
     auto takeOne = [&]() {
-        const bool takeRight = less(src[j], src[i]);
-        dst[out++] = std::move(takeRight ? src[j] : src[i]);
-        j += static_cast<std::size_t>(takeRight);
-        i += static_cast<std::size_t>(!takeRight);
+        const bool takeRight = less(*right, *left);
+        *out++ = std::move(takeRight ? *right : *left);
+        right += static_cast<std::ptrdiff_t>(takeRight);
+        left += static_cast<std::ptrdiff_t>(!takeRight);
     };
 
-    // High-entropy Random inputs route here specifically because the merge
-    // winner is difficult to predict. Process four selections per outer loop
-    // while both runs have enough remaining elements, reducing loop/end-check
-    // overhead without changing the comparison or output order.
-    while (i + 4 <= mid && j + 4 <= end) {
+    while (left + 4 <= leftEnd && right + 4 <= rightEnd) {
         takeOne();
         takeOne();
         takeOne();
         takeOne();
     }
-    while (i < mid && j < end) {
+    while (left < leftEnd && right < rightEnd) {
         takeOne();
     }
-    if (i < mid) {
-        std::move(src.begin() + static_cast<std::ptrdiff_t>(i),
-                  src.begin() + static_cast<std::ptrdiff_t>(mid),
-                  dst.begin() + static_cast<std::ptrdiff_t>(out));
-    } else if (j < end) {
-        std::move(src.begin() + static_cast<std::ptrdiff_t>(j),
-                  src.begin() + static_cast<std::ptrdiff_t>(end),
-                  dst.begin() + static_cast<std::ptrdiff_t>(out));
+    if (left < leftEnd) {
+        std::move(left, leftEnd, out);
+    } else if (right < rightEnd) {
+        std::move(right, rightEnd, out);
     }
 }
 
@@ -1355,7 +1350,8 @@ void mergeRunsFromTmpToArr(
     Less less = Less{},
     MergeSchedule schedule = MergeSchedule::adjacent_pairs,
     bool branchlessRandomMerge = false,
-    unsigned gallopTrigger = 7
+    unsigned gallopTrigger = 7,
+    unsigned branchlessImbalanceGallopRatioX100 = 0
 ) {
 
     const std::size_t n = tmp.size();
@@ -1438,7 +1434,18 @@ void mergeRunsFromTmpToArr(
             const std::size_t begin = currentStarts[r];
             const std::size_t mid = currentStarts[r + 1];
             const std::size_t end = currentStarts[r + 2];
-            if (branchlessRandomMerge) {
+            bool useBranchlessPair = branchlessRandomMerge;
+            if (useBranchlessPair && branchlessImbalanceGallopRatioX100 != 0) {
+                const std::size_t leftLen = mid - begin;
+                const std::size_t rightLen = end - mid;
+                const std::size_t larger = std::max(leftLen, rightLen);
+                const std::size_t smaller = std::min(leftLen, rightLen);
+                __extension__ typedef unsigned __int128 PairWide;
+                if (static_cast<PairWide>(larger) * 100 >
+                    static_cast<PairWide>(smaller) * branchlessImbalanceGallopRatioX100)
+                    useBranchlessPair = false;
+            }
+            if (useBranchlessPair) {
                 mergeTwoAdjacentRunsToDestBranchless(
                     *src, *dst, begin, mid, end, less);
             } else {
@@ -1509,15 +1516,14 @@ ReconstructedRuns simulateAndReconstructRunsToTemp(
 // Public sort entry point
 // =========================================================
 //
-// Sorts arr in place. V7 falls back to the scalar search path when its narrow
-// AVX2 exact-eight-tail specialization does not apply.
+// Sorts arr in place. Internal reconstruction buffers remain an implementation detail.
 
 template <typename T, typename Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
-                  "jessesort::simulated_simd_v7::sort requires copyable values because pile tails are stored by value");
+                  "jessesort::simulated::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
-                  "jessesort::simulated_simd_v7::sort requires movable values for merging");
+                  "jessesort::simulated::sort requires movable values for merging");
     static_assert(std::is_invocable_r_v<bool, Less&, const T&, const T&>,
                   "Comparator must be callable as bool(const T&, const T&)");
 
@@ -1569,9 +1575,9 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     std::vector<T> tmp;
 
     std::vector<std::size_t> runStart =
-        reconstructTaggedBlueprintToTemp_WithSplitCounts(
+        reconstructTaggedBlueprintNormalizedForV2(
             arr,
-            sim.blueprint,
+            std::move(sim.blueprint),
             std::move(sim.ascCounts),
             std::move(sim.descCounts),
             tmp,
@@ -1610,10 +1616,15 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
             less,
             MergeSchedule::adjacent_pairs,
             useRandomBranchlessMerge,
-            gallopTrigger);
+            gallopTrigger,
+            (useRandomBranchlessMerge &&
+             arr.size() > 20000 && arr.size() < 500000 &&
+             static_cast<Wide>(4) * finalPileSquare <
+                 static_cast<Wide>(29) * arr.size())
+                ? 150u : 0u);
     }
 }
 
 
-} // namespace jessesort::simulated_simd_v7
+} // namespace jessesort::simulated
 #endif

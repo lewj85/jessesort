@@ -1,12 +1,12 @@
-#include "v7_avx2.h"
+#include <jessesort/v5_deferred_bands.h>
 #include <vector>
 
 // This translation unit intentionally contains no algorithm implementation.
 // JesseSort is generic/template-based, so the implementation remains in the header.
 // This function forces an int instantiation during a normal multi-file build.
 namespace jessesort_minimal_compile_check {
-void v7_avx2() {
+void v5_deferred_bands() {
     std::vector<int> values{3, 1, 2, 1};
-    jessesort::simulated_simd_v7::sort(values);
+    jessesort::simulated_early_freeze::sort(values);
 }
 } // namespace jessesort_minimal_compile_check

@@ -1,7 +1,17 @@
-/build/
-/tests/
+# Build outputs
+/benchmark
 *.o
 *.out
 *.exe
+
+# Every benchmark invocation writes to an isolated results/run_* directory.
+# Results are analysis artifacts, not repository state.
+/results/
+/build/
+/tests/
+
+# Editor / OS noise
 .DS_Store
 .devcontainer/
+.vscode/
+.idea/

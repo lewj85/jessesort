@@ -259,14 +259,29 @@ permutations unchanged.
      should pay the new lookup cost.
 
 3. SIMD VARIATIONS V7+ — EARLY-FREEZE / CHUNKED INSERTION TRACK
-   - V7 remains the AVX2 exact-eight-tail proof of concept. E058 rejected a broad
-     post-probe AVX2 continuation route as a robust whole-sort optimization.
-   - Next AVX2 experiments: freeze/cap each game at 8 or 16 piles during the early
-     probe and spill additional values to deferred overflow; then test extending
-     this into SIMD-friendly insertion chunks whose active bases stay within the
-     efficient SIMD width.
-   - Add AVX-512 counterparts (natural exact-16 int32 lookup, early freeze, and
-     chunked insertion) before attempting multi-register linear scans.
+   - E076 promotes the E075 8-pile / 128-element capped-probe design to default
+     V7 specifically because it makes the validated single-register exact-eight
+     AVX2 path a regularly triggered mechanism on Random-like inputs. This is a
+     research/example choice, not a speed claim: E075 measured 8x128 at 1.003246
+     versus uncapped V7 (~0.32% slower) over 500 same-binary Random trials.
+   - E074 tested capping each game only during the 64-element probe. Cap-8 was
+     correctness-safe with a deferred probe overflow sorted after routing and
+     immediately married into an existing pile, but a 500-trial same-binary
+     Random A/B was neutral (candidate/baseline 0.9995). Cap-16 never activated
+     in 100 Random probes, so 64 elements is too short to exercise that width.
+   - E075 extended the capped probe itself to 128 and 256 elements. Cap-8/128
+     activated on every Random trial but was 0.32% slower in a 500-trial same-binary
+     A/B. Cap-8/256 spilled ~118 values/trial and regressed ~18%. Cap-16/256
+     activated its overflow on 498/500 Random probes with only ~12.5 spills/trial,
+     but remained neutral (candidate/baseline 1.00047). Longer one-shot probes are
+     therefore closed as a whole-sort optimization.
+   - Next AVX2 experiment: use SIMD-friendly insertion CHUNKS rather than one longer
+     initial probe, retaining a fixed-width active tail set long enough for SIMD
+     lookup savings while periodically resolving bounded spill. Record SIMD-hit
+     count, spill volume, sorting/marriage cost, and residency at width 8/16.
+   - For 16-wide work, prefer AVX-512 exact-16 int32 lookup when available. If
+     AVX2 16-pile work is revisited, measure the two-register lookup in isolation
+     and require enough 16-tail residency to amortize the second vector compare.
    - Compare SIMD early-freeze/chunked designs against V2/V3 and scalar V4-V6 with
      all spill/reconstruction/merge costs charged.
 
@@ -3866,3 +3881,598 @@ Changes:
   and compact-repo header filenames).
 - No algorithm thresholds, control flow, generators, benchmark timing behavior,
   compiler flags, or public sort semantics were changed.
+
+-------------------------------------------------------------------------------
+E072 — Standard include/src layout + Markdown benchmark output
+Status: repository/build/benchmark-reporting infrastructure only; no sorting algorithm or timed benchmark logic changed.
+
+Repository layout:
+- Moved public variation headers to `include/jessesort/`.
+- Moved variation translation units to `src/`.
+- Moved the benchmark harness to `benchmarks/benchmark.cpp`.
+- Updated project and cross-header includes to installed-style `<jessesort/...>` paths.
+- Updated the Makefile to compile with `-Iinclude` and the new source locations.
+- Updated README build, usage, result-artifact, and repository-layout documentation.
+
+Benchmark reporting:
+- Pooled workload summaries now print directly to stdout as valid Markdown pipe tables.
+- Added `benchmark_results.md`, containing the same human-readable Markdown tables for
+  every completed workload.
+- Retained `benchmark_results.csv` and `benchmark_trials.csv` unchanged for machine-readable
+  analysis and raw paired timing evidence.
+- Markdown reporting happens only after each workload's timed trials and validation are
+  complete; it does not enter any timed region.
+
+Validation:
+- Clean build succeeded with the reorganized paths.
+- `make smoke` completed all workloads without a sorting validation failure.
+
+-------------------------------------------------------------------------------
+E073 — Four-size benchmark sweep + 100-trial default
+Status: benchmark/build/reporting infrastructure only; no sorting algorithm logic changed.
+
+Purpose:
+- Make the normal benchmark practical enough to run routinely without giving up size scaling.
+- Preserve useful results from long 1M-element runs even when the invoking terminal/tool stops waiting.
+- Present benchmark output by variation so scaling from 1k through 1m is visible in one table.
+
+Changes:
+- `make run` now aliases `make run100` and runs 100 trials, one deterministic seed, over
+  n={1k, 10k, 100k, 1m} with two untimed warmups.
+- `bench200`, `bench500`, and `bench1000` now use the same four-size sweep; the latter two
+  retain two seeds for stronger confirmation runs.
+- The benchmark executable accepts `all` as its size argument for the four-size sweep and
+  still accepts a numeric size for targeted runs (for example `./benchmark 500 100000 2 2`).
+- Sweep order is 1k -> 10k -> 100k -> 1m so inexpensive columns finish before 1m work begins.
+- `benchmark_results.md` is now variation-centric: one table per V1-V7/std::sort, input
+  families as rows, and 1k/10k/100k/1m as columns. Each completed cell contains the median
+  paired ratio to std::sort and median time in microseconds; unfinished cells say `pending`.
+- Markdown is rewritten after every completed input/size pair. `benchmark_results.csv` is
+  also flushed there, while `benchmark_trials.csv` continues to flush every 10 paired trials.
+- `benchmark_progress.txt` now records the active n in addition to workload/seed/trial state.
+
+Methodology note:
+- The 100-trial default is intended for broad routine comparison and regression detection.
+  E066's stronger evidence standard still applies to small retain/revert effects: use more
+  trials and/or a second seed when the measured difference is small enough to be noise-sensitive.
+
+-------------------------------------------------------------------------------
+E074 — V7 capped 64-element SIMD probe with deferred overflow marriage
+Status: EXPERIMENTAL / CAP-ONLY RESULT NEUTRAL; default V7 behavior unchanged.
+
+Question:
+- Can V7 make its exact-eight AVX2 lookup materially useful by capping each game's
+  pile growth during the existing 64-element structure probe, spilling would-be
+  new piles to one temporary overflow run, and restoring patience-tail ordering
+  immediately after the routing decision?
+
+Implementation tested:
+- Added an experimental runtime `sortWithProbePileCap(values, cap)` path. Public
+  `sort(values)` still passes cap=0 and therefore preserves default V7 behavior.
+- During the first 64 input elements only, each ascending/descending game can be
+  capped independently at 8 or 16 piles. A value whose search result would create
+  cap+1 is tagged as probe overflow instead of extending the tail array.
+- Routing is decided BEFORE overflow marriage, using probe run-length concentration
+  (ordinary pile lengths plus overflow length) rather than raw pile count.
+- The overflow is then insertion-sorted/std::sort-sorted as one ascending run and
+  immediately married into the existing ascending pile selected by its final/max
+  element. If the max would create cap+1, it marries into the boundary pile while
+  preserving that pile's larger tail; this detail is required for valid future
+  patience insertion.
+- Reconstruction skips overflow tags and merges the sorted overflow values into the
+  selected reconstructed pile before the normal final merge phase.
+- The experimental 16-wide probe search can use at most two AVX2 registers, but only
+  while cap=16 is explicitly selected; normal V7 remains exact-eight only.
+
+Correctness:
+- An initial incorrect boundary-tail update was caught immediately at 100k Random.
+  It was fixed before timing: the merged pile tail is max(existing tail, overflow max),
+  not unconditionally overflow max.
+- Cap-8 and cap-16 then passed correctness validation across all ten benchmark families.
+
+Activation profile, 100 trials, n=100k:
+- Random cap-8: overflow activated in 61/100 probes; 163 total spill values; max spill 7.
+- Random%100 cap-8: 55/100 probes; 126 total spill values; max spill 6.
+- Other standard workloads: no cap-8 overflow in this sample.
+- Cap-16: 0/100 activations on every standard workload, including Random. The
+  per-game tail sets simply do not reach 16 often enough within 64 elements.
+
+Causal timing:
+- Cross-build timings were discarded for retain/revert decisions because they again
+  showed large code-layout swings on structured inputs.
+- A same-binary A/B/C harness compares baseline V7, cap-8, cap-16, and std::sort while
+  rotating execution order.
+- 500 paired Random trials at n=100k:
+    cap-8 / baseline V7  = 0.999508
+    cap-16 / baseline V7 = 0.998759 (NOT mechanism evidence; cap-16 never activates)
+    baseline V7 / std    = 0.909742
+    cap-8 V7 / std       = 0.910209
+- Therefore the cap-8-only 64-element probe is effectively neutral. The probe is too
+  short for the SIMD lookup savings to amortize overflow bookkeeping/marriage, and
+  cap-16 is not exercised at all.
+
+Decision / next step:
+- Do NOT change default V7 to probe capping.
+- Keep the experimental helper and `v7-probe-cap-experiment` harness for causal work.
+- Move the SIMD track to fixed-width insertion CHUNKS (likely 8 AVX2 int32 tails),
+  preserving the user's routing-before-marriage rule at chunk/probe boundaries.
+- Instrument future chunk experiments with SIMD-hit counts, spill counts/lengths,
+  and marriage/reconstruction cost; the goal is to demonstrate useful whole-sort
+  SIMD work, not merely a faster isolated eight-tail lookup.
+
+
+
+-------------------------------------------------------------------------------
+E075 — V7 capped 128/256-element probe experiments
+Status: REJECTED as one-shot probe optimization; default V7 unchanged.
+
+Question:
+- Does extending E074's capped initial probe from 64 elements to 128 or 256 keep
+  the tail set at a SIMD-friendly width long enough to create a measurable whole-sort
+  benefit before overflow is sorted and married into an existing pile?
+
+Implementation / methodology:
+- Parameterized the E074 experimental helper with a probe length while preserving
+  public V7 `sort()` behavior exactly as before.
+- Tested four experimental modes in the SAME binary against baseline V7 and std::sort:
+    * cap 8, probe 128   (8x128)
+    * cap 16, probe 128 (16x128)
+    * cap 8, probe 256   (8x256)
+    * cap 16, probe 256 (16x256)
+- All modes preserve E074's ordering rule: routing is decided before overflow
+  marriage; then overflow is sorted and immediately merged into the existing
+  ascending pile selected by its final/max element.
+- Execution order rotates across baseline/candidates/std::sort, and every timed result
+  is validated with std::is_sorted outside the timer.
+- A 100-trial, n=100k screen covered all ten standard workloads. A 500-trial,
+  n=100k Random-only same-binary run was used for the main causal conclusion.
+
+Correctness:
+- All four candidate modes passed the 100-trial screen across all ten workloads.
+- All four also passed the 500-trial Random confirmation with no validation failure.
+
+100-trial activation/spill screen at n=100k:
+- Random:
+    8x128:  100/100 probes spilled; 2,628 total spill values (~26.3/trial)
+    16x128:   1/100 probes spilled;     1 total spill value
+    8x256:  100/100 probes spilled; 11,732 total spill values (~117.3/trial)
+    16x256:  99/100 probes spilled;  1,196 total spill values (~12.0/trial)
+- Random%100:
+    8x128:  100/100; 2,397 total
+    16x128:   0/100; 0 total
+    8x256:  100/100; 10,502 total
+    16x256:  95/100; 743 total
+- Sorted+Noise(5%):
+    8x128: 11/100; 38 total
+    16x128: 0/100; 0 total
+    8x256: 89/100; 619 total
+    16x256: 10/100; 17 total
+- The remaining seven standard structured workloads produced no spill in this screen.
+
+100-trial same-binary screen, selected ratios (candidate / baseline V7):
+- Random:
+    8x128  = 1.007874
+    16x128 = 0.999909
+    8x256  = 1.182936
+    16x256 = 0.999970
+- Random%100:
+    8x128  = 0.998517
+    16x128 = 0.997586
+    8x256  = 1.130803
+    16x256 = 0.999610
+- The very large 8x256 regressions correlate with its much larger spill volume.
+  Structured-workload sub-percent differences are not treated as mechanism evidence.
+
+500-trial Random confirmation at n=100k:
+- Activation/spill:
+    8x128:  500/500 probes spilled; 13,697 values total (~27.39/trial)
+    16x128:   5/500 probes spilled;      6 values total (~0.012/trial)
+    8x256:  500/500 probes spilled; 59,024 values total (~118.05/trial)
+    16x256: 498/500 probes spilled;  6,257 values total (~12.51/trial)
+- Median paired timing ratios:
+    8x128  / baseline V7 = 1.003246  (~0.32% slower)
+    16x128 / baseline V7 = 0.999240  (effectively neutral; cap overflow almost absent)
+    8x256  / baseline V7 = 1.179726  (~18.0% slower)
+    16x256 / baseline V7 = 1.000473  (effectively neutral)
+    baseline V7 / std    = 0.905007
+
+Interpretation / decision:
+- 128 elements is long enough for cap-8 to activate consistently on Random, but the
+  additional SIMD-width residency does not repay spill handling; the confirmed result
+  is slightly slower than baseline.
+- Extending cap-8 to 256 is decisively counterproductive because the single initial
+  overflow grows too large; sorting/marrying roughly 118 displaced values per Random
+  trial overwhelms the lookup savings.
+- Cap-16/256 is the most balanced fixed-width case: it activates on essentially every
+  Random probe while spilling only ~12.5 values/trial. Nevertheless, its 500-trial
+  same-binary result is neutral, so simply lengthening the ONE initial probe is not
+  sufficient to turn SIMD into a whole-sort advantage.
+- Do not change default V7 to any 128/256 capped-probe mode.
+- Close longer one-shot probe lengths as this mechanism's next step. Future work should
+  move to bounded repeated/chunked insertion, where overflow is periodically resolved
+  rather than allowed to accumulate through one increasingly long initial probe.
+- Add explicit SIMD-hit/residency counters before the chunk experiment so savings and
+  overflow costs can be attributed directly instead of inferred from pile/spill counts.
+
+
+-------------------------------------------------------------------------------
+E076 — PROMOTE 8x128 CAPPED PROBE TO DEFAULT V7
+Status: RETAINED as the default V7 SIMD demonstration; performance result remains neutral/slightly negative.
+
+Decision:
+- The user explicitly wants V7 to demonstrate a regularly exercised, meaningful SIMD use
+  rather than merely retain a narrow exact-eight proof of concept that rarely triggers.
+- Of the E075 candidates, 8x128 is selected over 16x256 because it exercises the
+  already validated ONE-register AVX2 exact-eight lookup and activated on every
+  Random probe in both the 100-trial and 500-trial studies.
+- 16x256 also activated frequently, but it relies on a two-register 16-tail path and
+  is less directly representative of the exact-eight kernel whose isolated speedup
+  was previously established.
+
+Retained E075 evidence (n=100k Random, same-binary):
+- 8x128 activation: 500/500 probes; 13,697 spill values total (~27.39/trial).
+- 8x128 / uncapped V7 median paired ratio: 1.003246 (~0.32% slower).
+- 16x256 activation: 498/500 probes; 6,257 spill values total (~12.51/trial).
+- 16x256 / uncapped V7 median paired ratio: 1.000473 (effectively neutral).
+
+Default V7 behavior after E076:
+- During the first 128 values, each game is capped at 8 piles.
+- A value that would create another pile goes to the temporary probe-overflow run.
+- Probe routing is decided before overflow marriage, using pile/run lengths including
+  the overflow run rather than uncapped pile count.
+- Overflow is then sorted and immediately married into an existing ascending pile
+  selected by its final/max element, preserving the patience-tail ordering invariant.
+- While a game's tail array is exactly eight int32 entries, V7 performs one AVX2
+  eight-way comparison; all unsupported types/comparators/counts retain scalar fallback.
+- Default V7 therefore intentionally charges all overflow/sort/marriage costs so the
+  benchmark measures a real end-to-end SIMD-oriented design rather than a microkernel.
+
+Interpretation:
+- Do NOT describe E076 as a speed optimization. The measured causal result is slightly
+  negative. Its purpose is to keep V7 as a concrete example of restructuring insertion
+  so SIMD is exercised regularly enough to evaluate its practical value.
+- Continue the next planned experiment with repeated bounded SIMD-friendly chunks; the
+  goal is to increase useful SIMD residency without allowing one probe overflow to grow
+  as in the rejected 8x256 case.
+
+-------------------------------------------------------------------------------
+E077 — UNIQUE INPUT SEED PER TRIAL + SIZE-DEPENDENT CANONICAL TRIAL COUNTS
+Status: RETAINED benchmark-methodology change; sorting logic unchanged.
+
+Motivation:
+- The prior benchmark grouped hundreds of timing repetitions under only one or two
+  base RNG seeds. Paired timing was already correct, but this oversampled a very small
+  set of random-input streams and under-sampled input-to-input variability.
+- The main benchmark should characterize algorithm performance across many distinct
+  deterministic inputs while preserving exact within-trial pairing against std::sort.
+- The 1m workload is roughly an order of magnitude more expensive, so the canonical
+  sweep uses fewer trials there to keep a full four-size run practical.
+
+New canonical methodology:
+- Every measured trial receives its own deterministic RNG seed derived from
+  (base seed, input family, n, trial index).
+- That exact generated source vector is copied to V1-V7 and std::sort within the trial.
+- The reported comparison remains the median of per-trial paired ratios
+  algorithm_time / std_sort_time.
+- Execution order still rotates/reverses across trials to reduce systematic order bias.
+- Structured deterministic inputs naturally repeat when their generator does not use RNG;
+  randomized workloads receive a genuinely different deterministic sample each trial.
+- Raw CSV records the actual per-trial seed used, making every randomized trial exactly
+  reproducible without a separate seed-cohort dimension.
+
+Canonical `make run` / `make run500` / `make bench500` profile:
+- n=1k:   500 distinct paired trials
+- n=10k:  500 distinct paired trials
+- n=100k: 500 distinct paired trials
+- n=1m:    50 distinct paired trials
+- A targeted single-size invocation uses the requested trial count directly; the 10:1
+  1m reduction applies only to the standard all-size sweep.
+
+Reporting/checkpoint changes:
+- Markdown and metadata explicitly list the trial count for each size and describe the
+  unique deterministic seed policy.
+- The obsolete per-seed summary rows were removed; summary rows now represent the full
+  independent-trial sample for each input/size.
+- Progress checkpointing tracks completed trials against that size's actual trial count.
+
+Interpretation:
+- This is a benchmark-quality/reproducibility change only. It does not alter V1-V7 logic.
+- For randomized workloads, 500 trials now means 500 distinct generated instances rather
+  than repeated measurements organized around only one or two RNG streams.
+
+E078 - Resumable benchmark execution
+------------------------------------
+Goal: make long canonical benchmark runs survive execution/process timeouts without restarting completed trial work.
+
+Implementation:
+- Added explicit resume mode: ./benchmark <trials> <size|all> <warmups> <existing_run_dir>.
+- On resume, benchmark_trials.csv is parsed and complete 8-algorithm paired trials are reconstructed.
+- Already-complete trial indices are skipped; the next missing trial is generated with the same deterministic per-trial seed and appended.
+- A partially written trailing CSV row is ignored safely.
+- benchmark_results.csv is regenerated from complete raw trials on every startup/resume, preventing duplicated summary rows.
+- benchmark_results.md is reconstructed from all fully complete workload/size cells.
+- Raw CSV remains append-only during resumed timing work.
+- Warmups are rerun when an input still has unfinished trials; warmups remain outside timers.
+
+Validation:
+- Interrupted a 50-trial 100k test at Random 32/50.
+- Resumed the same run directory; Random continued through trial 50 and the runner advanced to later workloads.
+- Verified 1,624 raw rows were all unique by (input,n,trial,algorithm): 0 duplicate rows.
+- Correctness validation remained enabled outside all timers.
+
+Rationale:
+This allows 500-trial 100k and 50-trial 1m benchmark sweeps to be accumulated across multiple foreground invocations without discarding completed timings. The deterministic unique-seed-per-trial methodology makes exact continuation reproducible.
+
+-------------------------------------------------------------------------------
+E079 — V2 RANDOM SCALING AUDIT + BRANCH-ELIMINATED RECONSTRUCTION
+Status: RETAINED V2 reconstruction optimization; benchmark interpretation corrected.
+
+Motivation:
+- Under the E077/E078 unique-trial benchmark, V2 Random measured ~1.03x std::sort
+  at 100k instead of the ~0.92-0.94 ratios seen in earlier runs.
+- Audit whether a V2 logic regression occurred, whether the old base-seed design was
+  responsible, and which V2 phase now limits Random scaling.
+
+Code audit:
+- V2 implementation is unchanged between E071 and E078; the V7 SIMD experiments and
+  resumable benchmark work did not alter V2 sorting logic.
+- Important correction: E073's "one/two base seeds" benchmark already derived a fresh
+  deterministic RNG seed for every trial via trial_rng_seed(base_seed,n,input,trial).
+  It did NOT repeatedly sort only one or two Random arrays. Therefore the old favorable
+  ~0.93 result cannot be attributed simply to repeated identical inputs.
+- Re-running the preserved E073 code on the current host reached 30/100 Random trials
+  before timeout and already had a V2/std median paired ratio of ~1.0385. This agrees
+  with E078/current local observations and indicates the older ~0.93 result was strongly
+  affected by execution/build/host conditions rather than a later V2 algorithm regression.
+
+Random phase profile using current unique deterministic trial seeds:
+- 10k, 100 trials: insertion ~209 us, reconstruction ~47 us, merge ~348 us;
+  ~268 runs; branchless Random merge selected 100/100.
+- 100k, 100 trials: insertion ~3521 us, reconstruction ~2005 us, merge ~4082 us;
+  ~873 runs; branchless selected 99/100.
+- 1m, 30 trials: insertion ~35400 us, reconstruction ~19952 us, merge ~49156 us;
+  ~2796 runs; branchless selected 30/30.
+- Reconstruction grows from ~8% of V2 time at 10k to about ~20% at 100k/1m and is the
+  clearest phase-specific scaling penalty.
+
+Router revalidation under fresh unique Random trials:
+1. E043/E065 no-hint insertion continuation remains beneficial versus hinted insertion:
+   - 10k, 500 trials: no-hint/hinted ~0.8401 (~16.0% faster insertion)
+   - 100k, 300 trials: ~0.9208 (~7.9% faster)
+   - 1m, 50 trials: ~0.9068 (~9.3% faster)
+   Decision: retain no-hint Random insertion route.
+2. E036/E044 branchless merge remains strongly beneficial versus ordinary merge when
+   both modes receive independent copies of the same reconstructed runs:
+   - 10k, 300 trials: branchless/general ~0.7241
+   - 100k, 200 trials: ~0.6983
+   - 1m, 30 trials: ~0.6927
+   Decision: retain branchless Random merge route.
+
+Reconstruction experiment:
+- Baseline reconstruction branches per element on ascending vs descending game and then
+  updates one of two direction-specific cursor arrays before the scattered output write.
+- New reconstruction builds one global cursor array and a signed +1/-1 step per run.
+  The hot loop maps the packed blueprint tag to a global run, stores at cursor[run], and
+  advances the cursor by step[run], eliminating the unpredictable per-element direction
+  branch while preserving identical run materialization.
+
+Reconstruction-only same-binary A/B:
+- 10k, 300 trials: new/baseline ~0.3242
+- 100k, 300 trials: ~0.8574
+- 1m, 50 trials: ~0.9795
+- Outputs and run boundaries were byte-for-byte identical in the A/B harness.
+
+End-to-end current-host validation:
+- 100k, same 100 deterministic Random trial indices in separate canonical runs:
+  unmodified E078 V2/std median = 1.0600
+  E079 V2/std median = 1.0276
+  median per-trial ratio-of-ratios (E079 ratio / E078 ratio) = 0.9703
+  => about 3.0% end-to-end improvement.
+- 1m, same 20 deterministic Random trial indices:
+  unmodified E078 V2/std median = 1.0301
+  E079 V2/std median = 1.0052
+  median ratio-of-ratios = 0.9809
+  => about 1.9% end-to-end improvement.
+- Full 100-trial 100k benchmark completed with all correctness validation enabled.
+- Smoke validation across all ten workloads passed before timing confirmation.
+
+Decision:
+- RETAIN branch-eliminated global-cursor reconstruction in V2.
+- Do not roll back the no-hint insertion or branchless merge routers; both remain causal
+  wins under the new unique-trial methodology.
+- Treat ~1.03 rather than historical ~0.93 as the credible current-host V2 Random baseline
+  before E079. E079 closes most of the current 100k gap and brings the 20-trial 1m screen
+  close to parity, but larger canonical confirmation remains appropriate.
+
+Next V2 Random priorities:
+- Reconstruction is improved; remaining large-n cost is split mainly between insertion
+  and repeated adjacent merge passes. Look for cache/layout improvements that reduce
+  blueprint/tail traffic or merge-pass memory movement rather than retesting the already
+  validated Random routers.
+- Consider a compact blueprint representation or safely promotable 16-bit local pile tags
+  for int/typical Random cases, since blueprint bandwidth becomes material at 100k-1m.
+- Profile merge memory traffic / pass count at 1m before changing merge scheduling; the
+  current branchless kernel itself remains substantially faster than general merging.
+
+-------------------------------------------------------------------------------
+E080 — V2 LARGE-N FOLLOW-UP PLAN (IN PROGRESS)
+
+Priorities added after E079:
+1. Normalize packed blueprint tags to global run IDs before reconstruction, moving
+   game/tag decoding out of the scattered-write hot loop. Test first because it is
+   behavior-preserving, sequential, and directly attacks the measured reconstruction cost.
+2. Compact blueprint metadata: investigate 16-bit local pile IDs plus a separate direction
+   bitset with safe dynamic promotion/fallback for pathological >65535-pile cases.
+3. Reduce reconstruction memory traffic by combining metadata normalization with run-layout
+   preparation where possible; avoid extra full-n passes unless the scatter loop wins enough.
+4. Profile 100k/1m merge pass count and bytes moved; test merge scheduling changes only after
+   quantifying whether pass reduction can beat the retained branchless kernel.
+5. Revisit natural-run preservation at large n as a joint reconstruction+merge optimization,
+   gated by the existing structure probe so Random does not pay unnecessary scanning overhead.
+6. Investigate cache-friendly pile-tail / cursor layouts and narrower cursor-step metadata.
+7. Consider chunked reconstruction or prefetch experiments only after simpler metadata/layout
+   changes are exhausted.
+
+E080 experiment result — pre-normalize packed blueprint tags to global run IDs
+----------------------------------------------------------------------------
+Hypothesis:
+- Move direction-bit decoding and asc/desc global-run selection out of E079's scattered
+  reconstruction loop. A sequential pass rewrites each packed uint32 blueprint entry to its
+  final global run ID; the scatter loop then uses blueprint[i] directly as its cursor index.
+
+Correctness:
+- Compiled cleanly and completed the standard workload validation used by the benchmark.
+
+End-to-end Random A/B on the same deterministic trial indices:
+- 100k, 60 trials: median candidate/baseline per-trial ratio-of-ratios = 0.9966
+  (~0.34% faster). Candidate V2/std median 0.8778 vs baseline 0.8786 on this host run.
+- 1m, 20 trials: median candidate/baseline ratio-of-ratios = 1.0056
+  (~0.56% slower). Candidate V2/std median 0.8747 vs baseline 0.8690.
+
+Decision:
+- REJECT. The extra full-n metadata normalization pass is not repaid at 1m, where the
+  optimization should matter most. Restore E079's single-pass reconstruction.
+- This reinforces that the next large-n work should reduce total memory movement rather than
+  add preparatory passes around the scatter.
+
+Updated V2 large-n priorities after E080:
+1. Profile exact merge-pass count, bytes moved, and run-size evolution at 100k/1m; prioritize
+   reducing whole-array merge passes if possible while retaining the validated branchless kernel.
+2. Compact blueprint metadata without an extra full-n normalization pass. Candidate design:
+   16-bit local pile IDs plus a separate direction bitset, with safe promotion/fallback if a
+   game exceeds the representable pile count.
+3. Investigate whether reconstruction can emit a layout that reduces the first merge pass or
+   folds an initial merge into materialization, avoiding one complete read/write of n values.
+4. Revisit natural-run preservation for large n, gated by the structure probe, as a way to
+   reduce both reconstruction scatter and final merge run count.
+5. Explore cache-friendly pile-tail/cursor storage and narrower auxiliary metadata after the
+   higher-leverage memory-pass experiments above.
+
+
+-------------------------------------------------------------------------------
+E081 — E080 BLUEPRINT NORMALIZATION RETEST (RETAIN)
+
+Reason for retest:
+- E080 was initially rejected from only 60 Random trials at 100k and 20 at 1m.
+- Because the observed effect was sub-1% and V2 is already close to std::sort, the
+  user requested substantially more trials before accepting or rejecting the change.
+
+Method:
+- Same-binary causal A/B to minimize code-layout confounding.
+- Baseline E079 reconstruction and the E080 normalization candidate both sort the exact
+  same deterministic Random input on every trial; execution order rotates with std::sort.
+- Candidate performs one sequential pass converting packed local pile tags to global run
+  IDs, then the scattered reconstruction loop indexes the cursor table directly.
+- Correctness validated against std::sort on every trial.
+
+Higher-confidence results:
+- 100k, 500 paired Random trials:
+  candidate/baseline median = 0.977205
+  baseline/std median = 0.890523
+  candidate/std median = 0.876217
+  => candidate about 2.28% faster end-to-end than E079 baseline.
+- 1m, 50 paired Random trials:
+  candidate/baseline median = 0.970281
+  baseline/std median = 0.886730
+  candidate/std median = 0.868637
+  => candidate about 2.97% faster end-to-end than E079 baseline.
+
+Decision:
+- RETAIN. The earlier E080 rejection is superseded by the larger same-binary A/B.
+- The larger sample indicates the extra sequential metadata pass reliably repays itself by
+  simplifying the cache-sensitive reconstruction scatter at large n.
+- Keep E079's global cursor/step reconstruction and layer this normalization pass on top.
+
+Next V2 large-n priorities:
+1. Profile merge-pass count / bytes moved at 100k and 1m; reducing a whole merge pass is
+   still the highest-leverage remaining candidate.
+2. Test compact blueprint metadata, but only if it avoids adding another preprocessing pass.
+3. Investigate folding the first merge into reconstruction/materialization.
+4. Revisit natural-run preservation gated by the structure probe.
+
+-------------------------------------------------------------------------------
+E082 — V2 LARGE-N MERGE AUDIT + POINTER BRANCHLESS KERNEL (RETAIN)
+Date: 2026-08-10
+Status: RETAINED
+
+Goal:
+- Continue E081 large-n optimization by attacking the phase that now dominates
+  Random runtime rather than adding more reconstruction metadata work.
+
+Profile carried forward / reconfirmed:
+- Random run count is about 873 at 100k and ~2,796 at 1m.
+- Adjacent merging therefore requires roughly 10 and 12 merge levels before
+  ordered-boundary elision; merge accounts for roughly two-thirds of V2 Random
+  runtime on the current profiling build.
+
+Rejected candidates tested before retention:
+1. Fused 4-run merge schedule intended to halve whole-array merge levels.
+   Same reconstructed input, causal merge-only A/B:
+   - 100k, 100 trials: fused4/current = 1.569238 (~56.9% slower)
+   - 1m, 30 trials: fused4/current = 1.542881 (~54.3% slower)
+   Decision: REJECT. Extra 4-way selection comparisons overwhelm saved memory passes.
+
+2. Compact uint16 normalized blueprint IDs allocated during E081 normalization.
+   Reconstruction-only causal test:
+   - 100k, 500 trials: paired compact/current ratio ~0.97896, but individual
+     timing medians were order/cache sensitive.
+   - 1m, 50 trials: compact/current = 1.155714 (~15.6% slower).
+   Decision: REJECT. Allocation/extra compact-buffer traffic is harmful at 1m.
+
+3. Branchless merge unroll width retest (current width = 4):
+   - 100k, 300 trials: U2/U4=1.006492, U8/U4=1.032102, U16/U4=1.018307.
+   - 1m, 40 trials: U2/U4=1.001810, U8/U4=1.032516, U16/U4=1.011176.
+   Decision: retain width 4.
+
+4. Disable ordered-boundary elision for Random branchless merging:
+   - 100k, 500 trials: no-scan/current = 1.000813.
+   - 1m, 50 trials: no-scan/current = 1.004959.
+   Decision: REJECT; existing scan is slightly beneficial.
+
+Retained candidate — raw-pointer branchless merge kernel:
+- Preserve the exact current merge tree, boundary elision, fast paths, comparison
+  semantics, and four-selection unroll.
+- Replace repeated vector-index arithmetic in the high-entropy inner merge loop
+  with contiguous raw pointers into src.data()/dst.data().
+- This is a kernel implementation optimization only; algorithmic behavior is unchanged.
+
+Merge-only same-binary A/B on identical reconstructed Random inputs:
+- 100k, 500 trials: pointer/current = 0.861787 (~13.82% faster merge phase).
+- 1m, 50 trials: pointer/current = 0.868230 (~13.18% faster merge phase).
+
+Full-sort same-binary A/B on identical Random inputs, rotating execution order:
+- 100k, 500 trials: candidate/E081 = 0.909901 (~9.01% faster end-to-end).
+  median E081 4248.7805 us -> candidate 3871.6405 us.
+- 1m, 50 trials: candidate/E081 = 0.918656 (~8.13% faster end-to-end).
+  median E081 49857.7640 us -> candidate 45540.7065 us.
+- Correctness checked on every A/B trial; candidate output exactly matched baseline.
+
+Decision:
+- RETAIN as E082. This is the largest clean V2 large-n speedup found in the
+  E079-E082 audit and directly targets the dominant Random merge phase.
+
+Updated V2 priorities after E082:
+1. Re-profile V2 vs std::sort under the canonical benchmark after the pointer-kernel gain.
+2. Investigate reducing merge levels only with a cheaper two-level/fused technique than
+   general 4-way selection; E082 shows comparison-heavy k-way merging is not viable.
+3. Investigate reconstruction/materialization that can eliminate the first merge pass
+   without introducing an n-sized auxiliary preprocessing buffer.
+4. Revisit natural-run preservation gated by the existing structure probe to lower run count.
+5. Explore cache/prefetch behavior in the tail-search insertion phase after merge gains are exhausted.
+
+E083 — propagate E081/E082 retained optimizations across variations
+- Audited applicability rather than mechanically copying V2-specific code.
+- E082 pointer-based branchless merge:
+  - V3/V4/V5/V6 already inherited E082 automatically through simulated::mergeRunsFromTmpToArr in v2_simulated.h; no code change required.
+  - V1 had an independent branchless merge kernel, so its high-entropy branchless path was converted from vector indexing to raw contiguous pointers while preserving the same fast paths, four-selection unroll, stability behavior, and merge schedule.
+  - V7 had an independent copied branchless merge kernel, so the same E082 pointer conversion was applied there.
+- E081 normalized-blueprint reconstruction:
+  - V1 is not applicable (actual piles, no tagged simulated blueprint).
+  - V3 is not directly applicable (cycle/in-place reconstruction rather than V2's tagged scatter).
+  - V4/V5/V6 use specialized frozen/overflow reconstruction formats; the exact E081 normalization pass is not a drop-in equivalent and was not forced into them.
+  - V7 does use the same tagged simulated blueprint model, with an additional OVERFLOW_TAG sentinel from its capped probe. Added the E081-style normalization pass for all non-overflow tags while preserving OVERFLOW_TAG and the existing post-probe overflow marriage.
+- Correctness: full 10-workload 100k validation passed after propagation.
+- 100-trial 100k screen on the same host, separate canonical builds (therefore useful as a screen, not a pure same-binary causal estimate):
+  - V1 Random/std::sort: E082 baseline 0.9957 -> E083 0.9265.
+  - V7 Random/std::sort: E082 baseline 0.9403 -> E083 0.8483.
+  - Both ports are retained because they are semantic equivalents of already validated E081/E082 transformations and passed correctness; do not interpret the entire cross-build delta as the causal gain because binary layout/host effects can move absolute ratios.
