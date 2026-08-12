@@ -1,6 +1,8 @@
 #ifndef JESSESORT_ACTUAL_PILES_HPP
 #define JESSESORT_ACTUAL_PILES_HPP
 
+#include <jessesort/v2_simulated.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <functional>
@@ -67,146 +69,9 @@ std::size_t findDescendingPileBitWalk(const std::vector<T>& tails, const T& valu
     return static_cast<std::size_t>(idx + 1);
 }
 
-template <class T, class Less>
-void mergeRuns(std::vector<T>& src, std::vector<T>& dst,
-               std::vector<std::size_t>& ends, Less less, bool branchlessRandomMerge) {
-    if (ends.size() <= 1) return;
-    unsigned gallopTrigger = 7;
-    if (!branchlessRandomMerge) {
-        const std::size_t runCount = ends.size();
-        std::size_t largestRun = 0, prevEnd = 0;
-        for (std::size_t end : ends) {
-            largestRun = std::max(largestRun, end - prevEnd);
-            prevEnd = end;
-        }
-        // V2 E045 selector, tested independently here for V1 physical piles.
-        if (runCount >= 12 && runCount <= 128 &&
-            static_cast<unsigned long long>(largestRun) * runCount * 4 <=
-                static_cast<unsigned long long>(ends.back()) * 5) {
-            gallopTrigger = 5;
-        }
-    }
-    bool sourceIsSrc = true;
-    std::vector<std::size_t> next;
-    next.reserve((ends.size() + 1) / 2);
-
-    while (ends.size() > 1) {
-        auto& in = sourceIsSrc ? src : dst;
-        auto& out = sourceIsSrc ? dst : src;
-
-        // Elide boundaries between adjacent runs that are already globally
-        // ordered. This is a metadata-only merge and avoids copying those
-        // runs through the alternate buffer solely to remove the boundary.
-        next.clear();
-        for (std::size_t r = 0; r + 1 < ends.size(); ++r) {
-            const std::size_t boundary = ends[r];
-            if (less(in[boundary], in[boundary - 1]))
-                next.push_back(boundary);
-        }
-        next.push_back(ends.back());
-        ends.swap(next);
-        if (ends.size() <= 1) break;
-
-        next.clear();
-        std::size_t left = 0;
-        for (std::size_t r = 0; r < ends.size(); r += 2) {
-            const std::size_t mid = ends[r];
-            if (r + 1 == ends.size()) {
-                std::move(in.begin() + left, in.begin() + mid, out.begin() + left);
-                next.push_back(mid);
-                left = mid;
-                continue;
-            }
-            const std::size_t right = ends[r + 1];
-
-            // Fast path 1: the adjacent runs are already globally ordered.
-            // left.max <= right.min
-            if (!less(in[mid], in[mid - 1])) {
-                std::move(in.begin() + left, in.begin() + right,
-                          out.begin() + left);
-                next.push_back(right);
-                left = right;
-                continue;
-            }
-
-            // Fast path 2: the runs are disjoint in reverse order, so the
-            // merged result is simply right followed by left.
-            // right.max <= left.min
-            if (!less(in[left], in[right - 1])) {
-                const std::size_t rightLen = right - mid;
-                std::move(in.begin() + mid, in.begin() + right,
-                          out.begin() + left);
-                std::move(in.begin() + left, in.begin() + mid,
-                          out.begin() + left + rightLen);
-                next.push_back(right);
-                left = right;
-                continue;
-            }
-
-            std::size_t i = left, j = mid, k = left;
-            if (branchlessRandomMerge) {
-                T* lp = in.data() + left; T* const le = in.data() + mid;
-                T* rp = in.data() + mid; T* const re = in.data() + right;
-                T* op = out.data() + left;
-                auto takeOne = [&] { const bool tr = less(*rp,*lp); *op++ = std::move(tr ? *rp : *lp); rp += (std::ptrdiff_t)tr; lp += (std::ptrdiff_t)!tr; };
-                while (lp + 4 <= le && rp + 4 <= re) { takeOne(); takeOne(); takeOne(); takeOne(); }
-                while (lp < le && rp < re) takeOne();
-                i = (std::size_t)(lp - in.data()); j = (std::size_t)(rp - in.data()); k = (std::size_t)(op - out.data());
-            } else {
-                unsigned leftWins = 0, rightWins = 0;
-                const unsigned GALLOP_TRIGGER = gallopTrigger;
-                while (i < mid && j < right) {
-                    if (less(in[j], in[i])) {
-                        out[k++] = std::move(in[j++]);
-                        ++rightWins; leftWins = 0;
-                        if (rightWins >= GALLOP_TRIGGER && i < mid && j < right) {
-                            std::size_t step = 1;
-                            while (j + step < right && less(in[j + step], in[i]))
-                                step <<= 1;
-                            std::size_t lo = j;
-                            std::size_t hi = std::min(right, j + step + 1);
-                            while (lo < hi) {
-                                const std::size_t m = lo + (hi - lo) / 2;
-                                if (less(in[m], in[i])) lo = m + 1;
-                                else hi = m;
-                            }
-                            while (j < lo) out[k++] = std::move(in[j++]);
-                            rightWins = 0;
-                        }
-                    } else {
-                        out[k++] = std::move(in[i++]);
-                        ++leftWins; rightWins = 0;
-                        if (leftWins >= GALLOP_TRIGGER && i < mid && j < right) {
-                            std::size_t step = 1;
-                            while (i + step < mid && !less(in[j], in[i + step]))
-                                step <<= 1;
-                            std::size_t lo = i;
-                            std::size_t hi = std::min(mid, i + step + 1);
-                            while (lo < hi) {
-                                const std::size_t m = lo + (hi - lo) / 2;
-                                if (!less(in[j], in[m])) lo = m + 1;
-                                else hi = m;
-                            }
-                            while (i < lo) out[k++] = std::move(in[i++]);
-                            leftWins = 0;
-                        }
-                    }
-                }
-            }
-            while (i < mid) out[k++] = std::move(in[i++]);
-            while (j < right) out[k++] = std::move(in[j++]);
-            next.push_back(right);
-            left = right;
-        }
-        ends.swap(next);
-        sourceIsSrc = !sourceIsSrc;
-    }
-    if (!sourceIsSrc) src.swap(dst);
-}
-
 // Public V1 entry point: physical patience piles followed by run merging.
 template <class T, class Less = std::less<T>>
-void sort(std::vector<T>& arr, Less less = Less{}) {
+void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::actual_piles::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -324,6 +189,62 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
         else if (less(value, *previousValue)) descendingMode = true;
     };
 
+    bool naturalHandled = false;
+    bool earlyRandomLike = false;
+    const bool naturalRunCandidate = naturalRunRoute &&
+        prefixDirection != PrefixDirection::Unknown &&
+        prefixEnd >= MinPrefixPileLength && prefixEnd * 8 >= n;
+    if (naturalRunCandidate && processStart < n) {
+        std::size_t i = processStart;
+        auto insertOneNatural = [&](std::size_t j) {
+            T& value = arr[j];
+            routeGame(value);
+            previousValue = insertNormal(value, descendingMode);
+            if (descendingMode) lastDescPile = descPiles.size() ? findDescendingPile(descBaseArray, *previousValue, less) : 0;
+            else lastAscPile = ascPiles.size() ? findAscendingPile(ascBaseArray, *previousValue, less) : 0;
+        };
+        while (i < n) {
+            const bool asc = less(*previousValue, arr[i]);
+            const bool desc = !asc && less(arr[i], *previousValue);
+            if (!asc && !desc) { insertOneNatural(i++); continue; }
+            std::size_t end = i + 1;
+            if (asc) while (end < n && less(arr[end - 1], arr[end])) ++end;
+            else while (end < n && less(arr[end], arr[end - 1])) ++end;
+            const std::size_t len = end - i;
+            bool batched = false;
+            if (len >= 8) {
+                auto& piles = asc ? ascPiles : descPiles;
+                auto& base = asc ? ascBaseArray : descBaseArray;
+                const std::size_t firstPile = asc
+                    ? findAscendingPile(base, arr[i], less)
+                    : findDescendingPile(base, arr[i], less);
+                const std::size_t lastPile = asc
+                    ? findAscendingPile(base, arr[end - 1], less)
+                    : findDescendingPile(base, arr[end - 1], less);
+                if (firstPile == lastPile) {
+                    if (firstPile == piles.size()) {
+                        base.push_back(arr[end - 1]);
+                        piles.emplace_back();
+                        piles.back().reserve(len);
+                    } else {
+                        base[firstPile] = arr[end - 1];
+                    }
+                    auto& pile = piles[firstPile];
+                    for (std::size_t j = i; j < end; ++j)
+                        pile.push_back(std::move(arr[j]));
+                    previousValue = &pile.back();
+                    descendingMode = !asc;
+                    if (asc) lastAscPile = firstPile; else lastDescPile = firstPile;
+                    batched = true;
+                }
+            }
+            if (!batched) for (std::size_t j = i; j < end; ++j) insertOneNatural(j);
+            i = end;
+        }
+        naturalHandled = true;
+    }
+
+    if (!naturalHandled) {
     // True early probe: only the first 64 source elements may contribute.
     // Long monotone prefixes that already bypass ordinary insertion are kept
     // on the normal continuation path rather than classified retrospectively.
@@ -355,7 +276,7 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
         processStart = probeEnd;
     }
 
-    const bool earlyRandomLike = processStart == 64 &&
+    earlyRandomLike = processStart == 64 &&
         ascPiles.size() >= 6 && descPiles.size() >= 6;
 
     // The same early probe now routes both sides of the locality spectrum.
@@ -411,6 +332,8 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
         }
     }
 
+    }
+
     // Random-like routing without a separate prefix probe. Full-range random
     // inputs produce a large, balanced population of piles across both games.
     // Low-cardinality random inputs are balanced but fail the density gate,
@@ -419,12 +342,31 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     const std::size_t ascCount = ascPiles.size();
     const std::size_t descCount = descPiles.size();
     const std::size_t finalPileCount = ascCount + descCount;
-    const std::size_t minorityPileCount = std::min(ascCount, descCount);
+    // E109: use the same earlyRandomLike probe prerequisite as V2/V3.
     __extension__ typedef unsigned __int128 Wide;
+    const Wide finalPileSquare =
+        static_cast<Wide>(finalPileCount) * finalPileCount;
+    // E109 convergence baseline: V1/V2/V3 share the same non-freezing
+    // branchless/general density thresholds: 3.5 / 4.25 / 5.0.  V1 also
+    // uses the same earlyRandomLike prerequisite as V2/V3.
+    bool densitySelectsBranchless = false;
+    if (n <= 20000) {
+        densitySelectsBranchless =
+            static_cast<Wide>(2) * finalPileSquare >=
+            static_cast<Wide>(7) * n;
+    } else if (n < 500000) {
+        densitySelectsBranchless =
+            static_cast<Wide>(4) * finalPileSquare >=
+            static_cast<Wide>(17) * n;
+    } else {
+        densitySelectsBranchless =
+            finalPileSquare >= static_cast<Wide>(5) * n;
+    }
     const bool useRandomBranchlessMerge = n >= 10000 &&
-        static_cast<Wide>(finalPileCount) * finalPileCount >= static_cast<Wide>(5) * n &&
-        minorityPileCount * 4 >= finalPileCount &&
-        std::is_trivially_copyable_v<T> && sizeof(T) <= 2 * sizeof(void*);
+        earlyRandomLike &&
+        densitySelectsBranchless &&
+        std::is_trivially_copyable_v<T> &&
+        sizeof(T) <= 96;
 
     std::vector<T> flat;
     flat.reserve(n);
@@ -449,8 +391,16 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
         // instantiated for the ordinary numeric fast path.
         buffer = flat;
     }
-    mergeRuns(flat, buffer, ends, less, useRandomBranchlessMerge);
+    // E115: V1-V3 share one post-flatten adjacent-pair merge driver.
+    // V1 naturally stores run ends, so no run-boundary conversion is needed.
+    jessesort::simulated::mergeRunsAdjacentPairsEnds(
+        flat, buffer, ends, less, useRandomBranchlessMerge, bidirectionalBranchlessMerge);
     arr = std::move(flat);
+}
+
+template <class T, class Less = std::less<T>>
+void sort(std::vector<T>& arr, Less less = Less{}) {
+    sortImpl(arr, less, true, true);
 }
 
 } // namespace jessesort::actual_piles

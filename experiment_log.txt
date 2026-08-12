@@ -1,424 +1,496 @@
 JESSESORT EXPERIMENT LOG
-Last updated: 2026-08-09
+Last updated: 2026-08-12
 Status: canonical source of truth for the current repository, active roadmap,
-experiment decisions, timing deltas, and supporting evidence.
+experiment decisions, timing methodology, and decision-relevant evidence.
+
+HOW TO READ THIS LOG
+- Sections 1-3 describe the CURRENT repository and supersede older descriptions.
+- Section 2 is the only authoritative active roadmap. Historical "next steps" inside
+  individual E### records describe what was planned at that time only.
+- Section 3 is the complete compact experiment index. Detailed records in Section 4
+  preserve provenance, including rejected and superseded work.
+- Historical artifact filenames may be referenced even though old raw timing files are
+  intentionally not tracked in the compact repository.
 
 TIMING CONVENTION
-- Unless stated otherwise, a negative candidate delta means faster than the
-  baseline and a positive candidate delta means slower.
-- Small effects require evidence proportional to their size: use the E066 canonical
-  500-trials/seed x 2-seed paired benchmark for normal retain/revert decisions,
-  and >=1000 trials/seed or a stronger phase-isolated causal harness for effects
-  below roughly 1.5%.
-- Historical artifact filenames remain as provenance references even though the
-  compact repository no longer carries the old CSV collection. New benchmark raw
-  data lives only in isolated, gitignored `results/run_*` directories.
+- Unless stated otherwise, candidate/baseline ratio <1 means faster and >1 means slower.
+- Small effects require evidence proportional to their size. Under E077/E100 methodology,
+  use the canonical paired population when possible; effects near the noise floor should
+  use more trials and/or a phase-isolated, layout-matched causal harness.
+- For narrow-phase changes, report BOTH local phase impact and whole-sort impact. Do not
+  reject a large local improvement solely because Amdahl's law dilutes the total effect.
+- When a strong, repeatable phase-local win conflicts with a small whole-sort regression,
+  treat the disagreement as UNRESOLVED rather than immediately retaining/rejecting the
+  change. Increase trial counts substantially on BOTH measurements, preserve the canonical
+  input population, and use fork-isolated whole-sort timing when allocator/process-state
+  effects are plausible. E090 and the high-trial E102 revalidation both showed that an
+  under-sampled whole-sort signal can reverse after oversampling while the local win remains.
+- Rejection taxonomy (E103):
+    * MECHANISM REJECTED: the targeted phase itself loses materially with adequate trials;
+      do not reopen unchanged without a materially new mechanism or hardware regime.
+    * INTEGRATION REJECTED: the local kernel/mechanism wins, but the attempted way of
+      feeding work into it or amortizing its overhead loses; the mechanism remains open
+      to a different integration design.
+    * POLICY / STALE-DEPENDENT REJECTED: a threshold, scheduler, or route loses under the
+      then-current cost model; revalidate after major changes to the underlying kernel or
+      phase balance before treating the policy as permanently closed.
+- E103 mandatory disagreement rule: when a strong repeatable local win conflicts with a
+  small whole-sort loss or neutral result, status is UNRESOLVED. Substantially increase
+  trials on BOTH layers, preserve the same canonical seed population, and use fork-isolated
+  whole-sort timing when process/allocator state can bias order. Do not let a lightly sampled
+  end-to-end signal overrule a high-confidence causal phase win.
+- E103 mandatory propagation rule: after RETAINING any algorithmic/performance change in
+  one variation, immediately audit V1-V7 for applicability before moving on to unrelated
+  optimization work. For every other variation, record one of: tested+retained, tested+rejected,
+  not applicable (with architectural reason), or intentionally different (with reason). Do not
+  silently assume shared code means propagation, and do not leave plausible propagation as an
+  untracked future thought; add it to the active roadmap if it cannot be tested immediately.
+- Never calibrate against a std::sort result from another run/VM/session. Use same-run
+  paired evidence because host state, compiler layout, allocator reuse, and scheduling
+  can move absolute timings materially.
 
 ===============================================================================
 1. CURRENT REPOSITORY STATE
 ===============================================================================
 
 1.1 BENCHMARK AND AUDIT STANDARD
-- E066 supersedes the earlier 50-100-trial default because VM/host timing drift
-  is large enough to obscure the sub-percent and low-single-digit effects now
-  common in JesseSort optimization work.
-- Canonical whole-sort benchmark defaults:
-    * C++20, -O3, -march=native, -DNDEBUG; V7 uses AVX2 when the
-      selected native target exposes it
-    * n = 100,000 unless the experiment targets scale
+- E077 is the current whole-sort benchmark methodology; E100 centralizes its seed policy.
+- Canonical `make run` / `make run500` / `make bench500` profile:
+    * C++20, -O3, -march=native, -DNDEBUG
+    * n = {1k, 10k, 100k, 1m}
     * 2 untimed warmups per workload
-    * 500 measured trials per seed
-    * 2 fixed seeds (1000 paired observations per workload)
-    * 1000+ trials per seed for claims below roughly 1.5% unless a stronger
-      phase-isolated causal harness is available
-- Baseline/candidate/std::sort comparisons must use the same generated input in
-  the same process whenever possible. Execution order rotates and reverses by
-  trial to distribute cache/order effects. Correctness validation stays outside
-  timed regions.
-- Preserve raw paired timings. Report median, p25/p75, IQR, MAD, ratio of
-  medians, and median paired ratio; do not silently trim outliers.
-- Never use a saved std::sort median from another VM/session as a calibration
-  constant. Absolute timings can move with host allocation, scheduler load,
-  frequency behavior, and other VM effects. Historical absolute results are
-  context only unless the old implementation is recompiled in the current run.
-- For close A/B tests of header-only/template-heavy variations, prefer a
-  layout-matched same-binary or phase-isolated causal harness. Separate copied
-  implementations can alter inlining/code placement by several percent.
-- Routine workload families: Random, Sorted, Reverse, Sorted+Noise(5%),
-  Random%100, Alternating, Sawtooth, BlockSorted, OrganPipe, and Rotated. Use
-  targeted distributions when a hypothesis concerns duplicates, routing, run
-  shape, or another special property.
-- Validate benchmark generators rather than trusting labels. Test non-integer
-  types/custom comparators separately when correctness or genericity changes.
-- Do not assume an optimization transfers between variations.
+    * 500 measured paired trials at 1k/10k/100k
+    * 50 measured paired trials at 1m for the all-size sweep
+    * one deterministic unique input seed per randomized trial
+- MANDATORY POST-CHANGE ACCEPTANCE RULE: after every algorithmic/performance code change, run the
+  full canonical benchmark above across ALL SEVEN variations (V1-V7), even when the code change
+  directly targets only one variation. Use the benchmark's normal persisted-results resume handling
+  after shell/tool timeouts; resume the SAME run directory until the sweep is complete.
+- Every performance-change evaluation must display/preserve all seven generated ratio tables. Narrow
+  A/B or phase-local harnesses are diagnostic only and do not replace this full-suite acceptance run.
+- When a complete canonical resumed sweep conflicts with a smaller ad-hoc/end-to-end timing sample,
+  treat the canonical sweep as authoritative for repository-level retention decisions. Use the narrow
+  harness only to explain mechanism, not to overrule the canonical result by itself.
+- Targeted numeric-size invocations use the requested trial count directly; they do not
+  automatically apply the 1m 10:1 reduction.
+- Every algorithm and std::sort receive the exact same source vector within a trial.
+  Execution order rotates by trial and reverses every eight-trial block. Correctness
+  validation is outside timed regions.
+- Canonical seed policy for normal benchmarks and one-off A/B tests:
+    * base seed: `jessesort::bench::kCanonicalBaseSeed` (0x8A5CD789)
+    * mixer: `jessesort::bench::trial_seed()` in `benchmarks/benchmark_seed.h`
+    * do not invent a new seed population for an ordinary one-off test; explicitly label
+      intentional held-out/confirmation cohorts instead.
+- Preserve raw paired timings. Report robust statistics such as median, p25/p75, IQR,
+  MAD, ratio of medians, and median paired ratio as appropriate; do not silently trim
+  outliers.
+- For header-only/template-heavy close A/B tests, prefer a same-binary or phase-isolated
+  causal harness. E099 showed structured workloads can exhibit large first/second-sort
+  allocator/process-state effects; fork-isolated paired children are appropriate when
+  ordinary same-process alternation remains biased.
+- Routine workload families: Random, Sorted, Reverse, Sorted+Noise(5%), Random%100,
+  Alternating, Sawtooth, BlockSorted, OrganPipe, and Rotated.
+- `Rotated` intentionally keeps a randomized split. E100 audited 500 canonical 100k
+  trials: mean split/discontinuity position 49.322%, median 49.954%, decile counts close
+  to uniform, and exactly 250/500 positions before versus at/after the nominal 50%
+  freeze decision point. Keep the randomized generator; control it through canonical
+  seeds rather than deterministic stratification.
+- Benchmark runs are resumable with `./benchmark <trials> <size|all> <warmups>
+  <existing_run_dir>` and reconstruct summaries only from complete paired trials.
+- Validate workload generators rather than trusting labels. Test non-integer types and
+  custom comparators separately when genericity/correctness/performance conclusions
+  depend on value representation.
+- Do not assume an optimization transfers between variations; propagation gets its own
+  causal evidence unless the change is purely mechanical/documentary.
 
 1.2 CURRENT MAINTAINED VARIATIONS
 
+CANONICAL IDENTITY QUICK REFERENCE
+- V1-V3 are NON-FREEZING designs. V4-V6 are the EARLY-FREEZE/OVERFLOW designs.
+  V7 is a V2-derived SIMD/capped-probe research path and is not part of the freeze family.
+
+  V1  Actual physical piles                  no freeze      no overflow
+  V2  Simulated blueprint                    no freeze      no overflow
+  V3  V2-style simulation + in-place flatten no freeze      no overflow
+  V4  Early freeze + single deferred run     freeze family  one large overflow run
+  V5  Early freeze + deferred bands          freeze family  32-element deferred bands
+  V6  Early freeze + live-sorted bands       freeze family  32-element live bands
+  V7  V2-derived AVX2 capped-probe path      no general freeze; temporary probe spill only
+
+- E050 is the canonical numbering reset. Detailed historical records have been translated
+  to these implementation identities where practical; old artifact FILENAMES may still
+  contain pre-E050 labels and must be interpreted by namespace/implementation identity.
+
 V1. ACTUAL PHYSICAL PILES
-- Header: v1_actual_piles.h
-- Namespace: jessesort::actual_piles
-- Representation: vector-backed physical piles.
-- Routing: equality preserves the current game.
-- Merge policy: adjacent-pair merging with ordered/reverse-disjoint boundary fast paths and retained exponential-search galloping after seven consecutive wins in overlapping merges.
-- Dedicated correctness/performance audit complete.
+- Header: `include/jessesort/v1_actual_piles.h`
+- Namespace: `jessesort::actual_piles`
+- Representation: vector-backed physical patience piles with separate tail mirrors.
+- Early routing: equality preserves the current game. A >=32-element monotone prefix is
+  materialized directly. Otherwise the true first-64 probe routes Random-like inputs to
+  direct bit-walk tail search, high-locality inputs to exact previous-pile hint + binary
+  fallback, and ambiguous inputs to ordinary binary search (E046/E047/E056).
+- E099 natural-run route: after an initial monotone prefix covering >=12.5% of n, later
+  strict runs of length >=8 whose endpoints resolve to one physical pile are appended in
+  bulk. This is retained and especially effective for OrganPipe/Rotated.
+- E109 convergence baseline: V1 now uses the same non-freezing Random merge predicate as V2/V3:
+  the first-64 `earlyRandomLike` signal + common 3.5/4.25/5.0 pile-density thresholds + the
+  <=96-byte trivially-copyable type gate. The older V1-only minority-game balance predicate is
+  no longer part of the common starting policy.
+- Merge kernel: E083 raw pointers + E085 bidirectional low/high-end branchless merge are retained.
+- E111 removed selective PowerSort from the common V1/V2/V3 policy after cross-variation revalidation.
+- E115 consolidates V1/V2/V3 onto one shared ends-based adjacent-pair post-flatten merge driver with
+  adaptive ordered-boundary probing and the retained E045/E085 routing/kernel choices.
 
 V2. SIMULATED BLUEPRINT
-- Header: v2_simulated.h
-- Namespace: jessesort::simulated
-- Representation: sentinel-free value tails plus packed 32-bit blueprint.
-- Flattening: sequential reconstruction into the merge buffer. Game grouping is
-  always descending-game piles first, followed by ascending-game piles. The prior
-  2-or-10-32 run-count selector was withdrawn as too specialized.
-- Routing: equality preserves the current game.
-- Pile-tail search / early insertion routing: the first-64 structure signal is
-  retained. E065 superseded E054 after a historical-version recompilation showed
-  that E054's apparent reversal was a code-layout/timing artifact. Sustained
-  Random-like structure again dispatches to the direct no-hint continuation;
-  structured/high-locality inputs retain the hinted/inline search.
-- Merge policy: adjacent-pair baseline with adaptive ordered-boundary
-  elimination for ordinary run sets; selected PowerSort-style alphabetic tree
-  for n >= 32,768 when raw run sizes are sparse-dominant or compact-imbalanced.
-  All overlapping two-run merges use retained 7-win exponential-search galloping
-  from E035 unless the FINAL pile-density analysis confirms sustained Random-like
-  structure, in which case E036's branchless merge is selected. E043 deliberately
-  keeps this final merge decision separate from the earlier insertion decision.
-- Dedicated correctness/performance and pile-tail-search audits complete.
+- Header: `include/jessesort/v2_simulated.h`
+- Namespace: `jessesort::simulated`
+- Representation: sentinel-free value tails plus packed 32-bit blueprint tags.
+- Early insertion routing: >=32 monotone-prefix recognition; first-64 structure signal;
+  one-time no-hint continuation for sustained Random-like structure; split exact-hint
+  path for >=75% hint locality; ordinary search otherwise (E043/E065).
+- E098 natural-run route: if the initial strict monotone prefix covers >=12.5% of n,
+  later strict runs of length >=8 are endpoint-tested and blueprint-tagged in bulk when
+  both endpoints map to the same pile. Exact blueprint/count/tail equality was required
+  in A/B validation.
+- Reconstruction: descending-game runs first, ascending-game runs second. E081 normalizes
+  packed local tags to global run IDs before scatter. E086 keeps an explicit `step[]`
+  table below 500k and derives direction from normalized run ID at >=500k, where the
+  metadata-stream reduction wins.
+- E109 convergence baseline replaces V2's old pre-E085 E053 density coefficients with the shared
+  non-freezing 3.5/4.25/5.0 thresholds. V2 keeps its `earlyRandomLike` prerequisite, E045 gallop
+  selector, and adaptive ordered-boundary probing. E101 previously removed the obsolete E063 per-pair
+  imbalance fallback. E111 removed selective PowerSort; E115 moves V2 onto the same shared ends-based
+  adjacent-pair post-flatten merge driver used by V1/V3.
+- High-entropy merge: E082 raw pointers + E085 bidirectional branchless merging retained.
+  E092 widened the merge-only trivially-copyable type cutoff through 96 bytes; 128 bytes
+  crossed to neutral/slower. Do not infer the same cutoff for insertion copies.
 
-V3. SIMULATED BLUEPRINT WITH IN-PLACE PERMUTATION FLATTENING
-- Header: v3_inplace_simulated.h
-- Namespace: jessesort::simulated_inplace_flatten
-- Insertion matches V2. V3 then applies its own in-place physical run layout.
-  E065 restored the first-64 Random-like no-hint continuation here together with
-  V2 after E054's removal was falsified
-  by current-environment recompilation of the preserved E045 implementation.
-- Flattening: blueprint tags are converted to destination indices, then the
-  array is permuted in place with cycle swaps.
-- Merge policy: the same selected PowerSort-style alphabetic policy as V2
-  for sparse-dominant or compact-imbalanced raw run sets; adjacent-pair merging
-  remains the fallback. E038 now also retains V2's 64-element random router for
-  the adjacent-pair path. Because V3 already shares V2's insertion engine, the
-  probe metadata is collected with no second scan; sustained balanced high-pile
-  random structure selects the branchless merge kernel for small trivially-copyable
-  values.
-- Retained as an experimental memory/reconstruction comparison; it is not the
-  default simulated implementation.
+V3. SIMULATED BLUEPRINT + IN-PLACE PERMUTATION FLATTENING (NO FREEZE)
+- Header: `include/jessesort/v3_inplace_simulated.h`
+- Namespace: `jessesort::simulated_inplace_flatten`
+- This is a NON-FREEZING variation. Insertion shares V2 semantics, including E065 routing
+  and retained E099 natural-run batching. Flattening converts blueprint tags to destinations and permutes the array in
+  place with cycle swaps.
+- E109 convergence baseline aligns V3 with V1/V2 on descending-game-first materialization and
+  common 3.5/4.25/5.0 density thresholds. V3 still differs architecturally by performing the
+  blueprint flattening as an in-place cycle permutation. E111 removes selective PowerSort; E115
+  moves V3 onto the same shared ends-based adjacent-pair post-flatten merge driver as V1/V2 while
+  retaining adaptive ordered-boundary probing, E045 gallop policy, E085 kernel, and <=96-byte type gate.
+- E104 revisited E045 under the current E085/E093/E102 cost model with high trial counts.
+  V3 now retains the same final-layout 5/7 gallop-trigger selector used by V2: trigger 5
+  only for non-branchless, non-PowerSort layouts with 12-128 runs and largest run <=1.25x
+  the mean; trigger 7 remains the default.
+- Retained as an experimental reconstruction/memory comparison, not the default V2 path.
+
+
+V1/V2/V3 NON-FREEZING CONSOLIDATION — RESOLVED THROUGH E115
+- V1, V2, and V3 represent the same intended non-freezing patience-pile decomposition; their primary
+  architectural differences are physical versus simulated insertion storage and flattening mechanics.
+- E109-E114 systematically re-tested historical policy drift across all three variations rather than
+  preserving variation-specific assumptions. The retained common policy uses descending-first
+  materialization, `earlyRandomLike`, common 3.5/4.25/5.0 density thresholds, adaptive ordered-boundary
+  probing, and the retained E045/E085 merge routing/kernels.
+- E111 removed selective PowerSort from V1/V2/V3.
+- E115 consolidated all three onto the same shared ends-based adjacent-pair post-flatten merge driver.
+  After flattening, do not assume V1/V2/V3 need separate merge-driver logic unless a genuinely new
+  architecture-specific mechanism provides canonical full-suite evidence.
+- The E109-E115 reconciliation series is CLOSED. Do not reopen insertion-shape parity, old PowerSort
+  availability, historical boundary-probing/classifier/density exceptions, merge-driver parity, or tag
+  numbering merely because older historical records mention them. A new attempt requires a materially
+  new mechanism plus the mandatory full V1-V7 canonical acceptance benchmark.
 
 V4. EARLY FREEZE + ONE LARGE DEFERRED OVERFLOW RUN
-- Header: v4_single_overflow.h
-- Namespace: jessesort::simulated_early_freeze_single_overflow
-- Insertion routing: through the shared early-freeze core, E049 uses a separate
-  first-64 classifier and one-time dispatch to hinted or no-hint insertion; the
-  decision stays outside the long insertion loop.
-- Merge routing: E040 retains the post-insertion blueprint-derived Random signal.
-  A cheap late pile-density gate is evaluated first; sustained balanced high-pile
-  Random uses the branchless adjacent merge kernel for eligible small trivially-
-  copyable values.
-- Freeze policy: 50% is the decision point. V4 uses a conservative power-of-two
-  extension only when the combined pile count is 1 or in [4,32]; otherwise it
-  freezes at 50%. Selected inputs continue ordinary pile creation to the strict
-  next power-of-two cap.
-- Overflow: one contiguous region sorted once with std::sort.
-- Merge policy: selected PowerSort-style alphabetic scheduling when n >=
-  32,768, there are at least 16 reconstructed runs, average raw run length is
-  at least 25, and overflow is at most 10% of n; otherwise adjacent-pair.
-- Delaying the large run until the final merge was tested and rejected.
+- Header: `include/jessesort/v4_single_overflow.h`
+- Namespace: `jessesort::simulated_early_freeze_single_overflow`
+- E049 one-time first-64 hinted/no-hint routing remains outside the long insertion loop.
+- Freeze policy: 50% is the decision point. V4 may extend ordinary pile creation to a
+  strict next power-of-two cap only under its conservative selected policy; therefore
+  50% is not always the exact physical freeze boundary.
+- E099 natural-run batching is retained in a freeze-aware form that preserves the freeze
+  transition and keeps the power-of-two extension interval scalar.
+- Overflow: one contiguous deferred region sorted once with std::sort.
+- Merge routing retains the post-insertion Random signal, E085 bidirectional branchless
+  kernel, and E093 <=96-byte trivially-copyable merge cutoff. Selected PowerSort-style
+  scheduling remains limited to its retained run-structure conditions.
 
-V5. EARLY FREEZE + MULTIPLE DEFERRED-SORT OVERFLOW BANDS
-- Header: v5_deferred_bands.h
-- Namespace: jessesort::simulated_early_freeze
-- Insertion routing: E049 classifies a separate first-64 prefix once, then dispatches
-  to a fully hinted or fully no-hint early-freeze insertion specialization.
-- Merge routing: the retained E039/E040 post-insertion blueprint/pile-density signal
-  selects branchless merging for sustained high-pile Random structure on eligible
-  small trivially-copyable values.
-- Freeze policy: 50% is the decision point. V5 may continue ordinary pile
-  creation to the strict next power-of-two combined pile cap when the broad
-  selector activates: pile count <= 32, or n >= 32,768 and either pile count
-  <= 4*sqrt(n) or the next cap is within 25% of the current count.
-- Overflow: 32-element bands collected first and sorted after reconstruction.
-- Merge policy: variation-specific dominant-first endpoint deferral when an odd
-  run count begins with a first run at least 4x its immediate neighbor and
-  larger than the final run; otherwise adjacent-pair baseline.
-- This retained merge policy is not propagated to other variations.
+V5. EARLY FREEZE + DEFERRED-SORT 32-ELEMENT OVERFLOW BANDS
+- Header: `include/jessesort/v5_deferred_bands.h`
+- Namespace: `jessesort::simulated_early_freeze`
+- E049 one-time first-64 hinted/no-hint routing; 50% nominal freeze decision point with
+  the retained broad selected power-of-two extension policy.
+- E099 natural-run batching is retained with the STRONGER V5/V6 gate: after the >=12.5%
+  initial monotone prefix, the first continuation run must itself be >=8 before the route
+  is enabled. This preserves OrganPipe gains while avoiding the broad-gate Rotated loss.
+- Overflow: deferred 32-element bands. E090 uses a fixed specialized network for exact
+  full 32-element bands; partial/conservative cases retain std::sort. The network was
+  ~28.4% faster locally over 4,096,000 int-band sorts, with diluted whole-sort impact.
+- Merge routing retains E085 bidirectional branchless merging and E093 <=96-byte
+  trivially-copyable cutoff. V5 keeps its variation-specific dominant-endpoint merge
+  deferral; global PowerSort and simple adaptive band shaping were rejected.
 
-V6. EARLY FREEZE + MULTIPLE LIVE-SORTED OVERFLOW BANDS
-- Header: v6_live_bands.h
-- Namespace: jessesort::simulated_early_freeze_live
-- Insertion routing: through V5's shared early-freeze core, E049 uses the same
-  one-time first-64 hinted/no-hint dispatch.
-- Merge routing: E040 retains the density-first, post-insertion blueprint-derived
-  router. Random-like inputs bypass the TimSort selector and use branchless adjacent
-  merging; non-random inputs preserve the TimSort/adjacent policy unchanged.
-- Freeze policy: 50% is the decision point. V6 uses the same broad selected
-  power-of-two extension as V5 before entering the frozen/live-overflow phase.
-- Overflow: each value is inserted live into the current sorted 32-element band.
-- Merge policy: use a TimSort-style alphabetic run-stack tree only when the
-  largest reconstructed run is at least 8x the mean run length; otherwise use
-  the ordinary adjacent-pair baseline.
-- Band size 32 is current. E010's 8-element choice was superseded by E028
-  after E027 eliminated the organ-pipe overflow regime that had favored 8.
+V6. EARLY FREEZE + LIVE-SORTED 32-ELEMENT OVERFLOW BANDS
+- Header: `include/jessesort/v6_live_bands.h`
+- Namespace: `jessesort::simulated_early_freeze_live`
+- Shares V5's early-freeze base structure and nominal 50%/selected power-of-two extension.
+- Uses the same stricter E099 first-continuation-run >=8 natural-run gate as V5.
+- During reconstruction, overflow values are insertion-sorted immediately into their current
+  32-element band; unlike V5, the completed band is not gathered unsorted and sorted afterward.
+- Merge routing retains E085 bidirectional branchless merging and E093 <=96-byte cutoff.
+  Random-like inputs use branchless adjacent merging; non-random inputs preserve the
+  retained TimSort-style/adjacent selector. Band size 32 remains current.
 
-V7. AVX2 EXPERIMENTAL SIMULATED VARIATION
-- Header: v7_avx2.h
-- Namespace: jessesort::simulated_simd_v7
-- Pipeline: V2-derived simulated insertion/reconstruction/merge.
-- SIMD specialization: exact-eight int32 pile-tail lookup uses one AVX2 compare;
-  broader sequential AVX2 scans and probe-gated continuation were rejected.
-- E065 restored V2's first-64 Random-like no-hint continuation here as well.
-- V7+ numbering is reserved for SIMD-specific experiments; V1-V6 remain the
-  scalar/general algorithm variations.
+V7. AVX2 EXPERIMENTAL SIMULATED VARIATION (V2-DERIVED; NO GENERAL FREEZE)
+- Header: `include/jessesort/v7_avx2.h`
+- Namespace: `jessesort::simulated_simd_v7`
+- V2-derived pipeline with a SIMD-oriented capped-probe front end. Default E076 behavior
+  caps each game at eight piles during the first 128 values; excess would-be piles spill
+  to a temporary probe-overflow run that is sorted and married into an existing pile.
+- Exact-eight int32 pile-tail lookup uses one AVX2 compare. E105 adds a narrow repeated
+  hint-centered one-register AVX2 continuation for 5k-20k, low-pile layouts (<=12 ordinary
+  post-probe piles); broader/global and large-n windowing were rejected. Longer one-shot
+  probes and sequential multi-register AVX2 scans remain closed.
+- E099 natural-run batching is retained without changing capped-probe behavior on Random.
+- E095 fixed the old public-path discrepancy: normalized reconstruction is now the default
+  capped-probe reconstruction. E096 then removed its separate `step[]` stream entirely;
+  reconstruction improved modestly while whole-sort effect was near neutral.
+- E089 retained bidirectional branchless merging and E093 retained the <=96-byte
+  trivially-copyable merge cutoff.
+- V7+ numbering remains reserved for SIMD-oriented experiments.
 
-1.2A VARIATION NUMBERING RESET (E050)
+1.2A CANONICAL VARIATION NUMBERING (E050)
+- V1 Actual Piles
+- V2 Simulated Blueprint
+- V3 In-Place Simulated Flattening
+- V4 Single Overflow
+- V5 Deferred Bands
+- V6 Live Bands
+- V7 AVX2 Experimental
+Use "variation" rather than "variant" in current documentation.
 
-At E050 the variation numbering was deliberately normalized after an audit found
-that V4/V5 names had drifted between discussion, documentation, and historical
-records even though the implementation entry points themselves were correct.
-From E050 onward the canonical order is:
-  V1 = actual physical piles
-  V2 = ordinary simulated blueprint
-  V3 = simulated blueprint with in-place permutation flattening
-  V4 = early freeze + one large deferred overflow run
-  V5 = early freeze + multiple deferred-sort 32-element overflow bands
-  V6 = early freeze + multiple live-sorted 32-element overflow bands
-Historical prose in this log has been translated to this canonical numbering by
-implementation identity. Raw historical artifact filenames are preserved for
-provenance, so pre-E050 filenames containing V4 or V5 may still use the old
-V4=deferred-bands / V5=single-overflow labels. When a filename and this log
-disagree, use the implementation/namespace recorded by the experiment as ground
-truth.
+
+E109 COMMON NON-FREEZING BASELINE — CURRENT POLICY
+- E109 intentionally stopped treating historical V1/V2/V3 policy differences as prerequisites
+  for further research. Instead it cherry-picked the strongest/recently retained shared policies
+  into one common starting point, while preserving the core representation difference of each
+  variation.
+- Common V1/V2/V3 policies after E109:
+    * first-64 `earlyRandomLike` prerequisite for Random branchless merge routing;
+    * size-aware density thresholds 3.5 / 4.25 / 5.0 (<=20k / mid / >=500k);
+    * descending-game runs materialized before ascending-game runs;
+    * E045 final-layout 5/7 gallop selector;
+    * E085 bidirectional branchless merge and E093 <=96-byte type gate;
+    * adaptive ordered-boundary probing;
+    * selective PowerSort-style scheduling when `shouldUsePowerSortMerge()` qualifies.
+- V1 remains physical-pile insertion with its own merge driver; V2 remains normalized auxiliary
+  reconstruction; V3 remains in-place cycle flattening. E109 copies policies, not entire pipelines.
+- Simulated tag encoding remains ascending=0 / descending=1 for now. E109 aligns materialized
+  order only; renumbering tags would affect the wider simulated family and is not needed for the
+  common V1/V2/V3 baseline.
+- E109 is deliberately a CONVERGENCE baseline rather than a claim that every transferred policy
+  is locally optimal in every variation. Before/after regressions are recorded below and are now
+  explicit follow-up targets.
 
 1.3 CURRENT SHARED ENGINEERING DECISIONS
-- Numeric sentinels removed from maintained implementations.
-- Copyable, movable, non-default-constructible values supported.
-- Move-only values remain unsupported because pile-tail mirrors are copied.
-- Comparator must provide a strict weak ordering. Inputs containing NaNs require
-  an explicit total-order comparator such as NaN-last.
+- Numeric sentinels are removed from maintained implementations.
+- Copyable, movable, non-default-constructible values are supported. Move-only values
+  remain unsupported because pile-tail mirrors are copied.
+- Comparators must provide a strict weak ordering. Inputs containing NaNs require an
+  explicit total-order comparator such as NaN-last.
+- Equality preserves the current game in maintained pile-routing logic.
+- Branchless high-entropy two-run merging is bidirectional across V1-V7 (E085-E089).
+- The merge-only fast-path size gate is <=96 bytes for trivially copyable values across
+  V1-V7 (E092/E093); this is not a universal element-size policy.
+- Natural-run batching is retained across V1-V7 (E098/E099), with stricter activation in
+  V5/V6 as described above.
+- V4-V6 use 50% as the nominal freeze decision point, with retained power-of-two
+  extension policies able to move the actual freeze boundary later.
 - Conventional even-sample median retained.
-- JesseSort/std::sort execution order alternates or rotates by trial.
-- Random%100 samples uniformly from [0,99].
-- Sorted+Noise uses 5% independent random replacements.
-- Misleading jitter benchmark removed.
-- BlockSorted safely handles a partial final block.
-- Routine canonical benchmarking stays at n=100,000; scale-specific 1M
-  tests are run explicitly when an experiment targets scale.
+- Random%100 samples uniformly from [0,99]. Sorted+Noise uses 5% independent random
+  replacements. Misleading jitter workload removed. BlockSorted handles a partial final
+  block safely.
 
 1.4 CURRENT BENCHMARK ARTIFACT POLICY
-- `benchmark.cpp` is the single canonical whole-sort benchmark in the compact
-  repository.
-- No benchmark result snapshot is tracked at repository top level. Each
-  invocation writes an isolated, gitignored `results/run_*` directory containing
-  `benchmark_results.csv`, `benchmark_trials.csv`, `benchmark_metadata.txt`, and
-  `benchmark_progress.txt`.
-- Performance decisions use same-run std::sort measurements and paired raw
-  observations. Historical CSV collections were removed from the compact repo;
-  their decision-relevant findings remain in this experiment log.
+- `benchmarks/benchmark.cpp` is the canonical whole-sort benchmark.
+- Each invocation writes an isolated, gitignored `results/run_*` directory containing
+  `benchmark_results.md`, `benchmark_results.csv`, `benchmark_trials.csv`,
+  `benchmark_metadata.txt`, and `benchmark_progress.txt`.
+- Interrupted runs may be resumed explicitly using the existing run directory; completed
+  paired trials are reconstructed from raw CSV and are not rerun.
+- Performance decisions use same-run std::sort measurements and paired raw observations.
+  Historical CSV collections were removed from the compact repo; decision-relevant
+  conclusions remain in this log.
 
 ===============================================================================
 2. ACTIVE TODO LIST — CLEAN PRIORITY ORDER
 ===============================================================================
 
-This section contains only genuinely open work. E064 cleaned out mechanisms that
-were already completed, superseded, or rejected. V5 merge-tree planning remains
-high-potential but is intentionally PAUSED while V1/V2 and consolidation work
-continue. Historical details remain in the experiment index and E### records.
+This section is the only authoritative roadmap. The E109-E115 V1/V2/V3 reconciliation work is
+finished and intentionally removed from the active list. Historical "next step" text inside old
+experiment records is provenance only and MUST NOT be treated as an active task.
 
-TOP-TIER PRINCIPLE
-------------------
-Optimize whole-sort cost, and preserve phase-local causal measurement. Routing
-should be decided from cheap early/final metadata and dispatched outside hot loops
-whenever possible. E065 restored the validated E043 early-Random no-hint
-continuation in V2/V3/V7 after E054 was falsified; preserve that route unless new
-causal evidence supersedes it. Do not rerun E056's rejected V1 scalar hint-miss
-permutations unchanged.
+NON-REOPEN RULE
+---------------
+Do not spend new experiments re-validating the closed E109-E115 reconciliation topics without a
+materially new mechanism: insertion-shape parity, selective PowerSort for V1/V2/V3, old ordered-
+boundary policies, old random-route/game-balance classifiers, old non-freezing density coefficients,
+post-flatten merge-driver parity, or tag/game renumbering. Likewise, do not add a special scheduler
+merely because a workload happens to produce very few piles. These paths are not active roadmap items.
 
-1. V2 FINAL-LAYOUT / MERGE OPTIMIZATION — HIGHEST ACTIVE ALGORITHM PRIORITY
-   - Continue from E044/E045/E053/E063 production state: 4x branchless unroll,
-     run-shape gallop trigger routing, size-aware global branchless gate, and the
-     retained 1.5x pair-imbalance galloping route in the measured mid-density band.
-   - Add genuinely new final-layout signals: game balance, run-count/length
-     distribution, largest-run dominance, duplicate saturation, ordered/reverse-
-     disjoint boundaries, and predicted gallop streak potential.
-   - Test materially different kernels/schedulers only: hybrid branchless/gallop,
-     richer boundary elision, direct handling of very small run sets, or new
-     scheduler routing from final structure. Do not rerun the E044 unroll sweep,
-     E045 5-vs-7 sweep, or E063 1.5x rule unchanged.
-   - SIMD merge kernels belong to V7+ experimental variations, not silent V2
-     patches.
-   - Use merge-only/layout-matched harnesses when whole-sort code layout obscures
-     causality; validate retained routes end-to-end afterward.
+For every actual code/performance change below, follow Section 1.1: run the complete canonical
+V1-V7 benchmark, resume the same persisted run after timeouts, and display/preserve all seven ratio
+tables before retaining the change.
 
-2. V1 SEARCH / INSERTION — ONLY MATERIALLY DIFFERENT KERNELS REMAIN
-   - Preserve E046 low-locality Random direct bit-walk and E047 high-locality
-     exact previous-pile hint -> ordinary binary fallback.
-   - E056 closed adjacent checks, direction-restricted scalar search, and
-     bit-walk-on-hint-miss. Do not rerun those scalar permutations unchanged.
-   - Remaining useful work is a genuinely different pile-search kernel or data
-     layout (SIMD/small-pile lookup, Eytzinger-like physical-tail layout if it can
-     be maintained cheaply, hardware-guided branch/cache work).
-   - A successful exact hint should bypass any search kernel entirely; only misses
-     should pay the new lookup cost.
+1. FIRST-MERGE-PASS FUSION / RECONSTRUCTION REDESIGN
+   - Investigate whether reconstruction can eliminate or fold the first adjacent merge level without
+     adding equivalent cross-run comparison/scatter work elsewhere.
+   - A viable design should reduce memory traffic/merge levels, not merely move them.
 
-3. SIMD VARIATIONS V7+ — EARLY-FREEZE / CHUNKED INSERTION TRACK
-   - E076 promotes the E075 8-pile / 128-element capped-probe design to default
-     V7 specifically because it makes the validated single-register exact-eight
-     AVX2 path a regularly triggered mechanism on Random-like inputs. This is a
-     research/example choice, not a speed claim: E075 measured 8x128 at 1.003246
-     versus uncapped V7 (~0.32% slower) over 500 same-binary Random trials.
-   - E074 tested capping each game only during the 64-element probe. Cap-8 was
-     correctness-safe with a deferred probe overflow sorted after routing and
-     immediately married into an existing pile, but a 500-trial same-binary
-     Random A/B was neutral (candidate/baseline 0.9995). Cap-16 never activated
-     in 100 Random probes, so 64 elements is too short to exercise that width.
-   - E075 extended the capped probe itself to 128 and 256 elements. Cap-8/128
-     activated on every Random trial but was 0.32% slower in a 500-trial same-binary
-     A/B. Cap-8/256 spilled ~118 values/trial and regressed ~18%. Cap-16/256
-     activated its overflow on 498/500 Random probes with only ~12.5 spills/trial,
-     but remained neutral (candidate/baseline 1.00047). Longer one-shot probes are
-     therefore closed as a whole-sort optimization.
-   - Next AVX2 experiment: use SIMD-friendly insertion CHUNKS rather than one longer
-     initial probe, retaining a fixed-width active tail set long enough for SIMD
-     lookup savings while periodically resolving bounded spill. Record SIMD-hit
-     count, spill volume, sorting/marriage cost, and residency at width 8/16.
-   - For 16-wide work, prefer AVX-512 exact-16 int32 lookup when available. If
-     AVX2 16-pile work is revisited, measure the two-register lookup in isolation
-     and require enough 16-tail residency to amortize the second vector compare.
-   - Compare SIMD early-freeze/chunked designs against V2/V3 and scalar V4-V6 with
-     all spill/reconstruction/merge costs charged.
+2. V5 DYNAMIC OVERFLOW / MERGE-TREE BALANCING — LOWER PRIORITY / NEEDS A NEW IDEA
+   - E059 characterized fixed sizes; E060 rejected simple adaptive/local equalization; E062 rejected
+     power-of-two run-count shaping + global PowerSort; E106 rejected data-aware first-boundary shaping.
+   - Future work must introduce a materially new mechanism, not retry those policies unchanged.
 
-4. MULTI-REGIME ROUTER EXPANSION
-   - E052/E053 established that duplicate-heavy and sustained high-entropy final
-     layouts need different merge treatment. E054's separate duplicate-classifier
-     subtest found no additional duplicate-specific insertion policy worth routing
-     to; E054's removal of the Random no-hint route was later superseded by E065.
-   - Continue only when a new kernel/policy creates a meaningful choice. Candidate
-     early regimes include high locality, persistent few-pile structure, strong
-     game imbalance, and ambiguous/general fallback. Candidate final regimes
-     include duplicate saturation, sustained high entropy, few-run compatibility,
-     strong run imbalance, and gallop-friendly layouts.
-   - Record early->final route transition matrices and validate thresholds across
-     size, cardinality, distributions, and held-out seeds.
+3. CROSS-PHASE / FREEZE ENGINEERING
+   - Re-profile 1m phase costs before reopening freeze thresholds or overflow policies.
+   - Shape final runs during insertion only when measured downstream merge savings repay added work.
+   - E097 rejected mutable Eytzinger frozen-tail layout decisively; do not retry it unchanged.
+   - Any new freeze experiment uses the current 50% nominal decision point and retained extension
+     policies as its baseline, not the historical 36.8% baseline.
 
-5. PIECEWISE-MONOTONE NATURAL-RUN ROUTE
-   - E055 rejected generic structured run scanning but found large potential for
-     OrganPipe/Rotated-like layouts where long monotone regions stay in one pile.
-   - Revisit only as a narrow route with cheap evidence (for example a very long
-     initial monotone prefix plus a compatible continuation boundary). Avoid
-     rescanning overlapping runs such as Sawtooth.
-   - Measure searches avoided, bulk-assignment/merge traffic, run-layout changes,
-     and final merge cost with false-positive overhead charged.
+4. WHOLE-ARRAY SMALLSORT / TINY-N LIBRARY PATH
+   - E090 proved a specialized 32-element network can be valuable locally in V5 bands.
+   - Separately test a whole-array <=16/32 base case for library-quality tiny sorts.
+   - Lower priority for current 100k/1m headline work, but relevant to a general API.
 
-6. V5 DYNAMIC OVERFLOW / MERGE-TREE BALANCING — HIGH POTENTIAL, PAUSED
-   - Fixed-size response surface is characterized (E059); 32 remains a strong
-     general baseline. E060 rejected naive global adaptive sizing and local pair
-     equalization. E062 rejected power-of-two run-count shaping and global
-     PowerSort.
-   - Keep the central idea: use deferred overflow as a DYNAMIC MERGE-TREE BALANCING
-     RESOURCE. Future work must jointly choose nonuniform overflow partitioning and
-     merge scheduler from actual post-insertion structure, with a cost model for
-     sorting/inserting overflow versus merge traffic/depth/boundary elimination.
-   - Resume later with planner/scheduler co-optimization, not more fixed band-size
-     sweeps or unconditional local equalization.
+5. NON-POD / EXPENSIVE-COMPARATOR TYPE-AWARE ROUTING
+   - E092/E093 established <=96 bytes only for trivially copyable merge values.
+   - Test std::string/non-trivial movable records, large records, and deliberately expensive
+     comparators separately. Derive thresholds from measured movement/comparison cost.
 
-7. CROSS-PHASE / FREEZE ENGINEERING — SECONDARY
-   - Use insertion choices to shape final runs only when measured merge savings can
-     repay insertion cost.
-   - Frozen-base Eytzinger/compact-search ideas remain candidates for V4-V6.
-   - Add low-trial 1M phase instrumentation before reopening static freeze-point or
-     overflow policies. Do not rerun old fixed-threshold sweeps unchanged.
-   - Propagate future successful routing independently. E065 restored the
-     early-Random no-hint continuation in V2/V3/V7; V4-V6 retain their separate
-     out-of-loop early-freeze hint-routing path from E049.
+6. CODE CONSOLIDATION / MODULARIZATION — E064 PLAN, DEFERRED UNTIL ALGORITHM STABILIZES
+   - V7 remains close to V2 and should eventually become a thin compile-time search-policy
+     specialization.
+   - Extract in stages: core tags/result metadata; scalar/SIMD search policies; shared simulated
+     insertion; reconstruction/run-layout helpers; merge kernels/routing metadata; then thin wrappers.
+   - Avoid virtual/std::function/per-element runtime policy branches. Canonical-benchmark each stage.
 
-8. CODE CONSOLIDATION / MODULARIZATION — E064 ARCHITECTURE PLAN, NO REFACTOR YET
-   - V7 is ~97% line-similar to V2 and should become a thin policy specialization,
-     not a maintained full fork.
-   - Extract shared simulated primitives in stages: packed tags/result types,
-     pile-search kernels/policies, ordinary simulated insertion engine,
-     reconstruction/run-layout helpers, merge kernels/schedulers, and routing
-     metadata/decisions.
-   - Preserve V3's good composition pattern: share V2 insertion and replace only
-     flattening/reconstruction.
-   - Keep V4/V5/V6 overflow behavior as separate thin strategies over a shared
-     early-freeze insertion/base-layout core; do not create a giant runtime-
-     switched freeze function.
-   - Consolidate V1 with the simulated family only at genuinely shared low-level
-     seams (search primitives and contiguous merge kernels). Its physical pile
-     storage/insertion orchestration should remain distinct.
-   - Prefer compile-time policy templates and one-time dispatch outside hot loops;
-     avoid virtual calls/std::function/per-element runtime policy branches.
-   - Before each extraction, create equivalence tests and same-binary performance
-     checks because prior loop/code-layout changes have moved timings materially.
-   - The E064 record below contains the proposed module boundaries and
-     migration order; the standalone audit file was intentionally omitted from this
-     compact repository.
-
-9. AUTHORITATIVE PERFORMANCE CONSOLIDATION
-   - After meaningful retained algorithm groups or any later refactor stage, run
-     the canonical V1-V7+ comparison on identical inputs with rotated order.
-   - Periodically re-profile phases because routing/refactoring can move the
-     dominant cost. Keep raw absolute timings and JesseSort/std::sort ratios.
-
-10. MAINTENANCE / RELEASE
-   - Generic API: move-only support design, stability documentation, optional
-     projection API, and explicit large-record policies.
-   - Visualization: keep V1-V6 scripts synchronized with production semantics.
-   - Release: GCC/Clang CI, ASan/UBSan, namespace/header cleanup, obsolete scratch
-     and backup-header cleanup, versioning/release notes, packaging/single-header
-     evaluation.
+7. MAINTENANCE / RELEASE
+   - Move-only support design, stability documentation, optional projection API, explicit large-record
+     policies, visualization synchronization, GCC/Clang CI, ASan/UBSan, namespace/header cleanup,
+     release notes/versioning, packaging or single-header evaluation.
 
 ===============================================================================
 3. EXPERIMENT INDEX
 ===============================================================================
 
-ID    DATE        SCOPE                         STATUS       DECISION-RELEVANT RESULT                         PRIMARY EVIDENCE
-----  ----------  ----------------------------  -----------  -----------------------------------------------  -----------------------------------------------
-E001  2026-08-06  Benchmark harness             RETAINED     Corrected median/order/generators; no algorithm   benchmark_outputs/round2_comparison.csv
-E002  2026-08-06  Sentinel/index-tail design    MIXED        Sentinel removal kept; index tails rejected       ROUND2_AUDIT_REPORT.txt
-E003  2026-08-06  Static freeze policy          SUPERSEDED   50% beat 36.8%/25%; remains E027 decision point     experiment_log freeze-policy record
-E004  2026-08-06  Actual-piles audit            RETAINED     Correctness fixes + large structured gains        ACTUAL_PILES_AUDIT_REPORT.txt
-E005  2026-08-06  Simulated-blueprint audit     RETAINED     Random near neutral; structured gains up to 84%   SIMULATED_BLUEPRINT_AUDIT_REPORT.txt
-E006  2026-08-06  Early-freeze batched audit    NO CHANGE    Three candidates rejected; baseline survived       EARLY_FREEZE_AUDIT_REPORT.txt
-E007  2026-08-06  Early-freeze code cleanup     RETAINED     1124 lines reduced; compact 32-bit search kept     EARLY_FREEZE_CODE_CLEANUP_REPORT.txt
-E008  2026-08-06  Generic/API audit             RETAINED     Non-default types supported; auto index tails no   GENERIC_TYPE_API_AUDIT_REPORT.txt
-E009  2026-08-06  Live-overflow variant         RETAINED     Distinct profile; 100k rotated ~10% faster,        LIVE_OVERFLOW_AUDIT_REPORT.txt
-                                                              organ-pipe ~66% slower than batched
-E010  2026-08-06  Live band-size audit          RETAINED     Size 8: organ-pipe 20-24% faster; random 1-3%     LIVE_OVERFLOW_DEEP_AUDIT_REPORT.txt
-                                                              slower versus size 32
-E011  2026-08-06  Single large overflow         RETAINED     Useful distinct profile; sawtooth/block regress    SINGLE_OVERFLOW_VARIANT_REPORT.txt
-E012  2026-08-06  Variant-specific endpoint     MIXED        Retained only for deferred bands: organ-pipe       MERGE_PHASE_AUDIT_CHECKPOINT.txt
-                    merge policy                               10.6-13.5% faster; random neutral
-E013  2026-08-06  Live smallest-adjacent greedy REJECTED     100k sawtooth +206.6%, organ-pipe +140% slower     LIVE_SMALLEST_ADJACENT_GREEDY_AUDIT.txt
-E014  2026-08-06  Actual-piles 2-of-3 merge     REJECTED     Alternating 3.5% faster; sawtooth 7.7% slower     ACTUAL_PILES_2_OF_3_MERGE_AUDIT.txt
-E015  2026-08-06  Simulated 2-of-3 merge        REJECTED     No material gain; block-sorted 4.35% slower       SIMULATED_BLUEPRINT_2_OF_3_MERGE_AUDIT.txt
-E016  2026-08-06  In-place cycle flattening     RETAINED     Organ-pipe 6.72% faster; alternating 145.83%       SIMULATED_INPLACE_FLATTEN_VARIANT_REPORT.txt
-                                                              slower than ordinary simulated
-E017  2026-08-06  Routing/game collation        REJECTED     Full collation 11-29% slower at 100k             ROUTING_COLLATION_AUDIT.txt
-E018  2026-08-06  One-comparison routing        REJECTED     Duplicate bursts ~17% slower; no general gain     ONE_COMPARISON_EQUAL_ROUTING_AUDIT.txt
-E019  2026-08-06  Simulated pile-tail search    RETAINED     Random neutral; alternating -8.38%, block -6.88% PILE_TAIL_SEARCH_AUDIT_REPORT.txt
-E020  2026-08-06  Live TimSort-style merge       RETAINED     Noise 5% -6.08%; 1M noise 1-5% -12% to -15% LIVE_TIMSORT_MERGE_AUDIT_REPORT.txt
-E021  2026-08-06  Simulated PowerSort merge      RETAINED     Noise 5% -6.70%; noise 1-2% up to -21%; random neutral  SIMULATED_POWERSORT_MERGE_AUDIT_REPORT.txt
-E022  2026-08-07  Single-overflow PowerSort      RETAINED     Noise 5% -9.76%; 1M noise 1-10% -11% to -22%  SINGLE_OVERFLOW_POWERSORT_MERGE_AUDIT_REPORT.txt
-E023  2026-08-07  In-place-flatten PowerSort      RETAINED     Noise 5% -5.69%; 1M noise 1-5% -8% to -10%   SIMULATED_INPLACE_FLATTEN_POWERSORT_MERGE_AUDIT_REPORT.txt
-E024  2026-08-07  Actual-piles PowerSort           REJECTED     Random +4.84%; Noise 5% +17.77%; no material gain ACTUAL_PILES_POWERSORT_MERGE_AUDIT_REPORT.txt
-E025  2026-08-07  Deferred-band PowerSort          REJECTED     Random +3.32%; OrganPipe +7.42%; no material gain DEFERRED_BANDS_POWERSORT_MERGE_AUDIT_REPORT.txt
-E026  2026-08-07  Live-band PowerSort              REJECTED     Noise 5% +6.11%; Sawtooth +2.68%; no material gain LIVE_BANDS_POWERSORT_MERGE_AUDIT_REPORT.txt
-E027  2026-08-07  Power-of-two freeze targeting     RETAINED     V5 Random -4.02%, V4 Sawtooth -32.44%, V6 OrganPipe -50.78%; duplicate-heavy tradeoff  POWER2_FREEZE_TARGETING_AUDIT_REPORT.txt
-E028  2026-08-07  Random-input lineage audit         RETAINED     V1 neutral vs original; V2 -8% to -12%; V6 restored live32, up to -6% vs live8  RANDOM_INPUT_AUDIT_REPORT.txt
-E029  2026-08-07  V2 game reconstruction order       RETAINED     Always desc-first: Alternating -7.29%, BlockSorted -5.16% at 100k; Rotated +8.86%  benchmark_outputs/game_order_always_desc_v2_summary.csv
-E030  2026-08-07  Other-variation game order audit      MIXED        V1 retained; V3 rejected; V5-V6 left unchanged pending tradeoff decision  benchmark_outputs/game_order_all_ab_summary.csv
+The index is intentionally concise; detailed records below remain the provenance.
+E042 and E067-E069 were never assigned in this compact history.
 
-E031  2026-08-07  V1 adjacent merge fast paths    RETAINED     ~4-7% Alternating gains; otherwise neutral       benchmark_outputs/v1_merge_fastpaths_ab_run*.csv
-E032  2026-08-07  V1 merge galloping              RETAINED     Noise -26.6%, Random%100 -14.0%, Block -27.1%    benchmark_outputs/v1_galloping_ab_run*.csv
-E033  2026-08-07  V1 ordered-boundary elision    RETAINED     Rotated -2.6%, Alternating -1.7%, Noise -1.0%    benchmark_outputs/v1_boundary_elision_ab_*run*.csv
-E034  2026-08-07  V1 asymmetric smaller-side merge    REJECTED     Broad regressions; Sawtooth ~28.8% slower           benchmark_outputs/v1_asymmetric_gallop_ab_run1.csv
-E035  2026-08-07  V2 merge galloping                    RETAINED     Noise -20.5%, Random%100 -24.4%, Block -36.7%, Rotated -13.7%; Random +1.0%  benchmark_outputs/v2_galloping_ab_high_run1.csv
-E036  2026-08-07  V2 64-element random router          RETAINED     100k Random now ~0.93-0.95x std::sort via branchless merge routing  benchmark_outputs/e036_random_confirm.csv
-E037  2026-08-07  Cross-variation 64-element probe     PROMISING    Early signatures matched all six; V1/V5-V6 need cheaper probe integration  PROBE_ALL_VARIATIONS_AUDIT_REPORT.txt
-E038  2026-08-07  V3 random router propagation          RETAINED     Random -13.8% (300 trials), -13.3% second seed; no second probe scan  benchmark_outputs/e038_v3_router_ab_300.csv
-
-E043  2026-08-08  V2 two-stage early insertion routing   RETAINED     Random -4-6%, Random%100 -9-11%; early-whole-sort misroutes duplicates  benchmark_outputs/e043_arch_*.csv
-E044  2026-08-08  V2 branchless merge kernel unroll       RETAINED     4x unroll: Random ~2-2.5% faster; 8x loses benefit; k-way/four-way rejected  e044_unroll4_clean_validation.txt
-E045  2026-08-08  V2 final-layout gallop trigger routing RETAINED     Uniform 12-128 run sets use trigger 5; Sawtooth ~2-2.5% faster, others neutral  benchmark_outputs/e045_route_g5_300_seed1.csv
+E001  Benchmark harness corrections                         RETAINED
+E002  Sentinel removal / index-tail prototype              MIXED: sentinel removal retained; index tails rejected
+E003  Static early-freeze policy                            PARTIAL: 50% baseline retained; production extension superseded
+E004  V1 actual-piles audit                                 RETAINED
+E005  V2 simulated-blueprint audit                          RETAINED
+E006  V5 deferred-band early-freeze audit                    NO CHANGE
+E007  V5/shared early-freeze code cleanup                     RETAINED
+E008  Generic/API audit                                     RETAINED
+E009  V6 live-overflow variation                            RETAINED
+E010  V6 live band-size audit                               SUPERSEDED: size 32 restored later
+E011  V4 single large overflow variation                    RETAINED
+E012  V5 dominant-endpoint merge policy                     RETAINED only for V5
+E013  V6 smallest-adjacent greedy merge                     REJECTED
+E014  V1 two-of-three merge                                 REJECTED
+E015  V2 two-of-three merge                                 REJECTED
+E016  V3 in-place cycle flattening                          RETAINED
+E017  Routing/game collation                                REJECTED
+E018  Equality-to-ascending one-comparison routing          REJECTED
+E019  V2 pile-tail search policy                            RETAINED
+E020  V6 TimSort-style merge scheduler                      RETAINED selectively
+E021  V2 PowerSort-style merge scheduler                    RETAINED selectively
+E022  V4 PowerSort-style merge scheduler                    RETAINED selectively
+E023  V3 PowerSort-style merge scheduler                    RETAINED selectively
+E024  V1 PowerSort                                          REJECTED
+E025  V5 PowerSort                                          REJECTED
+E026  V6 PowerSort                                          REJECTED
+E027  Power-of-two freeze targeting                         RETAINED
+E028  Random-input lineage audit                            RETAINED; restored live band size 32
+E029  V2 descending-game-first reconstruction               RETAINED
+E030  Other-variation reconstruction-order audit            MIXED
+E031  V1 adjacent-merge fast paths                          RETAINED
+E032  V1 exponential galloping                              RETAINED
+E033  V1 ordered-boundary elision                           RETAINED
+E034  V1 asymmetric smaller-side merge                      REJECTED
+E035  V2 exponential galloping                              RETAINED
+E036  V2 Random router + branchless merge                   RETAINED
+E037  Cross-variation 64-element probe                      ARCHITECTURE EVIDENCE / selectively propagated
+E038  V3 Random router                                      RETAINED
+E039  V5 blueprint-derived Random merge router              RETAINED
+E040  V4/V6 blueprint-derived Random merge router           RETAINED
+E041  V1 final-density/game-balance Random merge router     RETAINED
+E043  V2 two-stage early insertion routing                  RETAINED
+E044  Branchless merge unroll                               RETAINED at width 4
+E045  Final-layout 5/7 gallop-trigger routing               RETAINED
+E046  V1 early insertion routing + V2 merge ports           RETAINED
+E047  V1 structured-side exact-hint routing                 RETAINED
+E048  V2 insertion-route propagation                        MIXED: V3 retained; direct V5/V6 port rejected
+E049  Early-freeze out-of-loop hint/no-hint routing         RETAINED
+E050  Canonical V1-V6 numbering reset                       DOCUMENTATION/LABEL FIX
+E051  V5 adaptive overflow planning                         DOCUMENTATION; followed by E059-E062
+E052  Duplicate saturation / merge-threshold audit          RETAINED signal; threshold later size-aware
+E053  Size-aware final pile-density routing                 RETAINED
+E054  Remove early Random no-hint route                     SUPERSEDED/FALSIFIED by E065
+E055  Broad natural-run batching                            REJECTED broadly; mechanism revived narrowly in E098
+E056  V1 hint-miss scalar refinements                       REJECTED
+E057  V7 exact-eight AVX2 pile search                       RETAINED as experimental variation
+E058  Probe-gated AVX2 small-pile continuation              REJECTED
+E059  V5 fixed band-size response surface                   CHARACTERIZED; size 32 unchanged
+E060  V5 simple adaptive/nonuniform shaping                 REJECTED; tree-aware idea remains open
+E061  V2 per-pair merge routing                             PROMISING; finalized in E063
+E062  V5 power-of-two run shaping / scheduler audit         REJECTED
+E063  V2 1.5x transition-band pair routing                  SUPERSEDED/RETIRED by E101
+E064  Active-roadmap cleanup / modularization audit         DOCUMENTATION ONLY
+E065  Restore early Random no-hint insertion                RETAINED for V2/V3/V7
+E066  Benchmark methodology hardening                       SUPERSEDED in cadence/seed design by E077/E100
+E070  Isolated checkpointed benchmark artifacts             RETAINED infrastructure
+E071  Public-repository documentation cleanup               RETAINED
+E072  include/src layout + Markdown benchmark output        RETAINED
+E073  Four-size/100-trial benchmark sweep                   SUPERSEDED by E077 trial policy
+E074  V7 capped 64-value SIMD probe                         NEUTRAL; experimental path only
+E075  V7 128/256 capped-probe sweep                         LONGER ONE-SHOT PROBES CLOSED
+E076  Default V7 8x128 capped probe                         RETAINED as SIMD demonstration, not speed claim
+E077  Unique deterministic input per trial                  RETAINED current benchmark methodology
+E078  Resumable benchmark execution                         RETAINED
+E079  V2 global cursor/step reconstruction                  RETAINED
+E080  Blueprint normalization initial small-sample test     SUPERSEDED by E081
+E081  V2 normalized blueprint reconstruction retest         RETAINED
+E082  V2 raw-pointer branchless merge kernel                RETAINED
+E083  E081/E082 cross-variation propagation                 PARTIAL; later reconciled/fixed by E084/E095
+E084  Current source/log reconciliation                     DOCUMENTATION AUDIT; found V7 wiring discrepancy
+E085  V2 bidirectional branchless merge                     RETAINED; propagation completed E087-E089
+E086  V2 large-n reconstruction step[] elimination          RETAINED at >=500k
+E087  V3 bidirectional merge propagation                    RETAINED
+E088  V4/V5 bidirectional merge propagation                 RETAINED
+E089  V6/V1/V7 bidirectional merge propagation              RETAINED; family propagation complete
+E090  V5 fixed 32-element smallsort network                 RETAINED for full bands
+E091  V2 4-ary instruction-parallel pile search             REJECTED
+E092  V2 type-aware branchless merge cutoff <=96B           RETAINED
+E093  E092 cutoff propagation to V1/V3/V4/V5/V6/V7         RETAINED across family
+E094  Hot/cold dedicated V2 merge continuation              REJECTED / neutral
+E095  V7 normalized reconstruction public-path wiring       RETAINED; discrepancy resolved
+E096  V7 reconstruction step[] elimination                  RETAINED; no size threshold needed
+E097  V5 frozen-tail Eytzinger search                       REJECTED
+E098  Narrow gated V2 natural-run batching                  RETAINED
+E099  E098 natural-run propagation to V1/V3/V4/V5/V6/V7   RETAINED; stricter V5/V6 gate
+E100  Rotated split distribution + canonical A/B seeds      RETAIN generator; seed policy centralized
+E101  Revalidate E063 after E085                             RETIRED E063; no propagation
+E102  V3 final-density routing recalibration                  RETAINED V3-specific 4/4.25/5 rule after high-trial recheck
+E103  Testing-process/revisit taxonomy                     RETAINED; rejection classes + high-trial revisit roadmap
+E104  V3 E045 gallop-trigger high-trial revalidation       RETAINED in V3; propagation audited
+E105  V7 repeated one-register AVX2 continuation            RETAINED narrowly at 5k-20k low-pile layouts
+E106  V5 data-aware first overflow-boundary shaping          REJECTED; no production change
+E107  V1 merge-density recalibration                          RETAINED V1-specific 3.5/4.25/5 rule
+E108  V1/V2/V3 non-freezing parity audit + roadmap          DOCUMENTATION/PLANNING; identified historical drift
+E109  Common V1/V2/V3 convergence baseline                    RETAINED common policy baseline; regressions logged for retuning
 
 ===============================================================================
 4. DETAILED EXPERIMENT RECORDS
@@ -1653,28 +1725,6 @@ Evidence:
 - benchmark_outputs/random_lineage_V6_live32_run3.csv
 - benchmark_outputs/final_six_variant_absolute.csv
 
-===============================================================================
-5. DECISION RULES FOR FUTURE LOG ENTRIES
-===============================================================================
-
-Every future experiment must add:
-1. One row to Section 3, the experiment index.
-2. One detailed record in Section 4 containing:
-   - exact hypothesis and code/policy tested;
-   - variant scope;
-   - baseline and benchmark method;
-   - correctness coverage;
-   - timing deltas for every decision-relevant input;
-   - notable smaller-size or repeated-run behavior;
-   - retained/rejected/inconclusive decision;
-   - explanation of gains/regressions;
-   - exact report and CSV paths.
-3. Any retained production change to Section 1.
-4. Any remaining follow-up to the single ordered list in Section 2.
-
-Do not append another standalone "current state," "remaining work," or "next
-active todo" block. Update Sections 1-3 in place and append only the detailed
-experiment record.
 
 -------------------------------------------------------------------------------
 E029 — V2 DESCENDING-GAME-FIRST RECONSTRUCTION ORDER
@@ -3759,7 +3809,9 @@ no-hint continuation; V1 and V4–V6 keep their independent insertion policies.
 
 -------------------------------------------------------------------------------
 E066 — Benchmark methodology hardening after VM/std::sort drift audit
-Status: methodology + benchmark-harness change; no sorting algorithm changed.
+Status: HISTORICALLY RETAINED, BUT SEED/TRIAL CADENCE SUPERSEDED BY E077; no sorting algorithm changed.
+Current-reading note: retain E066's paired/same-process/robust-statistics principles,
+but use Section 1.1/E077 for the current trial and seed design.
 
 Why this was necessary:
 - Repeated canonical runs showed that absolute std::sort medians can move enough
@@ -3909,7 +3961,7 @@ Validation:
 
 -------------------------------------------------------------------------------
 E073 — Four-size benchmark sweep + 100-trial default
-Status: benchmark/build/reporting infrastructure only; no sorting algorithm logic changed.
+Status: FOUR-SIZE/REPORTING DESIGN RETAINED; 100-TRIAL/SEED POLICY SUPERSEDED BY E077.
 
 Purpose:
 - Make the normal benchmark practical enough to run routinely without giving up size scaling.
@@ -4295,7 +4347,7 @@ Next V2 Random priorities:
   current branchless kernel itself remains substantially faster than general merging.
 
 -------------------------------------------------------------------------------
-E080 — V2 LARGE-N FOLLOW-UP PLAN (IN PROGRESS)
+E080 — V2 LARGE-N FOLLOW-UP PLAN (HISTORICAL; SUPERSEDED BY E081/E082)
 
 Priorities added after E079:
 1. Normalize packed blueprint tags to global run IDs before reconstruction, moving
@@ -4314,6 +4366,7 @@ Priorities added after E079:
    changes are exhausted.
 
 E080 experiment result — pre-normalize packed blueprint tags to global run IDs
+Status: INITIAL REJECTION SUPERSEDED BY E081'S HIGHER-CONFIDENCE RETEST
 ----------------------------------------------------------------------------
 Hypothesis:
 - Move direction-bit decoding and asc/desc global-run selection out of E079's scattered
@@ -4334,19 +4387,6 @@ Decision:
   optimization should matter most. Restore E079's single-pass reconstruction.
 - This reinforces that the next large-n work should reduce total memory movement rather than
   add preparatory passes around the scatter.
-
-Updated V2 large-n priorities after E080:
-1. Profile exact merge-pass count, bytes moved, and run-size evolution at 100k/1m; prioritize
-   reducing whole-array merge passes if possible while retaining the validated branchless kernel.
-2. Compact blueprint metadata without an extra full-n normalization pass. Candidate design:
-   16-bit local pile IDs plus a separate direction bitset, with safe promotion/fallback if a
-   game exceeds the representable pile count.
-3. Investigate whether reconstruction can emit a layout that reduces the first merge pass or
-   folds an initial merge into materialization, avoiding one complete read/write of n values.
-4. Revisit natural-run preservation for large n, gated by the structure probe, as a way to
-   reduce both reconstruction scatter and final merge run count.
-5. Explore cache-friendly pile-tail/cursor storage and narrower auxiliary metadata after the
-   higher-leverage memory-pass experiments above.
 
 
 -------------------------------------------------------------------------------
@@ -4383,12 +4423,6 @@ Decision:
   simplifying the cache-sensitive reconstruction scatter at large n.
 - Keep E079's global cursor/step reconstruction and layer this normalization pass on top.
 
-Next V2 large-n priorities:
-1. Profile merge-pass count / bytes moved at 100k and 1m; reducing a whole merge pass is
-   still the highest-leverage remaining candidate.
-2. Test compact blueprint metadata, but only if it avoids adding another preprocessing pass.
-3. Investigate folding the first merge into reconstruction/materialization.
-4. Revisit natural-run preservation gated by the structure probe.
 
 -------------------------------------------------------------------------------
 E082 — V2 LARGE-N MERGE AUDIT + POINTER BRANCHLESS KERNEL (RETAIN)
@@ -4451,16 +4485,11 @@ Decision:
 - RETAIN as E082. This is the largest clean V2 large-n speedup found in the
   E079-E082 audit and directly targets the dominant Random merge phase.
 
-Updated V2 priorities after E082:
-1. Re-profile V2 vs std::sort under the canonical benchmark after the pointer-kernel gain.
-2. Investigate reducing merge levels only with a cheaper two-level/fused technique than
-   general 4-way selection; E082 shows comparison-heavy k-way merging is not viable.
-3. Investigate reconstruction/materialization that can eliminate the first merge pass
-   without introducing an n-sized auxiliary preprocessing buffer.
-4. Revisit natural-run preservation gated by the existing structure probe to lower run count.
-5. Explore cache/prefetch behavior in the tail-search insertion phase after merge gains are exhausted.
 
 E083 — propagate E081/E082 retained optimizations across variations
+Date: 2026-08-10
+Status: PARTIALLY ACTIVE IN THE CURRENT TREE; E082 pointer ports are active, but
+V7's E081-style normalized reconstruction is not wired into the public sort path.
 - Audited applicability rather than mechanically copying V2-specific code.
 - E082 pointer-based branchless merge:
   - V3/V4/V5/V6 already inherited E082 automatically through simulated::mergeRunsFromTmpToArr in v2_simulated.h; no code change required.
@@ -4475,4 +4504,2015 @@ E083 — propagate E081/E082 retained optimizations across variations
 - 100-trial 100k screen on the same host, separate canonical builds (therefore useful as a screen, not a pure same-binary causal estimate):
   - V1 Random/std::sort: E082 baseline 0.9957 -> E083 0.9265.
   - V7 Random/std::sort: E082 baseline 0.9403 -> E083 0.8483.
-  - Both ports are retained because they are semantic equivalents of already validated E081/E082 transformations and passed correctness; do not interpret the entire cross-build delta as the causal gain because binary layout/host effects can move absolute ratios.
+  - The tested E083 candidate build passed correctness, but E084's source audit found
+    that the current public V7 path does not call the normalized reconstruction helper.
+    The V1 pointer port and V7 pointer port are active; the V7 E081 normalization result
+    must not be treated as current until the call path is corrected and revalidated.
+
+-------------------------------------------------------------------------------
+E084 — CURRENT SOURCE / EXPERIMENT-LOG RECONCILIATION
+Date: 2026-08-10
+Status: DOCUMENTATION/AUDIT ONLY; no sorting logic changed.
+
+Purpose:
+- Re-read the maintained headers, benchmark harness, Makefile, and experiment log
+  before starting the next optimization so the log again describes the repository
+  that actually builds and runs.
+
+Verified current state:
+- V1 actively contains E046/E047 insertion routing, E041 final Random merge routing,
+  E045-style gallop-trigger selection, and E083's raw-pointer branchless merge port.
+- V2 actively contains E065 early Random no-hint insertion, E079 global cursor/step
+  reconstruction, E081 in-place blueprint normalization, E053/E063 merge routing,
+  E045 trigger routing, selected PowerSort, and E082's raw-pointer 4x branchless kernel.
+- V3 shares V2 insertion and V2's E082 merge helper but retains its cycle flattening.
+- V4/V5/V6 retain their specialized early-freeze/overflow reconstruction and use the
+  shared V2 merge helper where their adjacent branchless path is selected.
+- V7's default remains E076's 8-pile/128-value capped probe and its independent
+  branchless merge kernel has the E082 raw-pointer conversion.
+- Benchmark.cpp currently uses E077's unique deterministic input seed per trial,
+  four default sizes, 500/500/500/50 all-size trial counts, two warmups, rotating/
+  reversing algorithm order, per-trial correctness validation outside timers,
+  Markdown+CSV output, and E078 resume support.
+- Clean GCC build and a 2-trial x 10-workload 10k smoke run completed successfully
+  during this audit.
+
+Discrepancy found:
+- `reconstructTaggedBlueprintNormalizedForV7()` exists and is used by V7's convenience
+  `simulateAndReconstructRunsToTemp()` wrapper, but the PUBLIC `sortWithProbePileCap()`
+  path still calls `reconstructTaggedBlueprintToTemp_WithSplitCounts()`.
+- Therefore the current repo does not actually apply E081 normalization to public V7,
+  despite E083's historical record saying that propagation was retained.
+- No sorting code was changed in this cleanup pass. Resolving and causally revalidating
+  this call-path mismatch is Item 0 in the active roadmap.
+
+Log cleanup performed:
+- Replaced superseded E066/E073 benchmark cadence in the current-state section with
+  E077's actual unique-input four-size methodology.
+- Updated V1/V2/V7 current-state descriptions to match the source after E079-E083.
+- Rebuilt the experiment index through E084 and explicitly marked unused numbers.
+- Rewrote the active roadmap around E081/E082's new large-n bottleneck and removed
+  stale historical "next priority" blocks that had been superseded by later work.
+- Moved the log-maintenance rules after the complete detailed experiment history so
+  E029-E084 are no longer separated from E001-E028 by an administrative section.
+
+
+
+-------------------------------------------------------------------------------
+E085 — V2 BIDIRECTIONAL BRANCHLESS MERGE (RETAIN)
+Date: 2026-08-10
+Status: RETAINED FOR V2; CROSS-VARIATION PROPAGATION NOT YET ASSUMED
+
+Origin / hypothesis:
+- ipnsort's small merge machinery highlighted a limitation in E082's source-level
+  four-selection unroll. E082 performs four `takeOne()` calls per loop, but each
+  decision advances either left or right, so the next comparison depends on the
+  previous result. The unroll reduces loop overhead without creating four independent
+  comparison chains.
+- Hypothesis: keep the same two-run merge tree but merge from both ends at once. One
+  selection chooses the minimum from the two run fronts while an independent selection
+  chooses the maximum from the two run backs. This should expose two independent
+  compare/select/address chains to out-of-order execution without the extra winner
+  selection that made E082's general 4-run fusion ~54-57% slower.
+
+Variation scope:
+- V2 only for the retained production change.
+- `mergeRunsFromTmpToArr()` gained an optional bidirectional-branchless flag defaulting
+  to false, so V3-V6 continue using E082 despite sharing this helper. V1/V7 have their
+  own branchless kernels and are unchanged.
+- V2 passes true only after its existing E053/E063 Random branchless routing selects the
+  branchless two-run kernel. General/galloping/PowerSort paths are unchanged.
+
+Kernel semantics:
+- Preserve E082 raw pointers, adjacent two-run scheduling, ordered and reverse-disjoint
+  fast paths, buffers, and comparator semantics.
+- Maintain source ranges [leftLo,leftHi) and [rightLo,rightHi) plus output bounds
+  [outLo,outHi). Each dual-ended iteration performs one forward minimum selection and
+  one backward maximum selection.
+- Forward ties take left. Backward ties take right because output is written from the
+  end; this preserves the old overlapping-merge equal-key order.
+- Stop dual-ended processing before either run has fewer than two remaining elements,
+  then finish the small/skewed residual middle using the proven forward branchless
+  merge logic.
+
+Correctness / safety:
+- Temporary exhaustive randomized run-pair harness tested left/right lengths 1..64,
+  100 trials per size pair, with keys sampled from [-8,8] to force many duplicates.
+  Candidate output exactly matched E082 and was sorted in every test.
+- The same harness passed AddressSanitizer + UndefinedBehaviorSanitizer.
+- Same-binary full-sort A/B required candidate output to equal both E082 output and
+  std::sort on every trial; all passed.
+- Normal production benchmark also passed per-trial correctness validation for all
+  V1-V7 + std::sort across all ten 100k workloads.
+
+Same-binary Random A/B (temporary harness, alternating/rotating execution order):
+- 10k, 1000 paired trials:
+    merge candidate/E082 = 0.575016  (~42.50% faster)
+    full candidate/E082  = 0.706183  (~29.38% faster)
+    E082/std median paired ratio = 0.925332
+    E085/std median paired ratio = 0.659516
+- 100k, 500 paired trials:
+    merge candidate/E082 = 0.542293  (~45.77% faster)
+    full candidate/E082  = 0.672180  (~32.78% faster)
+    E082/std median paired ratio = 0.859365
+    E085/std median paired ratio = 0.585564
+- 1m, 50 paired trials:
+    merge candidate/E082 = 0.544313  (~45.57% faster)
+    full candidate/E082  = 0.665185  (~33.48% faster)
+    E082/std median paired ratio = 0.877348
+    E085/std median paired ratio = 0.587552
+
+Comparison-count diagnostic on identical reconstructed Random runs:
+- 10k: E082 81,646 comparisons; E085 89,618 (1.09764x, ~9.8% MORE).
+- 100k: E082 949,959; E085 991,725 (1.04397x, ~4.4% MORE).
+- 1m: E082 11,369,533; E085 11,756,047 (1.03400x, ~3.4% MORE).
+- This is important mechanistic evidence: the speedup is not explained by doing less
+  comparison work. E085 wins despite extra comparisons, strongly supporting reduced
+  serial dependency depth / increased instruction-level parallelism as the cause.
+
+Production 100k screen after wiring E085 only into V2:
+- 100 trials x all 10 workload families, GCC -O3 -march=native.
+- V2 Random median paired ratio to std::sort = 0.5933206; median V2 time 3721.4925 us
+  vs std::sort 6124.6940 us.
+- V3-V6/V1/V7 remained on their prior E082 behavior by construction, confirming the
+  screen did not silently propagate the new shared-helper path.
+
+Decision:
+- RETAIN E085 in V2. The improvement is large, consistent across 10k/100k/1m, survives
+  same-binary causal testing, sanitizer checks, and the production benchmark, and has a
+  convincing mechanism supported by comparison-count evidence.
+- Do not yet propagate mechanically. Test V3-V6 and V1/V7 separately because their run
+  shapes, overflow behavior, and frequency of branchless-pair routing differ.
+- With E085 retained, V2's next independent large-n target is reconstruction metadata:
+  eliminate the separate `step[]` random-access stream if possible before attempting
+  invasive first-merge-pass fusion.
+
+Artifacts used during this experiment:
+- Temporary same-binary harness: /tmp/e085_ab.cpp and /tmp/e085_ab.out (not retained in repo).
+- Temporary 10k harness/output: /tmp/e085_ab_10k.cpp and /tmp/e085_ab_10k.out.
+- Temporary comparison-count harness: /tmp/e085_counts.cpp.
+- Production 100k report: results/run_20260810_211232/benchmark_results.md
+- Production raw CSV: results/run_20260810_211232/benchmark_trials.csv
+
+E087 — V3 BIDIRECTIONAL BRANCHLESS MERGE PROPAGATION
+-------------------------------------------------------------------------------
+Date: 2026-08-10
+Status: RETAINED in V3.
+
+Question:
+- Does E085's bidirectional front/back branchless two-run merge also improve V3,
+  whose in-place flattening and run shapes differ from V2 even though it shares the
+  downstream merge helper?
+
+Scope and implementation:
+- V3 only. PowerSort-selected cases were left unchanged. The candidate changed only
+  V3's high-entropy adjacent-pair branchless route from E082's forward-only raw-pointer
+  kernel to E085's bidirectional kernel.
+- An internal V3 `sortImpl(..., bool bidirectionalBranchlessMerge)` was used only to
+  enable same-process A/B testing; the public `sort()` now selects the retained
+  bidirectional path. V4-V6 remained on their prior behavior.
+
+Causal same-process Random A/B:
+- 10k, 200 paired trials: candidate/baseline median paired ratio 0.7309 (~26.9% faster).
+- 100k, 100 paired trials: 0.7234 (~27.7% faster).
+- 1m, 10 paired trials: 0.8115 (~18.9% faster).
+- Trial order alternated baseline/candidate. Every candidate and baseline result was
+  checked for exact equality against each other and against `std::sort`.
+
+Production validation:
+- Repository smoke benchmark passed across all ten workload families.
+- Normal 100-trial 100k production benchmark passed correctness on every trial.
+- V3 Random measured 0.7524 vs std::sort (4778.608 us median on this host/build).
+- Structured workloads retain their existing V3 routing; this experiment is not a
+  claim that bidirectional merging is used on every workload.
+
+Interpretation:
+- The E085 mechanism transfers strongly to V3 despite V3's different flattening cost
+  and run construction. The smaller relative gain at 1m suggests V3's non-merge work
+  and/or memory bandwidth becomes a larger share of end-to-end time at large n, but the
+  direction remains decisively positive.
+- This strengthens the hypothesis that the gain comes from breaking the serial
+  pointer-selection dependency chain rather than from a V2-specific side effect.
+
+Decision:
+- RETAIN bidirectional branchless merging in V3.
+- Continue propagation one variation at a time: V4 next, then V5/V6, then V1/V7's
+  independent kernels as applicable. Do not batch those changes together.
+
+Artifacts used during this experiment:
+- Temporary same-process harness: /mnt/data/e087_v3_ab.cpp and /mnt/data/e087_v3_ab
+  (not retained in repository).
+- Production report: results/run_20260810_213322/benchmark_results.md
+- Production raw CSV: results/run_20260810_213322/benchmark_trials.csv
+
+
+E090 — IPNSORT-INSPIRED V5 32-ELEMENT SMALLSORT
+-------------------------------------------------------------------------------
+Date: 2026-08-10
+Status: RETAINED for full 32-element V5 overflow bands after expanded trial evidence.
+
+Question:
+- Can V5 replace repeated std::sort calls on exact 32-element deferred overflow
+  bands with a specialized branchless fixed sorting network, transferring ipnsort's
+  small-input specialization into Jessesort?
+
+Implementation retained:
+- Exact full 32-element bands of trivially-copyable values use a fixed bitonic
+  compare-exchange network.
+- Partial final bands and conservative/non-trivial types remain on std::sort.
+- This changes only the overflow-band sorting subphase; insertion, reconstruction,
+  merge scheduling, and the retained E085 bidirectional merge are unchanged.
+
+Expanded evidence after the initial screen was judged under-sampled:
+- Kernel-level, actual benchmark int type: 4,096,000 full 32-element band sorts
+  across 1,000 alternating timing rounds. Median network/std::sort ratio = 0.7165,
+  or about 28.4% faster for this section of logic. Bootstrap 95% interval for the
+  median ratio was approximately 0.687-0.736. Exact outputs matched std::sort.
+- Full V5 Random same-process paired A/B, alternating order and exact correctness:
+  * 10k: 5,000 trials, median candidate/baseline ratio 0.9710 (~2.9% faster).
+  * 100k: 2,000 trials, ratio 1.0043 (effectively neutral; bootstrap interval spans 1).
+  * 1m: completed 600-trial run, ratio 0.9844 (~1.6% faster). A separate clean
+    rerun reached 295 trials before the command window ended and stabilized near
+    0.984 as well, independently reproducing the large-N result.
+
+Interpretation:
+- The previous rejection over-weighted whole-sort timing and under-weighted the
+  directly optimized phase. The network is a substantial, repeatedly measured
+  improvement to the actual 32-element band-sort operation even though that phase
+  is only a modest fraction of V5 after E085 accelerated merging.
+- Whole-sort gains are therefore expected to be diluted: clearly positive at 10k,
+  statistically neutral around 100k on this host, and small but reproducible at 1m.
+- This is still worth retaining because it replaces a repeated fixed-size std::sort
+  with a materially faster specialized kernel while preserving a std::sort fallback
+  for partial/non-trivial cases. Future decisions should report both phase-local and
+  whole-sort effects when an optimization targets a narrow subphase.
+
+Decision:
+- RETAIN the fixed 32-element network for V5 full overflow bands.
+- Do not generalize the closer 13-network + insertion + merge prototype; it did not
+  translate as well to V5 whole-sort timing.
+- Continue next with the higher-potential ipnsort-inspired instruction-parallel
+  4-ary pile-tail search, but preserve E090 as a retained specialized subphase win.
+
+Artifacts from expanded evidence:
+- /mnt/data/e090_retry/kernel_int_rounds.csv
+- /mnt/data/e090_retry/results_10000_111.csv
+- /mnt/data/e090_retry/results_100000_222.csv
+- /mnt/data/e090_retry/summary_1m_444.txt
+- /mnt/data/e090_retry/results_1000000_666.csv (clean partial rerun)
+
+
+E091 — V2 4-ARY INSTRUCTION-PARALLEL PILE SEARCH
+-------------------------------------------------------------------------------
+Date: 2026-08-10
+Status: REJECTED. Candidate code reverted.
+
+Question:
+- Can V2's Random/no-hint pile-tail search trade extra independent comparisons for
+  lower serial dependency depth, analogous to the successful E085 bidirectional
+  merge?
+
+Candidate:
+- Preserve all existing V2 early routing and no-hint gating.
+- At each search level, probe quarter, midpoint, and three-quarter pile tails
+  independently, sum the three monotonic predicates, select one of four subranges,
+  and finish the final <16-element range with ordinary binary search.
+- Baseline is the retained direct bit-walk from E065.
+
+Method:
+- Same-process alternating paired A/B over identical full-range Random int inputs.
+- Timed simulatePatienceInsertionBlueprint only, so reconstruction and merging do
+  not dilute the targeted search effect.
+- Exact equality required for blueprint, asc/desc counts, and asc/desc tails every
+  trial. All trials passed.
+- High trial counts were used because E090 showed that narrow-phase decisions should
+  not be made from noisy whole-sort samples.
+
+Results (candidate / baseline median paired timing):
+- 10k:  5,000 trials, 2.62902x (~162.9% slower).
+- 100k: 2,000 trials, 3.05864x (~205.9% slower).
+- 1m:     400 trials, 3.38328x (~238.3% slower).
+
+Interpretation:
+- This is not an Amdahl-law dilution issue: the phase being optimized is itself much
+  slower. Three independent random pile-tail probes per level increase memory traffic
+  and comparison count enough to swamp the benefit of reducing dependent levels.
+- The worsening ratio with n is consistent with extra tail loads becoming more costly
+  as pile-tail working sets grow. E085's ILP lesson therefore does not transfer
+  mechanically from a sequential merge stream to a search over dispersed pile tails.
+
+Decision:
+- REJECT and revert the three-quarter-probe 4-ary search.
+- Preserve E065's direct bit-walk for Random/no-hint V2 insertion.
+- Do not generalize E091 to other variations.
+- Continue with a materially different ipnsort-derived idea rather than micro-tuning
+  this failed formulation.
+
+Artifacts:
+- /mnt/data/e091_results/10k.csv
+- /mnt/data/e091_results/100k.csv
+- /mnt/data/e091_results/1m.csv
+
+===============================================================================
+5. DECISION RULES FOR FUTURE LOG ENTRIES
+===============================================================================
+
+Every future experiment must add:
+1. One row to Section 3, the experiment index.
+2. One detailed record in Section 4 containing:
+   - exact hypothesis and code/policy tested;
+   - variation scope;
+   - baseline and benchmark method;
+   - correctness coverage;
+   - timing deltas for every decision-relevant input;
+   - notable smaller-size or repeated-run behavior;
+   - retained/rejected/inconclusive decision;
+   - explanation of gains/regressions;
+   - exact report and CSV paths.
+3. Any retained production change to Section 1.
+4. Any remaining follow-up to the single ordered list in Section 2.
+
+Do not append another standalone "current state," "remaining work," or "next
+active todo" block. Update Sections 1-3 in place and append only the detailed
+experiment record.
+
+
+E086 — V2 LARGE-N RECONSTRUCTION STEP[] ELIMINATION (RETAIN >=500K ONLY)
+-------------------------------------------------------------------------------
+Date: 2026-08-10
+Status: RETAINED as a size-routed V2 reconstruction optimization.
+
+Question:
+- Can E079's separate signed `step[]` metadata stream be removed now that E081
+  normalizes blueprint tags to global run IDs, where `r < numDescPiles` identifies
+  descending runs?
+
+Causal same-process reconstruction A/B on identical Random insertion metadata:
+- 10k, 500 trials: candidate/baseline median paired ratio 1.5543 (regression).
+- 100k, 250 trials: 1.2625 (regression).
+- 200k, 120 trials: 1.0322 (small regression).
+- 300k, 100 trials: 1.0229 (small regression).
+- 500k, 70 trials: 0.9684 (~3.2% reconstruction win).
+- 750k, 50 trials: 0.9176 (~8.2% reconstruction win).
+- 1m, 40 trials: 0.8690 (~13.1% reconstruction win).
+- Candidate and baseline reconstructed buffers were checked for exact equality on
+  every paired trial. Copies of blueprint/count metadata were prepared outside the
+  timed region, and call order alternated to reduce order bias.
+
+Interpretation:
+- The original cache-working-set hypothesis is supported, but only above a crossover.
+  At small/mid n, loading `step[r]` is cheaper than recomputing direction from the
+  normalized run ID. At large n, eliminating the second pseudorandom metadata stream
+  wins increasingly as run metadata pressure grows.
+- A universal removal would be a serious 10k/100k regression, so V2 keeps E079's
+  explicit `step[]` below 500k and derives direction from `r < numDescPiles` at
+  >=500k. The threshold is intentionally coarse; do not overfit it without evidence.
+
+Decision:
+- RETAIN size-routed E086 in V2 only. Do not propagate this reconstruction-specific
+  change automatically to other variations because their reconstruction formats differ.
+- Per the active roadmap, return next to the still-pending E085 bidirectional-merge
+  propagation tests before starting unrelated optimization families.
+
+
+
+E088 — V4/V5 BIDIRECTIONAL BRANCHLESS MERGE PROPAGATION
+Status: retained in both V4 and V5.
+
+Question:
+- Does E085's front/back branchless two-run merge also improve the early-freeze
+  variations whose run populations include overflow structure?
+
+Method:
+- Added internal sortImpl entry points to V4 and V5 so the old E082 one-direction
+  branchless merge and E085 bidirectional merge could be compared in the same process.
+- Public sort() selects the bidirectional path after the candidate passed the causal A/B.
+- Random uint64_t inputs used unique deterministic seeds, alternating baseline/candidate
+  order to reduce drift. Every candidate and baseline output was checked for exact equality
+  with std::sort. Trial counts matched E087: 200 at 10k, 100 at 100k, 10 at 1m.
+
+Paired Random results (candidate / baseline median paired ratio):
+- V4 10k:  0.7549 (~24.5% faster)
+- V4 100k: 0.7417 (~25.8% faster)
+- V4 1m:   0.7233 (~27.7% faster)
+- V5 10k:  0.7238 (~27.6% faster)
+- V5 100k: 0.6783 (~32.2% faster)
+- V5 1m:   0.6399 (~36.0% faster)
+
+Production validation:
+- Normal 100-trial 100k x 10-workload benchmark completed successfully with built-in
+  correctness validation. Random ratios vs std::sort were 0.7428 for V4 and 0.6477 for V5.
+
+Interpretation:
+- E085 generalizes strongly beyond V2/V3. V4's gain is similar to V3's, while V5 gains
+  more as n grows, consistent with its deferred 32-element overflow bands increasing the
+  amount of work reaching the merge phase. The result further supports the original ILP
+  hypothesis: reorganizing a two-run merge into independent low-end/high-end dependency
+  chains is broadly useful across Jessesort's current merge-heavy variations.
+
+Decision:
+- Retain bidirectional branchless merging in V4 and V5.
+- Continue propagation next with V6, then independently port/test V1 and V7.
+
+E089 — V6/V1/V7 BIDIRECTIONAL BRANCHLESS MERGE PROPAGATION
+Status: RETAINED in all three remaining variations.
+
+Question:
+- Does E085's front/back branchless two-run merge continue to improve the final three
+  variations: V6 live overflow bands, V1 physical piles, and V7's independent SIMD/capped-
+  probe implementation?
+
+Method:
+- Ported only the E085 branchless merge mechanism. Existing insertion routing, overflow
+  management, merge scheduling, PowerSort/TimSort selection, and V7 SIMD probe behavior
+  were left unchanged.
+- Each variation exposes an internal A/B switch so the old E082-style forward branchless
+  path and the bidirectional candidate can run in the SAME binary/process.
+- Random uint64 inputs; alternating A/B execution order; each candidate and baseline
+  received identical input; every trial checked exact equality against std::sort and
+  against each other.
+- Trials matched the prior propagation screens: 200 at 10k, 100 at 100k, 10 at 1m.
+
+Causal A/B results (bidirectional / prior branchless path; lower is better):
+- V6: 10k 0.7144 (~28.6% faster), 100k 0.6707 (~32.9%), 1m 0.6583 (~34.2%).
+- V1: 10k 0.7581 (~24.2% faster), 100k 0.7175 (~28.3%), 1m 0.8310 (~16.9%).
+- V7: 10k 0.7417 (~25.8% faster), 100k 0.7007 (~29.9%), 1m 0.9005 (~10.0%).
+
+Absolute median A/B timings (microseconds):
+- V6 10k: 496.973 -> 358.977; 100k: 6032.219 -> 4148.919; 1m: 80514.543 -> 51933.316.
+- V1 10k: 584.794 -> 445.984; 100k: 6029.027 -> 4316.699; 1m: 77293.204 -> 57476.963.
+- V7 10k: 483.817 -> 351.312; 100k: 5395.834 -> 3741.140; 1m: 70603.373 -> 71358.510 median-of-times, while the paired-ratio median was 0.9005. The discrepancy reflects trial/order variance at only ten 1m trials; paired ratios are the causal statistic and still favor E085. If future work depends specifically on the V7 1m magnitude, rerun with more large-n trials.
+
+Production 100k / 100-trial Random screen after retaining all three:
+- V1 median 4935.220 us; median paired ratio to std::sort 0.80120.
+- V6 median 3983.760 us; median paired ratio to std::sort 0.65383.
+- V7 median 4213.567 us; median paired ratio to std::sort 0.68065.
+- std::sort median 6133.190 us.
+- Full ten-workload benchmark completed with correctness validation on every trial.
+
+Conclusion:
+- RETAIN E085 bidirectional branchless merging in V6, V1, and V7.
+- E085 has now been independently validated and retained across every JesseSort variation
+  whose Random/high-entropy route uses the branchless adjacent two-run merge: V1-V7.
+- The mechanism is strongest where merging dominates total work. V7's much smaller 1m
+  paired gain is consistent with more time being spent in its capped-probe/SIMD-specific
+  insertion and overflow machinery, not evidence against the merge kernel itself.
+- E085 propagation is COMPLETE; remove it from the active to-do queue.
+
+E089 follow-up — V7 1m variance check
+- Because the initial 10-trial V7 1m screen had conflicting median-of-times and median-paired-ratio directions, reran V7 only at 1m with 30 paired Random trials.
+- Baseline median: 74,935.342 us.
+- Bidirectional median: 53,963.455 us.
+- Median paired ratio: 0.7613 (~23.9% faster).
+- All 30 candidate outputs matched std::sort exactly.
+- This resolves the small-sample ambiguity and confirms a substantial V7 large-n gain; retain E085 without qualification.
+
+
+E092 — IPNSORT-INSPIRED TYPE-AWARE V2 MERGE ROUTING
+----------------------------------------------------
+Question:
+- Is V2's branchless Random merge cutoff of trivially-copyable T <= two pointers
+  unnecessarily conservative? ipnsort's type-specialized hot kernels suggested that
+  branchless/ILP machinery can stay profitable for considerably larger objects, but
+  its partition threshold was treated only as motivation, not copied as a rule.
+
+Method:
+- Kept V2 insertion, reconstruction, pile routing, density routing, merge schedule,
+  and E085 bidirectional kernel unchanged. Only the merge-kernel choice was A/B tested.
+- Generated Random trivially-copyable PODs whose first uint64_t is the comparison key
+  and whose total sizes were 16, 24, 32, 48, 64, 80, 96, and 128 bytes.
+- Merge-only A/B used identical reconstructed runs in the same process and alternated
+  baseline general merge versus E085 bidirectional branchless merge.
+- Whole-sort A/B used the existing public V2 as baseline and an otherwise identical
+  candidate whose Random branchless merge size cutoff was widened; insertion's <=16-byte
+  copy-by-value routing was deliberately left unchanged. Every trial checked exact key
+  equality and sortedness.
+
+Key merge-only results (candidate/general, Random 100k):
+- 24B: 0.486  (~51% faster)
+- 32B: 0.386  (~61% faster)
+- 48B: 0.526  (~47% faster)
+- 64B: 0.635  (~37% faster)
+- 80B: 0.737  (~26% faster)
+- 96B: 0.847  (~15% faster)
+- 128B: 1.084 (~8% slower)
+
+Whole-sort paired results (candidate/current V2, Random):
+- 10k, 300 trials: 24B 0.700; 32B 0.582; 48B 0.701; 64B 0.715.
+- 100k, 120 trials: 24B 0.689; 32B 0.611; 48B 0.692; 64B 0.840.
+- 1m completed/partial paired data: 24B ~0.616; 32B ~0.594; 48B ~0.761;
+  64B ~0.896. The result remains positive as movement cost grows, but leverage narrows.
+- Boundary confirmation for 96B: 0.801 at 10k over 300 trials and 0.908 at 100k
+  over 200 trials. 128B was ~1.007 at 100k, effectively neutral/slightly slower.
+
+Decision:
+- RETAIN for V2 Random merge routing: trivially copyable T <=96 bytes may use the
+  E085 bidirectional branchless merge when the existing structural/density router selects it.
+- Keep insertion/reconstruction type thresholds unchanged.
+- Do not extend to 128-byte PODs.
+
+Interpretation:
+- The former <=16-byte cutoff was leaving large gains on the table. E085's independent
+  front/back dependency chains remain valuable even when each selection moves several
+  cache words. Movement cost finally catches up between 96 and 128 bytes on this host.
+- This is a genuinely type-aware algorithm choice: the profitable threshold belongs to
+  the merge kernel, not to Jessesort globally. Different phases should retain independent
+  classifiers.
+
+E093 — Propagate E092 widened branchless-merge type cutoff to V1/V3/V4/V5/V6/V7 (retained)
+- Motivation: E092 showed V2's bidirectional branchless merge remained profitable for trivially-copyable POD values through 96 bytes, with 128 bytes crossing to neutral/slower. The other variations share essentially the same high-entropy adjacent two-run merge kernel but differ in pile freezing/overflow behavior and resulting run geometry.
+- Scope: widened ONLY the Random/high-entropy merge eligibility cutoff from <= 2*sizeof(void*) (normally 16 B) to <= 96 B. Insertion fast paths, pile routing, freeze policies, reconstruction, overflow handling, merge scheduling, and E090 V5 smallsort routing were unchanged.
+- A/B method: same-process alternating baseline/candidate runs on identical shuffled unique-key POD inputs, with sortedness validation after every run. Baseline used the old <=16 B merge cutoff; candidate used <=96 B.
+- 32-byte POD, n=100k, 100 paired trials per variation (candidate/baseline median):
+  V1 0.6990 (~30.1% faster); V3 0.6172 (~38.3%); V4 0.6501 (~35.0%); V5 0.5792 (~42.1%); V6 0.6006 (~39.9%); V7 0.6467 (~35.3%).
+- 96-byte POD, n=100k, expanded to 300 paired trials per variation because the boundary is noisier:
+  V1 0.9294 (~7.1% faster); V3 0.8894 (~11.1%); V4 0.8982 (~10.2%); V5 0.8759 (~12.4%); V6 0.8804 (~12.0%); V7 0.8876 (~11.2%).
+- Result: all six variations benefit strongly at 32 B and remain beneficial at the 96 B boundary. Retain a shared <=96 B trivially-copyable cutoff for the high-entropy bidirectional branchless merge in every variation.
+- Interpretation: freezing/overflow policy changes run count and lengths but does not change the central conclusion from E092: for these merge kernels, branchless bidirectional ILP remains valuable far beyond the old 16-byte limit. The 96-byte threshold is merge-specific and MUST NOT be copied to insertion/copy-by-value fast paths without separate evidence.
+
+
+E094 - IPNSORT-INSPIRED HOT/COLD MERGE CONTINUATION
+
+Goal:
+- Test whether V2's Random merge benefits from a dedicated continuation that removes
+  generic scheduler branches after routing has already selected adjacent-pair E085
+  bidirectional branchless merging.
+- Preserve all merge semantics, ordered-boundary coalescing, odd-run handling, and the
+  E063 imbalance fallback. This is a code-layout/dispatch experiment only.
+
+Precondition discovered:
+- V2 insertion already implements the analogous ipnsort-style one-time continuation
+  dispatch: Random/no-hint, high-hint split, and ordinary continuations are separate
+  noinline functions. No insertion-side change was needed.
+
+Method:
+- Same-binary alternating A/B over identical reconstructed Random runs.
+- Baseline: current generic mergeRunsFromTmpToArr with adjacent_pairs, branchless=true,
+  E085 bidirectional=true, and the same E063 imbalance ratio.
+- Candidate: dedicated adjacent/bidirectional hot continuation with the runtime schedule,
+  branchless/general, and bidirectional-selection branches removed.
+- Copies were prepared outside timing and outputs were checked for exact equality and
+  sortedness every trial.
+
+Results (candidate / baseline median paired ratio):
+- 10k, 5000 trials: 0.9987
+- 100k, 2000 trials: 1.0009
+- 1m, 400 trials: 0.9936
+
+Decision:
+- REJECT. The effect is at the noise/sub-percent level and inconsistent across sizes.
+  Do not duplicate the merge scheduler for this. The existing compiler/code layout is
+  already sufficient here.
+
+
+-------------------------------------------------------------------------------
+E095 — V7 NORMALIZED RECONSTRUCTION PUBLIC-PATH WIRING
+Status: RETAINED; active-roadmap Item 0 resolved.
+
+Question:
+- E083 added `reconstructTaggedBlueprintNormalizedForV7()`, and the convenience
+  wrapper used it, but the public capped-probe sort path still called the older
+  direction-branching reconstruction. Does the normalized path causally improve
+  current V7 after E085/E092/E093?
+
+Methodology:
+- Added a temporary same-binary reconstruction selector to `sortWithProbePileCap()`
+  so baseline and normalized modes share identical insertion, overflow handling,
+  merge routing, merge kernels, and comparator behavior. Execution order alternated.
+- Full-sort Random A/B trial counts: 10k=3,000; 100k=1,000; 1m=150.
+- Reconstruction-only A/B reused identical simulated insertion metadata with all
+  copies/setup outside the timer: 10k=5,000; 100k=2,000; 1m=400.
+- Every full-sort trial required exact baseline/candidate equality and sortedness;
+  every reconstruction trial required exact tmp buffer and run-boundary equality.
+
+Reconstruction-only median candidate/baseline ratios:
+- 10k:  0.356354 (~64.4% faster reconstruction)
+- 100k: 0.593699 (~40.6% faster reconstruction)
+- 1m:   0.912778 (~8.7% faster reconstruction)
+
+Full-sort median candidate/baseline ratios:
+- 10k:  0.925450 (~7.5% faster)
+- 100k: 0.946074 (~5.4% faster)
+- 1m:   0.986156 (~1.4% faster)
+
+Interpretation:
+- The discrepancy was real: V7's public path was missing a substantial local
+  reconstruction optimization, especially at 10k/100k. Whole-sort dilution is
+  expected because insertion and merging are unchanged.
+- The smaller 1m local gain suggests the V7 normalized helper may separately benefit
+  from E086-style large-n step-table elimination; treat that as a distinct follow-up.
+
+Decision:
+- RETAIN normalized reconstruction as the default in `sortWithProbePileCap()`.
+- Keep the old path selectable only for causal/historical A/B testing.
+- Close active-roadmap Item 0.
+
+E096 - V7 normalized reconstruction: eliminate step[] metadata stream (RETAINED)
+-------------------------------------------------------------------------------
+Motivation:
+  E095 wired the normalized E081-style reconstruction helper into V7. That helper
+  still carried a separate step[] vector, while normalized global run IDs already
+  encode whether a production V7 run is descending (reverse scatter) or ascending
+  (forward scatter). V2 E086 showed this trade can become favorable at large n.
+
+Test:
+  Same-process paired reconstruction A/B on identical V7 insertion metadata.
+  Metadata copies were prepared outside the timer. Candidate derived direction
+  from r < numDescPiles and removed step[]. Exact reconstructed buffers and run
+  boundaries were validated. Full V7 sort A/B also validated exact sorted output.
+
+Reconstruction-only median candidate/baseline ratios:
+  n=10k:   0.994  (5000 trials; ~0.6% faster)
+  n=100k:  0.966  (2000 trials; ~3.4% faster)
+  n=200k:  0.960  (1200 trials; ~4.0% faster)
+  n=300k:  0.954  (800 trials;  ~4.6% faster)
+  n=500k:  0.968  (500 trials;  ~3.2% faster)
+  n=750k:  0.9425 (350 trials;  ~5.8% faster)
+  n=1m:    0.940  (250 trials;  ~6.0% faster)
+
+Full-sort median candidate/baseline ratios:
+  n=10k:   1.001  (2000 trials; effectively neutral)
+  n=100k:  1.002  (1000 trials; effectively neutral)
+  n=1m:    0.9985 (150 trials; effectively neutral)
+
+Decision:
+  Retain in V7 with no size threshold. The targeted phase is consistently faster,
+  increasingly so at large n; whole-sort timing is neutral within noise; and the
+  production implementation is simpler and avoids one allocation/random metadata
+  stream. This is a modest phase optimization, not a headline whole-sort gain.
+
+E097 - V5 FROZEN PILE-TAIL EYTZINGER SEARCH (REJECTED)
+------------------------------------------------------
+Motivation:
+  Test whether V5's post-freeze pile-tail search could benefit from Eytzinger/tree
+  layout after the pile count becomes fixed. This targeted frozen insertion only;
+  freeze policy, overflow bands, reconstruction, E090 smallsort, and merge behavior
+  were unchanged. A literal pre-E097 copy of V5 was made before the refactor.
+
+Important structural observation:
+  Freeze makes the NUMBER of piles immutable, but not their tail values. Existing
+  pile tails continue to be replaced after every successful frozen insertion. The
+  candidate therefore used a fixed Eytzinger heap mapping plus logical<->heap maps
+  and updated the corresponding heap node whenever a logical pile tail changed.
+  It did not assume an invalid immutable-value search structure.
+
+Method:
+  V2-style Random/no-hint route only. Same-process alternating A/B on identical
+  Random int inputs. Baseline used the retained bit-walk search over monotone tail
+  vectors. Candidate built Eytzinger layouts at the actual freeze point and used
+  tree traversal for frozen searches while preserving identical blueprint/count/
+  overflow semantics. Insertion metadata and final sorted output were required to
+  match exactly on every paired trial.
+
+Results (candidate / baseline median paired ratio):
+  n=10k, 1000 trials:
+    insertion 1.3773  (~37.7% slower)
+    full sort 1.1635  (~16.4% slower)
+  n=100k, 600 trials:
+    insertion 0.9980  (effectively neutral)
+    full sort 0.9971  (effectively neutral)
+  n=1m, 120 trials:
+    insertion 1.7233  (~72.3% slower)
+    full sort 1.2353  (~23.5% slower)
+
+Interpretation:
+  Eytzinger does not solve a real cache-capacity problem for V5's frozen tails on
+  these inputs. Even at n=1m the active tail set is only on the order of thousands
+  of int values and is already compact/cache-friendly. The candidate instead adds
+  heap-index traversal, logical<->heap mapping, and a second tail update. Unlike
+  classic binary search over a large immutable array, V5 continuously mutates the
+  searched tails, which further weakens the usual Eytzinger advantage.
+
+Decision:
+  REJECT and fully revert V5 to its pre-E097 implementation. Do not retry the same
+  Eytzinger representation unchanged. If frozen search is revisited, target fewer
+  comparisons/loads or a representation that avoids duplicate tail maintenance.
+
+
+===============================================================================
+E098 — V2 NARROW PIECEWISE-MONOTONE NATURAL-RUN ROUTE
+Date: 2026-08-10
+Status: RETAINED for V2
+===============================================================================
+
+Goal
+----
+Revisit E055 without paying a general source-run scanner on Random/Sawtooth-like
+inputs. Use the long monotone prefix already discovered by V2 as a cheap gate, then
+skip redundant pile searches only when a later natural run provably maps to one pile.
+
+Design
+------
+- Gate: the existing strict initial monotone prefix must cover >= 1/8 of n and be at
+  least the existing 32-element prefix threshold.
+- Once gated, scan later strict monotone source runs. Runs shorter than 8 fall back.
+- For a longer run, search only its first and last value against the current tail array.
+  If both map to the same pile, fill that run's blueprint tags in bulk, add its length
+  to the pile count, and update the pile tail to the terminal value.
+- If endpoint destinations differ, process the run element-by-element with the retained
+  hinted search. The route changes no merge/reconstruction policy.
+- Paired testing required exact equality of blueprint, asc/desc counts, tails, and final
+  sorted output between baseline and candidate on every trial.
+
+Evidence
+--------
+10k, 500 paired trials per family:
+- OrganPipe insertion ratio 0.4521; whole sort 0.9390.
+- Rotated insertion ratio 0.5337; whole sort 0.9186.
+- Random/Sawtooth whole-sort ratios ~1.002; BlockSorted ~1.004.
+
+100k, 300 paired trials per family:
+- OrganPipe insertion ratio 0.5090; whole sort 0.8892.
+- Rotated insertion ratio 0.5777; whole sort 0.8938.
+- Random 0.9918, Sawtooth 0.9908, BlockSorted 0.9849, Sorted+Noise 0.9873
+  at whole-sort level; these small apparent gains are not attributed to the gated
+  mechanism because those families rarely/never enter it.
+
+1m expanded run, 150 paired trials per family:
+- OrganPipe insertion ratio 0.5721 (~42.8% faster); whole sort 0.9169 (~8.3% faster).
+- Rotated insertion ratio 0.6618 (~33.8% faster); whole sort 0.9424 (~5.8% faster).
+- Random whole sort 1.0128, Sawtooth 1.0039, BlockSorted 1.0033, Sorted+Noise 0.9989:
+  effectively neutral guardrails at this trial count.
+
+Interpretation
+--------------
+E055's mechanism was sound but its activation was too broad. A very long initial
+monotone prefix is enough to identify the narrow piecewise-monotone regime cheaply.
+For OrganPipe and many Rotated inputs, the remainder contains another long strict run
+whose values all belong to one patience pile. Two endpoint searches therefore replace
+thousands to hundreds of thousands of redundant per-element pile searches while
+preserving exactly the same simulated pile structure.
+
+Decision
+--------
+RETAIN in V2 with the conservative >=12.5% initial-prefix gate and min run length 8.
+Do not broaden the gate yet. Propagation to freeze/overflow variations is a separate
+experiment because their post-freeze routing changes the economics of run batching.
+
+
+===============================================================================
+E099 — E098 NATURAL-RUN BATCHING PROPAGATION TO V1/V3/V4/V5/V6/V7
+Date: 2026-08-10
+Status: RETAINED across all six propagation targets, with stricter V5/V6 gate
+===============================================================================
+
+Goal
+----
+Propagate E098's narrow piecewise-monotone batching beyond V2 while preserving each
+variation's insertion architecture, freeze boundary, overflow policy, reconstruction,
+and merge behavior. Measure both whole-sort impact and the targeted insertion phase.
+
+Implementation
+--------------
+- V1: physical-pile version. After the qualifying long initial monotone prefix, scan
+  later strict runs. If the first/last values resolve to the same destination physical
+  pile, append the whole run to that pile and update its tail/count in bulk; otherwise
+  retain scalar insertion.
+- V3: reuse V2's E098 simulated continuation directly.
+- V4: freeze-aware simulated batching. Batch only inside ranges that preserve the
+  existing freeze transition; the power-of-two extension interval remains scalar.
+- V5/V6: same freeze-aware structure, but final retained policy additionally requires
+  the first continuation run after the qualifying prefix to be >=8 values before the
+  natural-run route is enabled. This distinguishes the useful OrganPipe shape from the
+  common Rotated shape whose discontinuity is often a one-element bridge.
+- V7: propagate E098 into the capped-probe simulated path without changing SIMD probe,
+  normalized reconstruction, or merge policy.
+- Public V1/V3/V4/V7 routes enable the broad E098 gate. Public V5/V6 routes enable the
+  stricter first-continuation-run gate.
+
+Rotated benchmark structure
+---------------------------
+The canonical Rotated generator is stochastic per trial: it creates [0,1,...,n-1],
+samples a split point uniformly from [0,n-1], and calls std::rotate at that point.
+Therefore Rotated is not one fixed two-run geometry. The random split directly changes
+the initial monotone-prefix fraction and can move a trial across E098's 12.5% activation
+boundary. This is a real source of trial-to-trial variability and should be preserved in
+benchmarking because it tests different rotation geometries, but it requires enough paired
+samples to avoid over-interpreting one split distribution.
+
+Measurement correction
+----------------------
+Initial same-process A/B showed large, inconsistent first-vs-second-sort effects on
+OrganPipe/Rotated. Cache scrubbing did not remove them, indicating allocator/process-state
+reuse rather than simple data-cache warmth. Final whole-sort evidence therefore used a
+fork-isolated harness: baseline and candidate each run in a fresh child process from the
+same parent state with identical input. Direct insertion-phase harnesses were also used
+for V3-V7. Correctness required exact equality of blueprint, pile counts, tails, freeze/
+overflow metadata where applicable, and final sorted output.
+
+Representative fork-isolated whole-sort ratios (candidate / baseline)
+---------------------------------------------------------------------
+Variation   100k OrganPipe   100k Rotated   1m OrganPipe   1m Rotated
+V1             0.7972          0.8685          0.8056         0.8861
+V3             0.9829          0.9915          0.9517         0.9644
+V4             0.9620          0.9947          0.9670         0.9816
+V5*            0.9468          ~1.00           0.9504         ~1.00
+V6*            ~0.95           ~1.00           ~0.95          ~1.00
+V7             0.9520          0.9966          0.9690         0.9827
+
+* V5/V6 final production policy uses the stricter first-continuation-run gate; earlier
+  broad-gate Rotated measurements showed small repeatable regressions and motivated the
+  stricter retained condition.
+
+Targeted insertion-phase findings
+---------------------------------
+- V3-V7 generally show real local improvements even where whole-sort movement is only
+  a few percent. At 1m, OrganPipe insertion improvements are typically ~7-10%; Rotated
+  improvements are smaller and variation-dependent.
+- V1 is the standout propagation target: whole-sort gains remain roughly 19-20% on
+  OrganPipe and 11-13% on Rotated because physical-pile insertion avoids a larger amount
+  of repeated routing work when a compatible run can be appended in bulk.
+- Random is effectively neutral across variations, confirming the long-prefix gate keeps
+  the scanner off ordinary high-entropy input.
+
+Decision
+--------
+RETAIN across V1, V3, V4, V5, V6, and V7. Use the broad E098 gate in V1/V2/V3/V4/V7.
+Use the stricter first-continuation-run >=8 gate in V5/V6. Treat Rotated as a randomized
+family of split geometries, not a fixed shape, and use high-trial paired/fork-isolated
+evidence for future gate changes.
+
+
+E100. ROTATED SPLIT DISTRIBUTION / CANONICAL ONE-OFF SEED POLICY
+- Request: verify that the existing randomized Rotated workload is not materially
+  imbalanced before considering any generator redesign; preserve variety if the
+  canonical 500-trial distribution is healthy.
+- Rotated generation remains unchanged: sorted [0,n) data is rotated by one split
+  index drawn uniformly from [0,n-1] using the canonical per-trial RNG seed.
+- Audit used n=100k, 500 trials, canonical base seed 0x8A5CD789 and the shared
+  `jessesort::bench::trial_seed()` mixing from `benchmarks/benchmark_seed.h` (via
+  benchmark.cpp's workload wrapper). Exact split indices were recorded.
+- Distribution of the discontinuity position (1 - split/n):
+    * mean = 49.322%, median = 49.954%, stddev = 28.857%
+    * min = 0.005%, max = 99.814%
+    * decile counts = [50, 48, 64, 45, 43, 51, 50, 53, 52, 44]
+      versus an expectation of 50 per decile
+    * chi-square goodness-of-fit p = 0.691; Kolmogorov-Smirnov uniformity p = 0.760
+- Structural coverage at n=100k:
+    * 2/500 discontinuities fall within the first 64 positions (probe window)
+    * 56/500 fall after the probe but before 12.5% of input
+    * 442/500 occur at or after 12.5%, so E098's long-prefix gate is eligible
+    * 250/500 occur before the nominal 50% freeze/decision point
+    * 250/500 occur at or after the nominal 50% freeze/decision point
+    * V4-V6 may continue ordinary pile creation beyond 50% under their retained
+      power-of-two extension policies, so 50% is a decision point rather than an
+      unconditional physical freeze boundary for every trial.
+- Decision: RETAIN the current randomized Rotated generator. The 500 canonical
+  trials are well spread over the interval and show no evidence of problematic
+  imbalance. Variety is useful; no deterministic stratification is warranted now.
+- Methodology change: one-off canonical A/B tests must now share the benchmark's
+  starting seed and seed-mixing helper. `benchmarks/benchmark_seed.h` centralizes
+  that policy so the same trial index refers to the same canonical input population
+  across normal benchmarks and ad-hoc experiments.
+
+
+-------------------------------------------------------------------------------
+E101 — REVALIDATE E063 AFTER E085; RETIRE STALE PAIR-IMBALANCE FALLBACK
+Date: 2026-08-11
+Status: completed; E063 removed from production V2; propagation closed.
+
+Why this was revisited
+----------------------
+- The propagation audit noticed that E063's 1.5x per-pair imbalance fallback was
+  still present only in V2 and had never been propagated to V7/V3-V6.
+- Before propagating it, V7 was tested first as planned.
+- That test exposed a more important historical interaction: E063 was validated
+  before E085 replaced the old forward branchless merge with the much faster
+  bidirectional branchless kernel. Therefore E063's original branchless-vs-
+  galloping cost model could no longer be assumed current.
+
+Method
+------
+- Canonical base seed/mixing from `benchmarks/benchmark_seed.h` was used for all
+  new one-off populations.
+- Full-Random V7 A/B used fork-isolated timings because same-process measurements
+  showed the allocator/process-state bimodality documented in E099.
+- The decisive test used merge-only causal harnesses for the actual E063 target
+  regimes: 100k K3000 and K5000 duplicate-heavy Random-like inputs.
+- In each qualifying trial, insertion and reconstruction were outside the timer;
+  both modes received identical reconstructed buffers and run boundaries.
+- Baseline = current E085 bidirectional branchless merge for all globally routed
+  branchless pairs. Candidate = old E063 rule, falling back to the general/
+  galloping merge when max(left,right) > 1.5*min(left,right).
+- Exact final-output equality and sortedness were required on every timed trial.
+
+V7 result
+---------
+- Fork-isolated full Random remained essentially neutral, consistent with E063's
+  original observation that full Random was not the regime that justified it.
+- Merge-only target-regime results were clearly negative for E063:
+  - K3000, 100k: 660 qualifying trials; E063/current median ratio ~1.060
+    (~6.0% slower merge phase).
+  - K5000, 100k: 595 qualifying trials; E063/current median ratio ~1.093
+    (~9.3% slower merge phase).
+- Therefore E063 should not be propagated to V7.
+
+Current-V2 revalidation
+-----------------------
+- The same merge-only test was then run on current V2 rather than assuming the
+  old E063 evidence remained valid after E085.
+- K3000, 100k: 886 qualifying trials; E063/current median ratio ~1.047
+  (~4.7% slower merge phase).
+- K5000, 100k: 743 qualifying trials; E063/current median ratio ~1.088
+  (~8.8% slower merge phase).
+- A 300-pair fork-isolated whole-sort confirmation per target regime was noisy
+  and approximately neutral overall, which is expected because the changed
+  pair route is only one subphase. The direct merge-phase evidence is much
+  cleaner and follows the E090 methodology rule: judge narrow-phase changes by
+  both local and end-to-end effects rather than requiring a headline whole-sort
+  movement.
+
+Interpretation
+--------------
+- E063 was not a bad historical result. It optimized the older branchless merge
+  kernel that existed at the time.
+- E085 materially changed branchless merge economics by exposing independent
+  front/back dependency chains and delivered very large merge-phase gains.
+- After E085, routing moderately imbalanced pairs away from the bidirectional
+  branchless kernel to the older galloping/general path now loses performance in
+  exactly the transition regimes E063 was intended to help.
+- This is a concrete example of why retained heuristics must be re-profiled after
+  a major dominant-kernel improvement.
+
+Decision
+--------
+- RETIRE E063 from production V2.
+- Do not propagate E063 to V7 or V3-V6.
+- Remove the now-unused imbalance-ratio parameter and pair-routing branch from
+  the shared V2-family merge helper.
+- Keep E063's historical record intact as provenance, but current-state/roadmap
+  text must treat E101 as superseding it.
+
+Validation
+----------
+- V2/V7 target-regime A/B outputs matched exactly and were sorted on every trial.
+- Full repository build passes after cleanup.
+- Normal all-variation benchmark smoke completed across 1k/10k/100k/1m and all
+  ten canonical workload families with validation enabled.
+
+Artifacts (outside repository)
+------------------------------
+- e101_merge/k3000_100k.csv
+- e101_merge/k5000_100k.csv
+- e101_v2merge/k3000_100k.csv
+- e101_v2merge/k5000_100k.csv
+- e101_full/k3000_100k.csv
+- e101_full/k5000_100k.csv
+
+
+-------------------------------------------------------------------------------
+E102 — V3 FINAL PILE-DENSITY ROUTING RECALIBRATION
+Date: 2026-08-11
+Status: RETAINED, REVISED AFTER HIGH-TRIAL REVALIDATION; V3-specific 4.0 / 4.25 / 5.0 thresholds.
+
+Why this was revisited
+----------------------
+- The propagation audit found that V3 still used E038's fixed
+  `final_piles^2 >= 5*n` branchless-merge trigger, while V2/V7 had later moved to
+  E053's size-aware thresholds.
+- V3 is non-freezing and shares V2 insertion semantics, but its in-place cycle flattening
+  changes run ordering and the production merge context, so its crossover must be measured
+  independently.
+
+Original E102 decision and why it was reopened
+----------------------------------------------
+- The first E102 pass used a forced-kernel merge-only calibration that suggested branchless
+  crossover densities near 4.0 at 10k, 4.2-4.3 at 100k, and 5.0 at 1m.
+- A smaller set of fork-isolated whole-sort tests initially appeared to show regressions from
+  those lower thresholds (roughly 5% at 10k K200 and 15% at 100k K600), so the first E102
+  decision conservatively retained 6.0 / 6.5 / 7.0.
+- This contradicted a strong phase-local win. Per the lesson from E090, that disagreement was
+  reopened and both sides were deliberately over-sampled rather than treating the smaller
+  whole-sort result as final.
+
+High-trial revalidation methodology
+------------------------------------
+- All inputs use E100's canonical base seed and `benchmark_seed.h` trial mapping.
+- Isolated merge measurements use identical reconstructed V3 runs and compare forced
+  general/galloping versus E085 bidirectional branchless merging.
+- Whole-sort measurements use fork-isolated paired child processes from the same parent
+  state, comparing the lower candidate policy directly against the then-retained E102
+  6.0 / 6.5 / 7.0 policy.
+- Correctness validation is required on every child result.
+- Trial counts were increased well beyond the original evidence:
+    * 10k crossover cases: 10,000 phase pairs + 5,000 whole-sort pairs each.
+    * 100k crossover cases: 5,000 phase pairs + 2,000 whole-sort pairs each.
+    * 1m crossover cases: 1,000 phase pairs + 400 whole-sort pairs each.
+- Pile-density distributions were separately profiled with canonical trials so thresholds
+  are tied to density rather than particular Random-K cardinalities.
+
+High-trial results
+------------------
+10k:
+- K150, median density ~3.72: branchless phase ~0.822, but whole sort ~0.999 (neutral).
+- K200, median density ~4.41: branchless phase ~0.716; lower-policy whole sort ~0.871.
+- K300, median density ~5.20: branchless phase ~0.587; lower-policy whole sort ~0.798.
+- Therefore 4.0*n is a conservative useful production threshold: it leaves almost all K150
+  trials on general merge while routing K200+ to the clearly faster branchless kernel.
+
+100k:
+- K400, median density ~3.42: branchless phase ~1.299 (too early); whole sort ~1.003.
+- K500, median density ~4.03: branchless phase ~1.034 (near crossover/slightly early);
+  whole sort ~1.000.
+- K600, median density ~4.52: branchless phase ~0.908; lower-policy whole sort ~0.962.
+- K800, median density ~5.18: branchless phase ~0.743; whole sort ~0.895.
+- K1000, median density ~5.60: branchless phase ~0.663; whole sort ~0.846.
+- Therefore 4.25*n cleanly separates the K500-like neutral/early regime from the K600+
+  regime where the branchless kernel wins materially.
+
+1m:
+- K1500, median density ~3.99: branchless phase ~1.249; whole sort ~1.004 (neutral).
+- K2000, median density ~4.76: branchless phase ~1.121; whole sort ~0.986 (near neutral).
+- K2500, median density ~5.28: branchless phase ~0.961; whole sort ~0.978.
+- K3000, median density ~5.65: branchless phase ~0.871; whole sort ~0.973.
+- K5000, median density ~6.44: branchless phase ~0.723; whole sort ~0.905.
+- Therefore 5.0*n is the appropriate large-N crossover: it excludes the clearly slower
+  K1500/K2000 phase regime and admits K2500+ where the local and end-to-end signals improve.
+
+Retained rule (revised E102)
+----------------------------
+- n <= 20k: branchless if final_piles^2 >= 4*n.
+- 20k < n < 500k: branchless if final_piles^2 >= 4.25*n (4*pile^2 >= 17*n).
+- n >= 500k: branchless if final_piles^2 >= 5*n.
+- Existing `earlyRandomLike`, <=96-byte trivially-copyable merge guard, natural-run route,
+  and selected PowerSort scheduling remain unchanged.
+
+Interpretation / process lesson
+-------------------------------
+- The original isolated calibration was directionally correct. The apparent early
+  whole-sort regressions were not stable once both layers were adequately sampled.
+- This reproduces the earlier E090 lesson in a different phase: a strong local optimization
+  can be diluted or obscured by noisy whole-sort timing, and small conflicting end-to-end
+  signals require substantially more evidence before they override a clear causal phase win.
+- Future experiments must mark this situation UNRESOLVED and over-sample BOTH phase-local
+  and whole-sort measurements before retain/reject decisions.
+
+Artifacts (external to compact repo)
+------------------------------------
+- e102_recheck/phase_10k_k150.csv, phase_10k_k200.csv, phase_10k_k300.csv
+- e102_recheck/full_10k_k150.csv, full_10k_k200.csv, full_10k_k300.csv
+- e102_recheck/phase_100k_k400.csv, k500.csv, k600.csv, k800.csv, k1000.csv
+- e102_recheck/full_100k_k400.csv, k500.csv, k600.csv, k800.csv, k1000.csv
+- e102_recheck/phase_1m_k1500.csv, k2000.csv, k2500.csv, k3000.csv, k5000.csv
+- e102_recheck/full_1m_k1500.csv, k2000.csv, k2500.csv, k3000.csv, k5000.csv
+
+
+-------------------------------------------------------------------------------
+E103 — TESTING-PROCESS REVISION + REVISIT TAXONOMY
+Date: 2026-08-11
+Status: RETAINED PROCESS CHANGE; roadmap reprioritized, no sorting logic changed.
+
+Why this experiment/process revision was needed
+-----------------------------------------------
+- E090 and especially the high-trial E102 revalidation showed the same failure mode:
+  a strong, repeatable phase-local improvement was initially overshadowed by a smaller,
+  noisier whole-sort signal. When both layers were substantially over-sampled, the local
+  win remained and the apparent whole-sort regression reversed into a modest improvement.
+- Conversely, E091 and E097 lost badly in the targeted phase itself; more whole-sort trials
+  are unlikely to rescue those unchanged mechanisms.
+- E101 demonstrated a third category: E063 had once been valid, but E085 changed the
+  underlying merge cost model enough that the old routing heuristic became stale.
+- Therefore a single REJECTED label is too coarse for a long-running optimization program.
+
+Retained rejection taxonomy
+----------------------------
+1. MECHANISM REJECTED
+   - The targeted phase itself loses materially with adequate trials.
+   - Examples: E091 4-ary pile search; E097 mutable Eytzinger tail search; E034 smaller-side
+     merge; E013/E014/E015 merge-tree experiments with large direct regressions.
+   - Do not retry unchanged unless a materially new mechanism, data representation, compiler,
+     or hardware regime changes the premise.
+
+2. INTEGRATION REJECTED
+   - The local kernel/mechanism wins, but the attempted way of feeding enough work into it or
+     amortizing setup/spill/routing overhead loses. The mechanism remains a valid research
+     direction through a different integration.
+   - Canonical example: E057 proved exact-eight AVX2 lookup ~23-25% faster locally; E058
+     rejected the one-shot probe-gated integration because too little work stayed SIMD-resident.
+   - E055 broad natural-run batching is another useful precedent: the broad integration lost,
+     while E098/E099 later retained a narrowly gated version of the same underlying idea.
+
+3. POLICY / STALE-DEPENDENT REJECTED
+   - A threshold, scheduler, or route loses under the then-current phase costs. Major later
+     kernel changes can invalidate the old decision in either direction.
+   - Canonical example: E063 was historically beneficial, but E085's bidirectional merge
+     reversed the pair-level economics; E101 retired it.
+   - Old PowerSort propagation decisions and gallop-trigger routing fall into this class more
+     naturally than permanent mechanism rejection.
+
+Mandatory post-retention propagation protocol
+---------------------------------------------
+- Every retained algorithmic/performance change triggers a propagation audit across V1-V7.
+- For each other variation, classify the change as:
+    * TESTED + RETAINED,
+    * TESTED + REJECTED,
+    * NOT APPLICABLE because the relevant phase/data structure does not exist there, or
+    * INTENTIONALLY DIFFERENT, with the architectural reason recorded.
+- If a plausible propagation test cannot be run in the same experiment, add it explicitly to
+  Section 2 before starting unrelated optimization work. Do not rely on memory or on shared
+  helper code to imply that propagation has happened.
+- Propagation should preserve each variation's defining architecture. Port the mechanism, not
+  unrelated V2/V7 implementation details, and use causal A/B evidence independently per
+  variation when the economics can differ.
+- Once propagation is resolved, update both the detailed E### record and the current-state
+  summary so the retained family-wide scope is unambiguous.
+
+Mandatory local-vs-whole disagreement protocol
+----------------------------------------------
+- If a causal phase benchmark shows a strong repeatable improvement but whole-sort timing
+  shows only a small regression, neutral result, or unstable opposite signal, mark the
+  experiment UNRESOLVED.
+- Increase trial counts substantially on BOTH layers before retain/reject. Trial escalation
+  should be proportional to the effect size; E102 used up to 10,000 phase pairs / 5,000
+  whole-sort pairs at 10k, 5,000 / 2,000 at 100k, and 1,000 / 400 at 1m.
+- Preserve E100's canonical seed population and trial mapping so the two layers observe the
+  same input distribution.
+- Use fork-isolated paired whole-sort timing when allocator/process-state ordering effects
+  remain visible after ordinary alternation.
+- Report both local phase ratio and whole-sort ratio. Amdahl dilution is expected and is not
+  itself evidence against a local optimization.
+- Conversely, when the targeted phase itself loses decisively with adequate trials, do not
+  consume large whole-sort budgets trying to rescue the unchanged mechanism.
+
+Revisit audit after E102
+------------------------
+HIGH PRIORITY
+- V3 E045 gallop trigger: RESOLVED by E104. High-trial revalidation reversed E048's earlier
+  lightly sampled rejection and retained the 5/7 selector in V3. Propagation is complete: V1,
+  V2, V3, and V7 retain the selector; V4 qualifying shapes are already diverted to PowerSort;
+  V5/V6 frozen overflow layouts do not meet the selector's 12-128 balanced-run gate in the
+  propagation scan.
+- SIMD V7+ repeated/chunked integration: E057's local kernel win is proven; E058 rejected only
+  one integration strategy. Test sustained/chunked SIMD residency rather than rerunning the
+  old one-shot probe unchanged.
+
+MEDIUM / CONDITIONAL
+- V5 dynamic overflow + merge-tree balancing: do not rerun E060/E062's crude heuristics; build
+  the stronger joint overflow/scheduler cost model already on the roadmap. The old low-trial
+  simple-policy failures do not close the broader mechanism.
+- PowerSort in V1/V5/V6: E024-E026 had meaningful regressions and should remain closed as
+  standalone reruns, but classify them as stale-dependent because E085 materially changed
+  merge costs. Revisit only if merge-tree work is active, preferably jointly with new shaping.
+
+KEEP CLOSED UNCHANGED
+- E091 4-ary pile search: direct target phase 2.6-3.4x slower over thousands of trials.
+- E097 mutable Eytzinger search: target insertion up to ~72% slower and whole sort ~24% slower.
+- E034 smaller-side merge, E013/E014/E015 merge-tree alternatives: broad/large regressions.
+- E094 hot/cold merge continuation: already 5,000/2,000/400 phase trials and essentially 1.0.
+- E056 scalar hint-miss tweaks: the apparent win disappeared after restoring production-like
+  code layout and there is no retained strong local-kernel win to rescue.
+
+Roadmap decision
+----------------
+- E104 resolves the V3 E045 revisit and its propagation audit.
+- E105 resolves the immediate repeated/chunked AVX2 revisit: retain only the narrow 5k-20k
+  low-pile one-register continuation; broader/global and large-n integration remain rejected.
+- Keep V5 tree-aware overflow work as the highest-priority active optimization.
+- Revalidate old PowerSort propagation only when a new merge-tree design makes the question
+  relevant again.
+- Keep V1 density recalibration and first-merge-pass fusion active after these revisit items.
+
+Validation / repository impact
+------------------------------
+- E103 changes experiment methodology, status semantics, and roadmap only.
+- No sorting implementation, benchmark workload generator, or retained threshold changed.
+- Section 1 timing methodology and Section 2 active roadmap were updated to make this process
+  authoritative for future experiments, including mandatory post-retention propagation audits.
+
+
+-------------------------------------------------------------------------------
+E104 — V3 E045 GALLOP-TRIGGER HIGH-TRIAL REVALIDATION + PROPAGATION AUDIT
+Date: 2026-08-11
+Status: RETAINED IN V3; PROPAGATION RESOLVED
+
+Question
+- E048 rejected propagation of V2's E045 final-layout gallop-trigger selector to V3 after
+  roughly a ~1% Random regression and sub-percent structured gains. Under E103 this is a
+  policy/stale-dependent rejection, not a mechanism rejection: E085/E093/E102 materially
+  changed which V3 run sets reach the general merge and how expensive that merge is. Does
+  trigger 5 now provide a stable local and whole-sort benefit on the balanced moderate-run
+  layouts E045 was designed for?
+
+Policy re-tested
+- Default gallop trigger remains 7.
+- Trigger 5 is selected only when all of the following are true:
+    * the Random/high-entropy branchless merge route is not selected;
+    * PowerSort is not selected;
+    * reconstructed run count is 12 through 128 inclusive; and
+    * largest_run <= 1.25 * mean_run_length, expressed as
+      maxRun * runCount * 4 <= 5 * n.
+- No generator identity is used by the production selector.
+
+Methodology
+- Direct merge-phase A/B: identical V3 in-place-flattened runs, trigger 7 versus trigger 5.
+- Whole-sort A/B: fork-isolated child processes so allocator/process history cannot create the
+  first-versus-second distortion found in E099.
+- The E103 disagreement rule was applied explicitly. A 32-run descending periodic case showed
+  a small local win but initially neutral/slightly negative whole-sort movement, so both layers
+  were expanded rather than rejecting from the first whole-sort sample.
+
+High-trial evidence
+- 100k Sawtooth (21 balanced runs, selector active, no PowerSort/branchless):
+    phase: 3,000 pairs, trigger5/trigger7 median 0.9710 (~2.9% faster)
+    full:  1,000 fork-isolated pairs, median 0.9840 (~1.6% faster)
+- 1m Sawtooth:
+    phase: 1,200 pairs, median 0.9773 (~2.3% faster)
+    full:    400 fork-isolated pairs, median 0.9919 (~0.8% faster)
+- 100k ascending periodic, 32 runs:
+    phase: 2,000 pairs, median 0.9669 (~3.3% faster)
+    full:    600 pairs, median 0.9846 (~1.5% faster)
+- 100k ascending periodic, 64 runs:
+    phase: 2,000 pairs, median 0.9621 (~3.8% faster)
+    full:    600 pairs, median 0.9906 (~0.9% faster)
+- 100k descending periodic, 32 runs, deliberately over-sampled after local/full disagreement:
+    phase: 8,000 pairs, median 0.9933 (~0.7% faster)
+    full:  2,500 fork-isolated pairs, median 0.9995 (neutral)
+  The high-trial result removes the earlier apparent regression; this shape is effectively
+  whole-sort neutral while still slightly faster in the targeted merge phase.
+
+Decision
+- RETAIN E045's final-layout 5/7 gallop-trigger selector in V3.
+- E048's earlier V3 rejection is superseded by E104. The old decision was too lightly sampled
+  for a small policy-dependent effect and predated major merge/routing changes.
+- The result reinforces E103: a strong local win plus a small/noisy whole-sort disagreement is
+  UNRESOLVED until both layers are over-sampled.
+
+Mandatory propagation audit
+- V1: TESTED + RETAINED previously in E046.
+- V2: RETAINED owner of E045.
+- V3: TESTED + RETAINED by E104.
+- V7: already contains the V2-family E045 selector.
+- V4: NOT APPLICABLE under the current scheduler ordering for the qualifying shapes tested.
+  In a 100k periodic scan over 6,8,12,16,20,24,32,48,64,96 cycles in both directions, only
+  the 16- and 32-run layouts met the E045 balanced-run gate, and every one of those layouts
+  was already diverted to V4's retained PowerSort path before adjacent galloping is considered.
+- V5/V6: NOT APPLICABLE under the current frozen overflow run geometry in the same scan. Their
+  reconstructed layouts either exceeded 128 runs or failed the <=1.25x max/mean balance gate;
+  no tested 6-96-cycle periodic layout reached the E045 selector. Revisit only if freeze,
+  overflow partitioning, or scheduler policy later changes those run geometries.
+
+Validation
+- Production V3 was updated to compute the E045 selector after in-place flattening and before
+  merge-scheduler selection. PowerSort still takes precedence and retains its own behavior.
+- Repository rebuilt cleanly.
+- Standard 100-trial x 100k x 10-workload benchmark completed with correctness validation for
+  all V1-V7 paths.
+
+Evidence
+- /mnt/data/e104_results/saw_100k.csv
+- /mnt/data/e104_results/saw_1m.csv
+- /mnt/data/e104_results/p32_100k.csv
+- /mnt/data/e104_results/p64_100k.csv
+- /mnt/data/e104_results/d32_100k_hi.csv
+- /mnt/data/e104_prop/scan.txt
+
+
+-------------------------------------------------------------------------------
+E105 — V7 REPEATED ONE-REGISTER AVX2 CONTINUATION
+Date: 2026-08-11
+Status: RETAINED NARROWLY IN V7; BROADER INTEGRATION REJECTED; PROPAGATION RESOLVED
+
+Question
+- E057 proved that an exact-eight int32 AVX2 pile lookup is ~23-25% faster than the scalar
+  bit-walk in isolation, while E058/E075 showed that one-shot probe gating or long capped probes
+  do not amortize reliably. Can the same one-register primitive be reused repeatedly inside a
+  larger tail array without sequentially scanning multiple vectors or carrying large spill runs?
+
+Candidate design
+- After the ordinary exact-hint check misses, compare one contiguous 8-tail AVX2 window centered
+  around the previous pile hint. If the insertion boundary lies inside that window, resolve it
+  with one vector compare + movemask + ctz; otherwise fall back immediately to the existing
+  scalar bit-walk. No sequential multi-register scan is performed.
+- Instrumentation showed that global enablement is wrong: at n=100k, Random/Random%100 produced
+  thousands of window attempts but only ~8-10% window hits, whereas Sawtooth produced only ~173
+  attempts but ~94% of those attempts resolved inside the window. The ordinary exact hint already
+  catches the overwhelming majority of Sawtooth insertions, limiting the maximum whole-sort gain.
+- A free outer gate therefore reuses post-probe structure: enable the window only when the input
+  size is 5k-20k and the two ordinary post-probe pile counts sum to <=12. No new scan or per-input
+  generator identity is used.
+
+High-trial evidence
+- Ungated 100k integration was rejected: Random insertion slowed by roughly 1%, confirming that
+  low-hit vector probes cannot be paid globally.
+- Gated 100k Sawtooth initially produced only a tiny benefit and 1m reversed: 1m Sawtooth over
+  1,200 fork-isolated insertion-phase pairs was ~0.43% slower and 400 whole-sort pairs were
+  ~0.31% slower. Therefore large-n windowing is rejected.
+- 10k Sawtooth, targeted small-size route:
+    * insertion phase: 5,000 fork-isolated pairs, window/baseline median 0.98393
+      (~1.6% faster);
+    * whole sort: initial 3,000-pair run median 0.99285 (~0.7% faster);
+    * independent 3,000-pair replication using later canonical trial indices: 0.99267
+      (~0.73% faster).
+- 20k Sawtooth:
+    * insertion phase: 4,000 pairs, 0.99295 (~0.7% faster);
+    * whole sort: 2,500 pairs, 0.99769 (~0.23% faster).
+- 10k full-workload guardrail, 2,000 fork-isolated whole-sort pairs each: Random 1.00023,
+  Sorted+Noise 0.99974, Random%100 1.00183, Alternating 0.99998, Sawtooth 0.99598,
+  BlockSorted 1.00002, OrganPipe 1.00000, Rotated 0.99885. The small Random%100 movement
+  did not replicate: an independent 3,000-pair run was 1.00099 (neutral).
+- n=1k Sawtooth was neutral/slightly negative (1.00074 over 5,000 pairs), motivating the lower
+  5k size gate rather than enabling the route for all small arrays.
+
+Decision
+- RETAIN only the narrow V7 route: int/std::less AVX2, n in [5k,20k], <=12 ordinary post-probe
+  piles, and only after the scalar exact-hint check misses.
+- REJECT global windowing, 100k+ continuation, and any sequential multi-register AVX2 scan.
+- E057 remains a valid mechanism win; E105 shows that its useful integration envelope is small
+  because the existing hint path already removes most structured-search work.
+
+Mandatory propagation audit
+- V7: TESTED + RETAINED narrowly.
+- V1-V6: INTENTIONALLY NOT PROPAGATED. This is an int/std::less AVX2 specialization and V7 exists
+  specifically as the SIMD research variation; copying it into V2 would erase the scalar V2
+  comparison baseline, while V1/V3-V6 have distinct insertion representations. Revisit only if
+  SIMD becomes part of the intended production/default family rather than an experimental V7+ axis.
+
+Validation
+- Repository rebuilt cleanly with -O3 -march=native -DNDEBUG -Wall -Wextra -Wpedantic.
+- Standard 100-trial x 10k x 10-workload benchmark completed with correctness validation across
+  all V1-V7 variations after enabling the retained V7 route.
+
+Process interpretation
+- This is an INTEGRATION result, not a new SIMD mechanism result. The high-trial process avoided
+  both errors: global/large-n integration was rejected from direct phase evidence, while the
+  small 10k local win was not discarded merely because its whole-sort gain was sub-1%.
+
+-------------------------------------------------------------------------------
+E106 — V5 DATA-AWARE FIRST OVERFLOW-BOUNDARY / MERGE-TREE SHAPING
+Date: 2026-08-11
+Status: REJECTED; NO PRODUCTION CODE CHANGE; V5 RESTORED BYTE-FOR-BYTE
+
+Question
+- E060 found that local boundary shaping was safer than global adaptive band sizing, and E062
+  concluded that overflow shaping has useful leverage primarily when it changes merge levels,
+  enables ordered-boundary elimination, or is paired with a size-aware scheduler. Can V5 use
+  actual reconstructed values at the frozen/overflow boundary to shape only the first deferred
+  band while leaving all later bands at the retained size 32?
+
+Candidate A — split 32 -> 16 only to create an ordered boundary
+- After ordinary V5 reconstruction gathers overflow values, inspect the maximum of the last
+  frozen run plus prefix minima of the first 16 and 32 overflow values.
+- Trigger only when sorting the first 16 values would make the frozen/overflow boundary already
+  globally ordered, while the ordinary 32-value first band would not. Use 16 only for that first
+  band, then immediately return to canonical 32-element bands.
+- 100k standard-workload screening showed meaningful triggers only on Sorted+Noise (~8% of
+  canonical trials); other standard families almost never qualified.
+- Trigger-conditioned 100k Sorted+Noise, canonical seeds:
+    * 1,000 reconstruction+merge phase pairs: candidate/baseline median 1.00306;
+    * 500 fork-isolated whole-sort pairs: 1.00016.
+- Decision: reject. Creating one eliminable boundary by splitting the first band is neutral to
+  slightly slower and does not repay the changed small-sort/run geometry.
+
+Candidate B — coalesce first ordered region to 64
+- Opposite strategy: if all first 64 overflow values can form a run already globally ordered
+  after the last frozen run, make the first deferred overflow run size 64 and then return to 32.
+  This preserves an eliminable frozen/overflow boundary while reducing downstream run count.
+- Initial 1,000 phase / 500 whole-sort trigger-conditioned pairs disagreed slightly, so E103's
+  mandatory high-trial rule was invoked.
+- Expanded 100k Sorted+Noise evidence:
+    * 4,000 reconstruction+merge phase pairs: 0.99667 (~0.33% faster locally);
+    * 1,600 fork-isolated whole-sort pairs: 1.00289 (~0.29% slower end-to-end).
+- The local gain is small and the actual sort is consistently worse at higher trial count.
+  Decision: reject this integration.
+
+Candidate C — coalesce first ordered region to 128
+- Same data-aware condition as Candidate B but require the first 128 overflow values to remain
+  globally ordered after the last frozen run, reducing more overflow runs at the price of a
+  larger deferred sort.
+- Expanded trigger-conditioned 100k Sorted+Noise evidence:
+    * 3,000 reconstruction+merge phase pairs: 1.00063 (neutral);
+    * 1,200 fork-isolated whole-sort pairs: 1.00265 (~0.27% slower).
+- Decision: reject.
+
+Interpretation
+- E106 strengthens E062's structural conclusion. Under V5's current scheduler, changing only the
+  first overflow boundary does not provide enough downstream leverage, even when the planner uses
+  actual values and explicitly preserves/creates an ordered boundary.
+- The 32-element E090 smallsort plus current adjacent/defer scheduler is already difficult to beat
+  with a single local boundary perturbation.
+- Future V5 merge-tree work should therefore require a materially different idea: jointly plan
+  multiple overflow boundaries and/or select a scheduler from actual post-insertion structure.
+  Do not retry fixed/global band constants, blind pair equalization, power-of-two run counts, or
+  first-boundary-only 16/64/128 shaping unchanged.
+
+Research-process handling
+- Candidate B produced the exact local-vs-whole disagreement covered by E103. Neither layer was
+  allowed to decide the experiment from the initial sample; both were substantially oversampled.
+- Because no candidate was retained, the mandatory post-retention propagation audit does not
+  apply. V1-V4/V6/V7 remain unchanged.
+
+Repository result
+- All E106 experimental hooks/harnesses were removed from the packaged repository.
+- include/jessesort/v5_deferred_bands.h was restored byte-for-byte to its E105 production version.
+- The repository rebuilds cleanly after restoration.
+
+External evidence files
+- /mnt/data/e106_trigger_100k.csv
+- /mnt/data/e106_trigger64_100k_hi.csv
+- /mnt/data/e106_trigger128_100k_hi2.csv
+
+
+-------------------------------------------------------------------------------
+E107 — V1 SIZE-AWARE RANDOM MERGE-DENSITY RECALIBRATION
+Date: 2026-08-11
+Status: RETAINED; V1-SPECIFIC 3.5 / 4.25 / 5.0 DENSITY RULE
+
+Question
+- V1 still used E041's fixed finalPileCount^2 >= 5*n branchless-merge threshold plus a
+  minority-game balance gate. After E085 substantially improved the bidirectional branchless
+  kernel, does V1 now benefit from earlier branchless routing at small/mid sizes?
+- V1 was calibrated independently rather than inheriting V2/V3 coefficients because physical
+  piles change flattening/ownership and V1 retains its own game-balance classifier.
+
+Phase calibration — forced general vs bidirectional branchless merge
+- Canonical Random-K cohorts were used to sweep actual V1 final-pile density while preserving
+  the existing >=25% minority-game balance condition.
+- 10k, 3,000 phase pairs each:
+    * K100, density ~2.59: branchless/general 1.2212 (branchless slower);
+    * K125, density ~3.20: 0.9745 (small local win);
+    * K150, density ~3.72: 0.8226 (~17.7% faster);
+    * K200, density ~4.41: 0.6877 (~31.2% faster).
+- 100k:
+    * K500, density ~4.05, 1,500 pairs: 1.0165 (slightly slower);
+    * K550, density ~4.30, 2,000 pairs: 0.9612 (~3.9% faster);
+    * K600, density ~4.52, 2,000 pairs: 0.9007 (~9.9% faster);
+    * K700, density ~4.89, 1,500 pairs: 0.8176 (~18.2% faster).
+- 1m, 300 phase pairs each:
+    * K1500, density ~4.00: 1.2178;
+    * K2000, density ~4.77: 1.0404;
+    * K2500, density ~5.28: 0.9290;
+    * K3000, density ~5.65: 0.8317;
+    * K5000, density ~6.45: 0.6909.
+- These crossovers support a deliberately conservative size-aware candidate of 3.5*n at <=20k,
+  4.25*n through the mid-size regime, and the existing 5.0*n at >=500k.
+
+High-trial fork-isolated whole-sort confirmation — candidate vs old fixed 5*n
+- 10k K150, 5,000 pairs: 0.96857 (~3.1% faster).
+- 10k K200, 5,000 pairs: 0.94007 (~6.0% faster).
+- 100k K550, 2,500 pairs: 0.99176 (~0.8% faster).
+- 100k K600, 2,500 pairs: 0.97752 (~2.2% faster).
+- 100k K700, 2,000 pairs: 0.95746 (~4.3% faster).
+- No 1m production behavior changes because both old and new policies use 5.0*n there.
+
+Decision
+- RETAIN V1-specific size-aware density routing:
+    <=20k: 2*pileCount^2 >= 7*n  (3.5*n)
+    20k..499999: 4*pileCount^2 >= 17*n (4.25*n)
+    >=500k: pileCount^2 >= 5*n
+- Preserve V1's existing minorityPileCount*4 >= finalPileCount game-balance gate and <=96-byte
+  trivially-copyable type gate.
+
+Mandatory propagation audit
+- V1: TESTED + RETAINED in E107.
+- V3: ALREADY INDEPENDENTLY CALIBRATED in revised E102 at 4.0/4.25/5.0; do not overwrite it.
+- V2/V7: ALREADY INDEPENDENTLY CALIBRATED by E053 at 6.0/6.75/7.5 at the time of E107.
+  E108 SUPERSEDES the E107 interpretation that this proved an inherently later simulated
+  reconstruction crossover for V2: E053 predates E085 and V2/V3 share pile formation and merge
+  kernels. V2 now requires controlled revalidation after the non-freezing parity work. V7 remains
+  separately confounded by its capped-probe front end and is not part of the V1/V2/V3 parity claim.
+- V4/V5/V6: NOT DIRECTLY APPLICABLE as a threshold copy. Their early-freeze/overflow pipelines
+  use different post-insertion random classifiers/run geometries; E107 does not supply causal
+  evidence for changing those policies. No propagation change made.
+
+Validation
+- Repository rebuilt cleanly after the retained V1 change.
+- Standard 100-trial x 10-workload benchmarks at 10k and 100k completed with correctness
+  validation across V1-V7.
+
+Process interpretation
+- E107 reinforces E102's lesson: major kernel changes can move routing crossovers substantially.
+  Recalibrate the owner variation directly, then audit propagation; do not assume either an old
+  threshold or another variation's newer threshold remains correct.
+
+
+-------------------------------------------------------------------------------
+E108 — V1/V2/V3 NON-FREEZING PARITY AUDIT + RECONCILIATION ROADMAP
+Date: 2026-08-11
+Status: DOCUMENTATION / PLANNING; NO SORTING LOGIC CHANGED
+
+Trigger
+- E107 retained V1 density thresholds of 3.5/4.25/5.0 while V2 still used E053's
+  6.0/6.75/7.5 and V3 used revised E102's 4.0/4.25/5.0.
+- This divergence was questioned because V1/V2/V3 are all non-freezing JesseSort designs and
+  should form the same patience piles for the same input. V4-V6 can legitimately diverge
+  because freeze/overflow changes final run geometry; V7 can diverge because its capped-probe
+  path can alter pile formation. The non-freezing trio requires a stricter explanation.
+
+Code audit findings
+1. V2 and V3 insertion/pile formation are identical by construction.
+   - V3 calls `jessesort::simulated::simulatePatienceInsertionBlueprint()` directly.
+   - Therefore game assignment, local pile ID, asc/desc pile counts, and per-pile lengths are
+     identical for V2 and V3 before flattening.
+2. V1 is a separate physical-pile implementation but intends the same pile-placement semantics.
+   - It owns independent search/hint code and physical vectors, so semantic parity should be
+     asserted directly rather than assumed forever.
+   - Nothing in its intended algorithm requires different pile counts or lengths.
+3. Materialized game-group order differs.
+   - V1: descending-game piles first, then ascending-game piles.
+   - V2: descending-game runs first, then ascending-game runs.
+   - V3: ascending-game runs first, then descending-game runs.
+   - This does NOT change the run-length multiset, but it changes adjacency and therefore can
+     alter pairings, ordered boundaries, PowerSort decisions, and cache state.
+4. Merge-driver implementation differs materially.
+   - V1 owns `mergeRuns()`.
+   - V2/V3 share `mergeRunsFromTmpToArr()`.
+   - V1 and V2/V3 therefore should not be assigned different thresholds before testing whether
+     driver differences themselves are still justified.
+5. Scheduler policy differs materially.
+   - V2/V3 can call `shouldUsePowerSortMerge()` / `mergeRunsPowerSortStyle()`.
+   - V1 currently has no corresponding PowerSort path.
+   - This is a major confound because scheduler choice changes merge depth/traffic and which
+     adjacent pairs reach the two-run kernels.
+6. Ordered-boundary probing differs.
+   - V1 removes already ordered adjacent boundaries every merge level.
+   - Shared V2/V3 initially probes boundaries but adaptively disables the scan when it ceases
+     to remove enough boundaries (`newRuns > 64` and <25% removed).
+7. Random-regime classifier differs.
+   - V1: final density + minority-game >=25% balance gate.
+   - V2/V3: `earlyRandomLike` insertion signal + final density.
+   - Thus two variations with the same pile shape can intentionally make different routing
+     decisions before the density coefficient is even considered.
+8. Flatten/reconstruction memory path differs.
+   - V1 physically flattens into a new `flat` vector.
+   - V2 counting-scatters normalized blueprint IDs into temporary storage.
+   - V3 cycle-permutes the input in place, then prepares merge ping-pong storage.
+   - These can affect cache/allocation state but do not justify assuming different pile shape.
+
+Threshold interpretation correction
+- Current coefficients remain production behavior for now, but their interpretation changes:
+    * V1 E107 3.5/4.25/5.0: PROVISIONAL pending reconciliation.
+    * V2 E053 6.0/6.75/7.5: HIGHEST-PRIORITY REVALIDATION because E053 predates E085.
+    * V3 E102 4.0/4.25/5.0: PROVISIONAL pending reconciliation.
+- In particular, withdraw the prior claim that V2/V7's later crossover demonstrates that
+  simulated reconstruction inherently needs 6/6.75/7.5. V2 and V3 share pile formation and
+  merge kernels; the difference is confounded by ordering, policy, and chronology.
+
+Canonical game-numbering hypothesis
+- Current simulated blueprint convention is ascending game = 0, descending game = 1, while
+  V1/V2's natural materialized order is descending then ascending.
+- Proposed test: renumber descending game = 0 and ascending game = 1, then use one canonical
+  descending-first materialization across V1/V2/V3.
+- Expected benefit if performance-neutral: simpler tag/global-run mapping, less variation-specific
+  order logic, and a cleaner shared non-freezing pipeline.
+- This is NOT retained yet. E030 previously found V3 descending-first slower under an older cost
+  model; that result must be revalidated after E085/E093/E102/E104 rather than ignored or assumed
+  permanent.
+
+Planned reconciliation sequence
+A. Build an insertion-shape parity harness and prove V1/V2/V3 pile equivalence directly.
+B. Isolate game numbering/materialization order. Re-test V3 ascending-first vs descending-first
+   under current kernels; test semantic renumbering separately from physical order.
+C. Feed identical flattened runs into V1's merge driver and the shared V2/V3 driver with scheduler
+   and kernel choices held constant. Decide whether two merge drivers are still justified.
+D. Revalidate PowerSort across the reconciled non-freezing family. E024's V1 rejection predates
+   E085 and must be treated as stale-dependent.
+E. Reconcile ALWAYS vs ADAPTIVE ordered-boundary probing.
+F. Reconcile V1 final-balance classifier vs V2/V3 `earlyRandomLike` classifier.
+G. Only then recalibrate branchless/general density thresholds for V1/V2/V3 together, preferring
+   one common policy unless a remaining intentional architectural difference proves otherwise.
+H. Defer first-merge-pass fusion until this baseline is reconciled so fusion work is not built on
+   accidental V1/V2/V3 drift.
+
+Decision
+- NO CODE CHANGE.
+- Reframe the current V1/V2/V3 differences as an explicit reconciliation program and make it the
+  top of the active roadmap.
+- The next experiment should be the insertion-shape parity harness, not another density tweak.
+
+
+-------------------------------------------------------------------------------
+E109 — COMMON V1/V2/V3 CONVERGENCE BASELINE
+Date: 2026-08-11
+Status: RETAINED COMMON STARTING POINT; INDIVIDUAL REGRESSIONS EXPLICITLY DEFERRED
+
+Goal
+- Stop carrying a collection of historically independent V1/V2/V3 policies as the baseline.
+- Cherry-pick the strongest/recently retained shared policies into the three non-freezing
+  variations, preserve their defining storage/flattening architectures, and record all resulting
+  gains/losses for later isolated retuning.
+- E109 is intentionally not a proof that every copied policy is optimal everywhere. It creates
+  one understandable starting point so later exceptions are evidence-backed rather than inherited.
+
+Policies cherry-picked into the common baseline
+1. Density routing: 3.5 / 4.25 / 5.0 for <=20k / 20k..499999 / >=500k.
+   - Source: most recent high-trial V1 E107 and revised V3 E102 evidence.
+   - V2's older E053 6/6.75/7.5 coefficients predated E085 and are superseded for the E109 baseline.
+2. Random-route prerequisite: first-64 `earlyRandomLike` for V1/V2/V3.
+   - Source: V2/V3 retained insertion routing. V1 already computed this signal; E109 simply uses
+     it for merge routing instead of the separate final >=25% minority-game balance predicate.
+3. Materialized run order: descending-game runs first, then ascending-game runs.
+   - Source: existing V1/V2 order; propagated mechanically to V3 to remove an ordering difference.
+   - Historical V3 ascending-first evidence is not erased; E109 records any slowdown for follow-up.
+4. Selective PowerSort scheduling in V1/V2/V3.
+   - Source: current V2/V3 retained `shouldUsePowerSortMerge()` policy. Added to V1 without
+     replacing V1's whole physical-pile merge driver.
+5. Adaptive ordered-boundary probing in V1/V2/V3.
+   - Source: shared V2/V3 merge driver. V1 now stops repeated scans when run count remains >64
+     and the previous scan removed <25% of boundaries.
+6. Already-common policies left unchanged: E045 gallop selector, E085 bidirectional branchless
+   kernel, E093 <=96-byte merge type gate, natural-run batching, monotone exits.
+7. Tag encoding NOT changed. Simulated tags remain asc=0 / desc=1; E109 aligns materialized order
+   only so the change stays scoped to V1/V2/V3 rather than perturbing V4-V7.
+
+Correctness
+- Repository rebuilt successfully after convergence.
+- Standard smoke benchmark across all ten workloads passed sortedness validation for V1-V7.
+
+Before/after measurement method
+- 10k and 100k: 200 canonical deterministic trials per workload, same seeds before/after.
+- Deltas are normalized as median `(after/std::sort)/(before/std::sort)` so separate-process host
+  drift is reduced; <1 is faster after E109, >1 is slower.
+- 1m: targeted guardrails were used because the broad 20-trial sweep was too noisy for Rotated.
+  Rotated was rechecked with 50 canonical trials; Random with 20 canonical trials.
+
+10k notable changes
+- V1: Reverse -4.7%, Alternating -1.9%, Sorted -1.9%; regressions OrganPipe +6.9%, Rotated +7.4%,
+  BlockSorted +2.7%, Sawtooth +2.2%, Sorted+Noise +2.2%.
+- V2: generally improved/neutral: Reverse -4.4%, Sorted+Noise -3.8%, Sorted -2.1%, Random%100
+  -1.8%, Alternating -1.5%; Sawtooth essentially neutral.
+- V3: Random -3.0%, Rotated -3.0%, Reverse -4.5%; major OrganPipe regression +22.7%, plus
+  Sawtooth +3.7% and BlockSorted +2.8%.
+
+100k notable changes
+- V1: mostly regressions under the convergence bundle: Sorted+Noise +7.5%, Sawtooth +3.6%,
+  BlockSorted +3.1%, Rotated +2.4%, OrganPipe +2.0%, Random +1.5%.
+- V2: Random/Random%100/Rotated essentially neutral; Sorted+Noise -1.5%; regressions BlockSorted
+  +4.0%, Sawtooth +3.5%, Alternating +2.5%.
+- V3: Random +0.8% and Random%100 +0.8%; regressions BlockSorted +8.9%, Sawtooth +6.6%,
+  Rotated +5.1%, OrganPipe +4.4%, Alternating +1.9%.
+
+1m targeted guardrails
+- Random, 20 canonical trials normalized to std::sort:
+    * V1: ~+1.2% slower after convergence;
+    * V2: ~+1.1% slower;
+    * V3: ~+1.7% slower.
+- Rotated, 50 canonical trials normalized to std::sort:
+    * V1: before 0.1233, after 0.1438 => ~16.6% slower;
+    * V2: before 0.1486, after 0.1449 => ~2.5% faster;
+    * V3: before 0.2149, after 0.1884 => ~12.3% faster.
+- An earlier 20-trial broad 1m Rotated snapshot produced extreme ratios and was treated as
+  under-sampled/process-noisy; it is not used for the retained E109 interpretation.
+
+Decision
+- RETAIN the convergence bundle as the new common V1/V2/V3 starting point despite documented
+  regressions. This is deliberate: later experiments should isolate and justify exceptions from
+  E109 rather than inheriting unexplained pre-E109 variation drift.
+- The follow-up process is POLICY-CENTRIC, not VARIATION-CENTRIC. Every E109 policy that is revisited
+  must be A/B tested across V1, V2, and V3 even if the candidate loses on the first variation tested.
+  Any final divergence among the three must therefore be an explicit measured exception rather than
+  an accident of historical test order.
+- Pre-E109 policies removed from one variation (for example V1's game-balance guard or always-on
+  ordered-boundary probing, V3's ascending-first run order, or V2's higher density thresholds) are
+  candidates for all three variations when revisited; do not restore them only to the original owner
+  without completing the three-way matrix.
+- Maintain the E109 before/after delta table as the reference for whether later retuning recovers
+  performance without reintroducing opaque policy divergence.
+
+
+### E109 baseline implementation correction (pre-E110 audit)
+A source audit before beginning E110 found that V2's E109 comment said the common
+3.5 / 4.25 / 5.0 density policy had been applied, but the mid/large expressions
+still encoded the former 6.75 / 7.5 thresholds. This was an implementation
+oversight, not an experimental result. V2 is corrected to the documented E109
+common policy before any E110 measurements. This correction is part of making
+E109 the intended common baseline and is not treated as a new optimization.
+
+
+-------------------------------------------------------------------------------
+E110 — V1/V2/V3 MATERIALIZED GAME/RUN ORDER REVALIDATION
+Date: 2026-08-11
+Status: REJECTED AS COMMON CHANGE; E109 DESCENDING-FIRST BASELINE RETAINED
+
+Question
+- E109 standardized V1/V2/V3 on descending-game runs first, then ascending-game runs.
+- V3 historically used ascending-first, and E109's bundle showed a large V3 OrganPipe regression.
+- Test whether ascending-first should replace descending-first across the entire non-freezing trio.
+- Per the E109 process rule, the candidate was implemented and measured in V1, V2, and V3 rather
+  than restoring it only to its historical owner.
+
+Candidate
+- V1: flatten ascending physical piles first, then reversed descending piles.
+- V2: normalized simulated reconstruction assigns ascending runs the low global run IDs and
+  descending runs the high IDs; cursor direction remains correct for each game.
+- V3: in-place destination layout becomes ascending runs first, then descending runs.
+- No pile formation, density routing, merge kernel, PowerSort policy, or boundary-probe policy was
+  intentionally changed.
+
+Correctness
+- Candidate rebuilt successfully.
+- 10-workload smoke benchmark passed sortedness validation for V1-V7.
+
+Measurement
+- 50 deterministic paired trials per workload at 10k and 100k, same benchmark seed policy.
+- Deltas below are candidate ascending-first median paired ratio to std::sort divided by the E109
+  descending-first baseline median paired ratio; negative is faster with ascending-first.
+
+10k notable deltas
+- V1: BlockSorted -10.1%, Random%100 -1.7%, but OrganPipe +9.0%, Rotated +16.1%,
+  and Alternating +44.7%. Other workloads were near neutral to small regressions.
+- V2: Sorted+Noise -5.4%, Rotated -6.4%; OrganPipe +4.4%, Alternating +3.5%, Random%100 +2.6%.
+  Overall median effect was essentially neutral.
+- V3: OrganPipe -14.4%, BlockSorted -6.7%, Sawtooth -2.8%; Rotated +15.6%, Alternating +4.0%.
+  This confirms that V3's E109 OrganPipe loss was substantially caused by materialized order, but
+  the historical ascending-first order introduces a meaningful Rotated tradeoff under current code.
+
+100k notable deltas
+- V1: Alternating -7.2%; BlockSorted +5.1%, Sorted+Noise +3.1%, OrganPipe +2.0%.
+  Rotated measured much faster (-46.5%), opposite the 10k direction, reinforcing that order effects
+  are strongly workload/size dependent rather than a stable global V1 win.
+- V2: Alternating -10.0% and Rotated -30.3%; OrganPipe +9.9%, Random%100 +7.7%, Random and
+  Sorted+Noise +3.8% each. Again, no broad common win.
+- V3: OrganPipe -18.7%, Sawtooth -3.9%, BlockSorted -2.1%; Rotated +8.2%, Sorted+Noise +5.7%,
+  Random +3.1%.
+
+Interpretation
+- Materialized game order is not performance-neutral under the current schedulers: changing which
+  game appears first changes adjacent run boundaries and therefore merge scheduling/traffic.
+- V3 has a real architecture-specific reason to prefer ascending-first on OrganPipe and some other
+  structured layouts, but that preference is not universal even within V3 because Rotated moves in
+  the opposite direction.
+- V1 and V2 likewise show large workload/size interactions. Therefore a single global order policy
+  cannot be justified from this test, and restoring V3's old order unconditionally would simply
+  trade one regression family for another.
+
+Decision
+- REJECT ascending-first as a common V1/V2/V3 baseline change.
+- Restore and retain E109 descending-first for all three for now.
+- Preserve the measured V3 OrganPipe/BlockSorted/Sawtooth recovery as evidence for a possible future
+  structure-aware order/scheduler interaction test after the simpler E109 policies are isolated.
+- Continue the policy-centric reconciliation sequence; next candidate should test another E109
+  convergence policy across all three rather than making a V3-only exception from this mixed result.
+
+
+-------------------------------------------------------------------------------
+E111 — V1/V2/V3 SELECTIVE POWERSORT REVALIDATION
+Date: 2026-08-11
+Status: RETAINED REMOVAL; ADJACENT-PAIR SCHEDULING IS THE COMMON V1/V2/V3 BASELINE
+
+Question
+- E109 propagated V2/V3's historical selective PowerSort scheduler to V1 as part of the common
+  convergence baseline, but V2/V3's positive evidence came from E021/E023 before later kernel,
+  routing, boundary, and materialization changes; V1's E024 rejection was likewise stale.
+- Re-test PowerSort ON versus OFF across all three non-freezing variations under the same current
+  E110 baseline instead of inheriting the historical decisions.
+
+Isolation and measurement
+- Candidate disabled only the `shouldUsePowerSortMerge()` path in V1/V2/V3. Run order, pile
+  formation, density routing, E045 gallop routing, E085 branchless kernels, and adaptive ordered-
+  boundary probing were unchanged.
+- Initial separate-process 50-trial 10k/100k sweeps showed process drift even on workloads where
+  PowerSort could not be selected, so they were not used as primary decision evidence.
+- A tighter paired harness put PowerSort-ON and PowerSort-OFF copies of V1/V2/V3 in the same process,
+  on the same per-trial input, with rotating execution order. 100 paired trials were run at 100k.
+- Targeted paired guardrails used Sorted+Noise(5%) and OrganPipe at 500k (60 trials) and 1m
+  (60 trials). Negative deltas below mean PowerSort OFF was faster.
+
+100k paired results — PowerSort OFF versus ON
+- V1: Sorted+Noise -9.97%; Alternating -2.06%; Random -3.33%; BlockSorted +1.16%;
+  OrganPipe +4.68%. Sorted/reverse were neutral as expected.
+- V2: Sorted+Noise -8.54%; Alternating -1.05%; Rotated -1.05%; OrganPipe +1.38%;
+  other routine workloads approximately neutral.
+- V3: Sorted+Noise -3.33%; BlockSorted -1.94%; OrganPipe -9.79%; most other workloads neutral.
+- The central result is that the old selector's principal 100k target, Sorted+Noise(5%), now loses
+  under PowerSort in all three variations after the newer convergence changes.
+
+500k targeted paired guardrail
+- Sorted+Noise(5%): V1 -3.94%, V2 -0.94%, V3 -3.78% with PowerSort OFF.
+- OrganPipe: V1 -1.96%, V2 +1.21%, V3 -1.91%.
+- This continues to favor OFF for V1/V3 and is mixed/near-neutral for V2.
+
+1m targeted paired guardrail
+- Sorted+Noise(5%): V1 -6.26%, V2 +1.29%, V3 -1.70%.
+- OrganPipe: V1 -4.88%, V2 -2.12%, V3 +0.07%.
+- V2 therefore retains one small 1m noise win for PowerSort, but the effect is not broad: OrganPipe
+  moves the opposite way and the 500k/100k evidence does not support keeping the complexity.
+- V3 is essentially neutral at 1m OrganPipe and still favors OFF on noise; V1 clearly favors OFF.
+
+Interpretation
+- PowerSort's usefulness was not an invariant property of the V2/V3 reconstructed pile shape.
+  Its older gains depended on the surrounding merge/order/routing state. After E085/E093/E102/E109
+  and the corrected common baseline, the old selector is stale.
+- Keeping a V2-only >=1m exception would reintroduce policy divergence for a small, workload-specific
+  gain that is countered by another selected workload. That does not meet E109's evidence threshold
+  for intentional divergence.
+
+Decision
+- REMOVE selective PowerSort scheduling from V1, V2, and V3.
+- RETAIN adjacent-pair scheduling as the common non-freezing baseline.
+- The shared PowerSort helpers remain because other variations have separately tested policies and
+  because the implementation remains useful for future scheduler experiments; E111 changes only
+  V1-V3 production routing.
+- Continue the policy-centric reconciliation. The next high-value E109 policy to isolate is adaptive
+  versus always-on ordered-boundary probing across V1/V2/V3.
+
+
+-------------------------------------------------------------------------------
+E112 — V1/V2/V3 ORDERED-BOUNDARY PROBING REVALIDATION
+Date: 2026-08-11
+Status: REJECT ALWAYS-ON; RETAIN ADAPTIVE PROBING AS COMMON V1/V2/V3 BASELINE
+
+Question
+- E109 propagated V2/V3's adaptive ordered-boundary scan policy to V1, replacing V1's historical
+  always-on scan. Re-test that convergence choice symmetrically across V1, V2, and V3 under the
+  current E111 adjacent-pair baseline.
+
+Isolation and measurement
+- The experimental switch changed only whether ordered-boundary elimination remains enabled after
+  an unproductive merge level. Pile formation, run materialization order, density routing, gallop
+  selection, branchless kernels, and adjacent-pair scheduling were unchanged.
+- Adaptive baseline rule: continue scanning when the remaining run count is <=64 or the last scan
+  removed at least 25% of runs; otherwise stop repeated scans for later levels.
+- Always-on candidate: perform the same ordered-boundary elimination scan at every merge level.
+- An in-process paired harness ran adaptive and always-on copies on identical generated inputs with
+  alternating execution order and validated every output against std::sort.
+- 100 paired trials were run at 10k and 100k across all ten canonical workloads. A 20-trial 1m
+  guardrail was then run across the same workload set. Positive deltas below mean always-on was
+  slower; negative deltas mean always-on was faster.
+
+10k paired results — always-on versus adaptive
+- V1: Alternating -13.20%, Random +1.29%, Random%100 +4.41%, Sorted+Noise +17.18%; most other
+  structured workloads were within about 1%.
+- V2: largely neutral; Rotated +2.18%, Random%100 +0.97%, Sorted+Noise -0.92%.
+- V3: largely neutral; Random +1.02%, Sorted+Noise +0.78%, OrganPipe -0.76%.
+
+100k paired results — always-on versus adaptive
+- V1: OrganPipe +171.53%, Rotated +149.02%, Alternating +84.00%, BlockSorted +73.56%, Sawtooth
+  +66.88%, Random%100 +41.02%, Sorted+Noise +5.74%; Random -0.51%.
+- V2: Alternating +97.97%, Random%100 +64.02%, Sorted+Noise +34.83%, Rotated +5.69%, BlockSorted
+  +2.52%; Random -21.86%, Sawtooth -2.47%, OrganPipe -0.49%.
+- V3: OrganPipe -42.11%, Rotated +32.77%, BlockSorted +17.68%, Alternating +9.26%; Random%100
+  -7.16%, Sorted+Noise -7.10%, Random -0.96%.
+
+1m guardrail — always-on versus adaptive
+- V1: Alternating +231.11%, Sawtooth +39.81%, BlockSorted +32.08%, Random%100 +6.47%; OrganPipe
+  -21.61%, Rotated -14.28%, Random -6.35%, Sorted+Noise -5.15%.
+- V2: Alternating +218.54%, Random%100 +26.25%, Random +4.41%, BlockSorted +2.31%; other workloads
+  were near neutral (roughly +/-3%).
+- V3: OrganPipe +51.32%, Random%100 +19.70%, Random +8.16%, Alternating +3.66%; Rotated -34.89%,
+  Sorted+Noise -12.12%, Sawtooth -7.17%, BlockSorted -6.13%.
+
+Interpretation
+- Repeated ordered-boundary probing is not merely scan overhead. At later merge levels it can remove
+  newly ordered boundaries, changing the effective merge topology and therefore producing very large
+  workload-dependent swings.
+- The effect is strongly architecture-, workload-, and size-dependent. Several cases reverse sign
+  between 100k and 1m, so there is no defensible static always-on policy for the common non-freezing
+  family.
+- Always-on has real opportunities worth preserving for future structure-aware routing (notably V2
+  Random at 100k, V3 OrganPipe at 100k, and V3 Rotated at 1m), but these wins coexist with
+  catastrophic regressions such as V1/V2 Alternating at 1m.
+
+Decision
+- REJECT always-on ordered-boundary probing as a common V1/V2/V3 baseline policy.
+- RETAIN the E109 adaptive rule unchanged for all three variations.
+- Do not introduce variation-specific exceptions from this experiment; the sign reversals show that
+  any future exception needs an explicit structure/size classifier rather than a variation ID alone.
+
+
+-------------------------------------------------------------------------------
+E113 — V1/V2/V3 RANDOM-ROUTE CLASSIFIER / GAME-BALANCE REVALIDATION
+Date: 2026-08-11
+Status: REJECT FINAL-BALANCE REPLACEMENT AND COMBINED GUARD; RETAIN EARLYRANDOMLIKE
+
+Question
+- E109 replaced V1's historical final >=25% minority-game balance prerequisite with the same
+  first-64 `earlyRandomLike` prerequisite used by V2/V3. Was the old V1 final game-balance signal
+  actually a generally useful classifier that should be restored or propagated?
+
+Candidates
+1. E112 baseline: `earlyRandomLike` + common final pile-density threshold.
+2. Final-balance replacement: min(ascPiles, descPiles)*4 >= finalPileCount + density, with no
+   `earlyRandomLike` prerequisite.
+3. Combined guard: `earlyRandomLike` AND final >=25% minority-game balance + density.
+- All other insertion, materialization, merge-kernel, boundary-probing, and scheduling logic stayed
+  fixed. The candidate was tested symmetrically in V1, V2, and V3.
+- In-process paired A/B copies used identical generated inputs, alternating execution order, and
+  validated both results for sortedness/equality.
+
+Final-balance replacement at 100k — candidate versus E112 baseline
+- V1: Random -3.33%, Sorted+Noise -6.88%, but Alternating +195.13%, OrganPipe +119.83%, Sawtooth
+  +116.63%, Rotated +58.59%, BlockSorted +38.09%, Random%100 +25.38%.
+- V2: Random -11.46%, Random%100 -38.53%, Sawtooth -4.12%, but Rotated +124.30%, Alternating
+  +129.37%, Sorted+Noise +21.44%.
+- V3: Sawtooth -23.39%, Alternating -6.34%, but Rotated +112.19%, BlockSorted +15.97%, Random%100
+  +9.02%.
+- Conclusion: final game balance alone is far too permissive. It routes several structured layouts
+  into the random branchless merge path and causes catastrophic regressions.
+
+Combined `earlyRandomLike && finalBalance` at 100k
+- V1: Random -6.39%, Sorted+Noise -3.87%, Alternating -27.55%, but OrganPipe +237.31%, Rotated
+  +50.79%, BlockSorted +41.14%, Random%100 +34.17%, Sawtooth +32.75%.
+- V2: BlockSorted ~neutral, but Alternating +173.11%, Sorted+Noise +64.85%, Rotated +56.95%,
+  Random%100 +36.64%, and Random +6.88%.
+- V3: Sawtooth -21.58%, BlockSorted -3.17%, but Alternating +48.79%, OrganPipe +34.03%, Rotated
+  +20.73%.
+- The final-balance guard therefore also rejects cases where the current early classifier's
+  branchless route is valuable; it is not a safe false-positive filter.
+
+1m guardrail for the combined guard
+- V1: OrganPipe +254.72%, Random%100 +23.37%, Alternating +19.98%, Rotated +19.51%, Sawtooth
+  +11.68%, Random +7.31%; Sorted+Noise -22.04%.
+- V2: Alternating +192.28%, Random%100 +30.50%; other targeted cases were roughly neutral.
+- V3: all targeted cases were approximately neutral (within about +/-3.5%).
+- The large V1/V2 structured regressions persist at 1m, so the 100k result is not a size-local
+  artifact.
+
+Decision
+- RETAIN the E109/E112 first-64 `earlyRandomLike` prerequisite unchanged for V1, V2, and V3.
+- REJECT both the old V1 final-game-balance classifier as a replacement and a combined balance
+  guard. Do not restore a V1-specific classifier exception.
+- The old E041 signal was useful under its historical merge/routing state, but it is stale under the
+  current common baseline; its apparent separation no longer corresponds to profitable merge
+  routing after later kernel and topology changes.
+
+E114  V1/V2/V3 common non-freezing density threshold revalidation     RETAINED CURRENT COMMON POLICY
+Date: 2026-08-11
+
+Goal
+- Re-test the E109 common 3.5 / 4.25 / 5.0 branchless-merge density thresholds across V1, V2,
+  and V3 rather than preserving historical coefficients based on variation-specific experiments.
+
+Candidates
+- Current common: 3.5 / 4.25 / 5.0 (<=20k / mid-size / >=500k).
+- Midpoint: 4.75 / 5.5 / 6.25.
+- Historical V2 high: 6.0 / 6.75 / 7.5.
+- All candidates retained the E113 earlyRandomLike prerequisite and all other merge policy.
+- Timings used an in-process paired harness with the same generated input copied to every policy;
+  policy execution order rotated by trial and every output was checked against std::sort.
+
+Results
+- 10k: mostly near-neutral. No broad gain from the historical-high policy. The main isolated signal
+  was V3 Rotated, where the midpoint was about 7.3% faster.
+- 100k: Random was approximately neutral across policies in all three variations. Higher thresholds
+  produced scattered structured-input wins and losses without a common direction. Examples:
+  V3 Sawtooth historical-high ~4.3% faster; V2 Rotated midpoint ~2.5% faster but historical-high
+  ~7.0% slower; V3 OrganPipe historical-high ~2.3% faster.
+- 1m targeted guardrail:
+    * Random: midpoint/high vs current: V1 -0.6/-1.2%, V2 +0.2/+0.6%, V3 +0.9/+8.5%.
+    * Sorted+Noise: V1 +0.1/+0.1%, V2 -2.3/-1.4%, V3 +1.2/+1.3%.
+    * Sawtooth: V1 +0.3/+0.8%, V2 +0.7/+2.8%, V3 -1.6/-0.2%.
+    * BlockSorted: V1 -4.4/-4.3%, V2 -2.4/-0.7%, V3 +7.9/+7.1%.
+    * OrganPipe: V1 +1.2/+0.1%, V2 -0.3/+0.7%, V3 -0.8/+0.5%.
+    * Rotated: V1 +3.4/-14.7%, V2 +0.4/+0.05%, V3 -9.8/-7.8%.
+  Negative means faster than current; positive means slower.
+
+Decision
+- RETAIN the common 3.5 / 4.25 / 5.0 policy for V1/V2/V3.
+- REJECT both the midpoint and historical V2 threshold sets as common replacements. Their wins are
+  workload/variation specific and are paired with material counter-regressions, including V3 Random
+  and BlockSorted under the historical-high policy.
+- Do not reintroduce variation-specific density coefficients from these results. The large Rotated
+  wins in V1/V3 suggest possible future workload-aware merge routing, but they do not justify static
+  divergence between variations.
+
+-------------------------------------------------------------------------------
+E115 — V1/V2/V3 POST-FLATTEN MERGE-DRIVER CONSOLIDATION
+Date: 2026-08-11
+Status: RETAIN V1 ENDS-BASED DRIVER AS THE SINGLE COMMON V1/V2/V3 DRIVER
+
+Question
+- After flattening, V1, V2, and V3 no longer need distinct merge-driver logic. Compare V1's
+  ends-based adjacent-pair driver against the shared V2/V3 run-start driver and retain whichever
+  implementation is faster as one common post-flatten driver for all three variations.
+
+Method
+- First, V1 was measured in-process with identical insertion/flattening and only the merge driver
+  switched between its historical ends-based implementation and V2/V3's run-start implementation.
+- Because V1's driver showed material structured-input wins, the reverse transplant was then tested:
+  the same ends-based driver was applied to V2 and V3, again with paired identical inputs and
+  alternating A/B execution order. Every output was checked against std::sort.
+- 100 paired trials were run at 10k and 100k over all ten canonical workloads. A 10-trial 1m
+  guardrail covered the same workload set.
+
+100k highlights
+- V1, shared run-start driver versus V1 ends driver: Random -5.7% and Random%100 -6.2% favored the
+  run-start driver, but Sawtooth +13.5%, BlockSorted +36.4%, OrganPipe +31.7%, Rotated +4.7%, and
+  Sorted+Noise +5.4% favored the ends driver.
+- V2, ends driver versus run-start driver: Random +16.8% favored run-start, while Random%100 -18.4%
+  and Alternating -38.0% strongly favored ends; most other structured workloads were near neutral.
+- V3, ends driver versus run-start driver: Random +5.8%, Sorted+Noise +6.9%, and Rotated +12.0%
+  favored run-start; BlockSorted -5.3% favored ends; most remaining cases were smaller.
+- Summed median time across all 30 V1/V2/V3 workload cells was ~2.29% lower with the ends-based
+  driver.
+
+1m guardrail
+- V1 strongly favored the ends driver overall, including Sawtooth (~15.8% faster), BlockSorted
+  (~10.6%), OrganPipe (~20.1%), and Rotated (~39.3%); Random remained ~6.3% faster with run-start.
+- V2 was mixed and slightly favored run-start in aggregate (~1.4%), with ends notably faster on
+  Alternating (~16.7%) but slower on Random (~5.0%) and Sawtooth (~5.4%).
+- V3 was approximately aggregate-neutral (~0.3% in favor of ends), with ends faster on Random,
+  Alternating, Sawtooth, and Rotated but slower on BlockSorted and OrganPipe.
+- Across all three variations and all ten workloads, summed median time was ~2.34% lower with the
+  ends-based driver, essentially matching the 100k aggregate result.
+
+Decision
+- RETAIN the V1 ends-based adjacent-pair merge driver as the single common V1/V2/V3 post-flatten
+  implementation.
+- Move that implementation into the shared simulated namespace and call it from V1, V2, and V3.
+- REMOVE V1's duplicate private merge-driver implementation and remove the temporary A/B switches.
+- V2/V3 convert their run-start metadata to run ends before entering the common driver; V1 already
+  has run ends naturally.
+- The common driver retains the reconciled E109/E111/E112 policies: adaptive ordered-boundary
+  probing, adjacent-pair scheduling, E045 gallop-trigger selection, and the current branchless merge
+  routing/kernel choices.
+- V4+ are not changed by E115; their merge policies remain separately validated.

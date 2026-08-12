@@ -222,7 +222,9 @@ template <bool UseHint, typename T, typename Less = std::less<T>>
 FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
     const std::vector<T>& arr,
     Less less = Less{},
-    FreezePolicy freezePolicy = FreezePolicy::fixed_half
+    FreezePolicy freezePolicy = FreezePolicy::fixed_half,
+    bool naturalRunRoute = false,
+    bool naturalRequireFirstContinuationLong = false
 ) {
     constexpr std::size_t MinPrefixPileLength = 32;
 
@@ -349,6 +351,102 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
     auto pileCount = [&]() {
         return result.ascCounts.size() + result.descCounts.size();
     };
+
+    bool naturalRunCandidate = naturalRunRoute &&
+        prefixDirection != PrefixDirection::Unknown &&
+        prefixEnd >= MinPrefixPileLength && prefixEnd * 8 >= n;
+    if (naturalRunCandidate && naturalRequireFirstContinuationLong && processStart < n) {
+        const bool firstAsc = less(arr[processStart - 1], arr[processStart]);
+        const bool firstDesc = !firstAsc && less(arr[processStart], arr[processStart - 1]);
+        std::size_t firstEnd = processStart + 1;
+        if (firstAsc) {
+            while (firstEnd < n && less(arr[firstEnd - 1], arr[firstEnd])) ++firstEnd;
+        } else if (firstDesc) {
+            while (firstEnd < n && less(arr[firstEnd], arr[firstEnd - 1])) ++firstEnd;
+        }
+        naturalRunCandidate = (firstAsc || firstDesc) && firstEnd - processStart >= 8;
+    }
+    if (naturalRunCandidate && processStart < n) {
+        auto processRangeNatural = [&](std::size_t begin, std::size_t end, bool frozen) {
+            std::size_t i = begin;
+            auto insertOne = [&](std::size_t j) {
+                if (frozen) processFrozen(arr[j - 1], arr[j], j);
+                else processUnfrozen(arr[j - 1], arr[j], j);
+            };
+            while (i < end) {
+                const bool asc = less(arr[i - 1], arr[i]);
+                const bool desc = !asc && less(arr[i], arr[i - 1]);
+                if (!asc && !desc) { insertOne(i++); continue; }
+                std::size_t runEnd = i + 1;
+                if (asc) while (runEnd < end && less(arr[runEnd - 1], arr[runEnd])) ++runEnd;
+                else while (runEnd < end && less(arr[runEnd], arr[runEnd - 1])) ++runEnd;
+                const std::size_t len = runEnd - i;
+                bool batched = false;
+                if (len >= 8) {
+                    if (asc) {
+                        int h1 = result.ascTails.empty() ? 0 : std::min<int>(lastPileIndexAscending, static_cast<int>(result.ascTails.size()) - 1);
+                        int h2 = h1;
+                        const int firstPile = result.ascTails.empty() ? 0 : findAscendingPileWithTails<false>(result.ascTails, h1, arr[i], less);
+                        const int lastPile = result.ascTails.empty() ? 0 : findAscendingPileWithTails<false>(result.ascTails, h2, arr[runEnd - 1], less);
+                        const bool allowed = firstPile == lastPile && (!frozen || firstPile < static_cast<int>(result.ascTails.size()));
+                        if (allowed) {
+                            if (firstPile < static_cast<int>(result.ascTails.size())) {
+                                result.ascTails[static_cast<std::size_t>(firstPile)] = arr[runEnd - 1];
+                                result.ascCounts[static_cast<std::size_t>(firstPile)] += len;
+                            } else {
+                                result.ascTails.push_back(arr[runEnd - 1]);
+                                result.ascCounts.push_back(len);
+                            }
+                            std::fill(result.blueprint.begin() + static_cast<std::ptrdiff_t>(i),
+                                      result.blueprint.begin() + static_cast<std::ptrdiff_t>(runEnd),
+                                      simulated::makeAscTag(static_cast<uint32_t>(firstPile)));
+                            lastPileIndexAscending = firstPile;
+                            descendingMode = false;
+                            batched = true;
+                        }
+                    } else {
+                        int h1 = result.descTails.empty() ? 0 : std::min<int>(lastPileIndexDescending, static_cast<int>(result.descTails.size()) - 1);
+                        int h2 = h1;
+                        const int firstPile = result.descTails.empty() ? 0 : findDescendingPileWithTails<false>(result.descTails, h1, arr[i], less);
+                        const int lastPile = result.descTails.empty() ? 0 : findDescendingPileWithTails<false>(result.descTails, h2, arr[runEnd - 1], less);
+                        const bool allowed = firstPile == lastPile && (!frozen || firstPile < static_cast<int>(result.descTails.size()));
+                        if (allowed) {
+                            if (firstPile < static_cast<int>(result.descTails.size())) {
+                                result.descTails[static_cast<std::size_t>(firstPile)] = arr[runEnd - 1];
+                                result.descCounts[static_cast<std::size_t>(firstPile)] += len;
+                            } else {
+                                result.descTails.push_back(arr[runEnd - 1]);
+                                result.descCounts.push_back(len);
+                            }
+                            std::fill(result.blueprint.begin() + static_cast<std::ptrdiff_t>(i),
+                                      result.blueprint.begin() + static_cast<std::ptrdiff_t>(runEnd),
+                                      simulated::makeDescTag(static_cast<uint32_t>(firstPile)));
+                            lastPileIndexDescending = firstPile;
+                            descendingMode = true;
+                            batched = true;
+                        }
+                    }
+                }
+                if (!batched) for (std::size_t j = i; j < runEnd; ++j) insertOne(j);
+                i = runEnd;
+            }
+        };
+
+        std::size_t i = processStart;
+        if (i < unfrozenEnd) {
+            processRangeNatural(i, unfrozenEnd, false);
+            i = unfrozenEnd;
+        }
+        const std::size_t pilesAtHalf = pileCount();
+        if (shouldExtendToPowerOfTwo(freezePolicy, n, pilesAtHalf)) {
+            const std::size_t pileCap = nextPowerOfTwoStrict(pilesAtHalf);
+            for (; i < n && pileCount() < pileCap; ++i)
+                processUnfrozen(arr[i - 1], arr[i], i);
+            result.freezePoint = i;
+        }
+        if (i < n) processRangeNatural(i, n, true);
+        return result;
+    }
 
     if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) <= 2 * sizeof(void*)) {
         T previous = arr[processStart - 1];
@@ -480,16 +578,18 @@ template <typename T, typename Less = std::less<T>>
 FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreeze(
     const std::vector<T>& arr,
     Less less = Less{},
-    FreezePolicy freezePolicy = FreezePolicy::fixed_half
+    FreezePolicy freezePolicy = FreezePolicy::fixed_half,
+    bool naturalRunRoute = false,
+    bool naturalRequireFirstContinuationLong = false
 ) {
     const bool noHintRoute =
         arr.size() >= 10000 && insertionPrefixLooksRandomLike(arr, less);
     if (noHintRoute) {
         return simulatePatienceInsertionBlueprintEarlyFreezeImpl<false>(
-            arr, less, freezePolicy);
+            arr, less, freezePolicy, naturalRunRoute, naturalRequireFirstContinuationLong);
     }
     return simulatePatienceInsertionBlueprintEarlyFreezeImpl<true>(
-        arr, less, freezePolicy);
+        arr, less, freezePolicy, naturalRunRoute, naturalRequireFirstContinuationLong);
 }
 
 
@@ -542,6 +642,28 @@ inline bool frozenInsertionLooksRandomLike(
 }
 
 
+template <typename T, typename Less>
+inline void e090Bitonic32(T* x, Less less) {
+    auto ce = [&](T& a, T& b) {
+        const bool swap = less(b, a);
+        T lo = swap ? b : a;
+        T hi = swap ? a : b;
+        a = std::move(lo);
+        b = std::move(hi);
+    };
+    for (unsigned k = 2; k <= 32; k <<= 1) {
+        for (unsigned j = k >> 1; j > 0; j >>= 1) {
+            for (unsigned i = 0; i < 32; ++i) {
+                const unsigned l = i ^ j;
+                if (l > i) {
+                    if ((i & k) == 0) ce(x[i], x[l]);
+                    else ce(x[l], x[i]);
+                }
+            }
+        }
+    }
+}
+
 template <typename T, typename Less = std::less<T>>
 std::vector<std::size_t> reconstructFrozenBlueprintWithOverflowBands(
     const std::vector<T>& arr,
@@ -550,7 +672,8 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithOverflowBands(
     std::vector<std::size_t> descCounts,
     std::size_t overflowCount,
     std::vector<T>& tmp,
-    Less less = Less{}
+    Less less = Less{},
+    bool useE090SmallSort = false
 ) {
     constexpr std::size_t BandSize = 32;
     const std::size_t n = arr.size();
@@ -614,10 +737,15 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithOverflowBands(
 
     for (std::size_t pos = normalCount; pos < n; pos += BandSize) {
         const std::size_t end = std::min(n, pos + BandSize);
-        std::sort(
-            tmp.begin() + static_cast<std::ptrdiff_t>(pos),
-            tmp.begin() + static_cast<std::ptrdiff_t>(end),
-            less);
+        if (useE090SmallSort && end - pos == BandSize &&
+            std::is_trivially_copyable_v<T>) {
+            e090Bitonic32(tmp.data() + pos, less);
+        } else {
+            std::sort(
+                tmp.begin() + static_cast<std::ptrdiff_t>(pos),
+                tmp.begin() + static_cast<std::ptrdiff_t>(end),
+                less);
+        }
         runStart.push_back(end);
     }
     return runStart;
@@ -627,7 +755,7 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithOverflowBands(
 
 // Public V5 entry point: early freeze with deferred-sort overflow bands.
 template <typename T, typename Less = std::less<T>>
-void sort(std::vector<T>& arr, Less less = Less{}) {
+void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool useE090SmallSort = false, bool naturalRunRoute = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::simulated_early_freeze::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -638,15 +766,14 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     if (arr.size() < 2) return;
     FrozenInsertionResult<T> sim =
         simulatePatienceInsertionBlueprintEarlyFreeze(
-            arr, less, FreezePolicy::power2_broad);
+            arr, less, FreezePolicy::power2_broad, naturalRunRoute, true);
     if (sim.alreadySortedAscending) return;
     if (sim.reverseSortedDescending) {
         std::reverse(arr.begin(), arr.end());
         return;
     }
     bool useRandomBranchlessMerge = false;
-    if constexpr (std::is_trivially_copyable_v<T> &&
-                  sizeof(T) <= 2 * sizeof(void*)) {
+    if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) <= 96) {
         useRandomBranchlessMerge =
             frozenInsertionLooksRandomLike(sim, arr.size());
     }
@@ -655,11 +782,16 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     std::vector<std::size_t> runStart =
         reconstructFrozenBlueprintWithOverflowBands(
             arr, sim.blueprint, std::move(sim.ascCounts),
-            std::move(sim.descCounts), sim.overflowCount, tmp, less);
+            std::move(sim.descCounts), sim.overflowCount, tmp, less, useE090SmallSort);
     simulated::mergeRunsFromTmpToArr(
         tmp, arr, std::move(runStart), less,
         simulated::MergeSchedule::defer_dominant_first_endpoint,
-        useRandomBranchlessMerge);
+        useRandomBranchlessMerge, 7, bidirectionalBranchlessMerge);
+}
+
+template <typename T, typename Less = std::less<T>>
+void sort(std::vector<T>& arr, Less less = Less{}) {
+    sortImpl(arr, less, true, true, true);
 }
 
 

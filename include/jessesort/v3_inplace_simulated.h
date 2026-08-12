@@ -18,10 +18,11 @@ namespace jessesort::simulated_inplace_flatten {
 // Convert the packed pile blueprint into a source-index -> destination-index
 // permutation, then resolve that permutation in place with cycle swaps.
 //
-// V3 materializes ascending-game runs first, followed by descending-game
-// runs. This ordering is local to the in-place flattening strategy:
-//   [ascending pile 0 ... ascending pile A-1]
+// E109 convergence baseline: materialize descending-game runs first, then
+// ascending-game runs, matching V1/V2.  The in-place permutation remains V3's
+// distinguishing flattening mechanism; only the shared run ordering is aligned.
 //   [descending pile 0 ... descending pile D-1]
+//   [ascending pile 0 ... ascending pile A-1]
 //
 // Ascending-game piles preserve encounter order. Descending-game piles are
 // reversed so every reconstructed pile is ascending under the comparator.
@@ -41,26 +42,26 @@ std::vector<std::size_t> flattenTaggedBlueprintInPlace(
 
     std::vector<std::size_t> runStart(numRuns + 1, 0);
     std::size_t out = 0;
-    for (std::size_t p = 0; p < numAscPiles; ++p) {
-        runStart[p] = out;
-        out += ascCounts[p];
-    }
     for (std::size_t p = 0; p < numDescPiles; ++p) {
-        const std::size_t run = numAscPiles + p;
-        runStart[run] = out;
+        runStart[p] = out;
         out += descCounts[p];
+    }
+    for (std::size_t p = 0; p < numAscPiles; ++p) {
+        const std::size_t run = numDescPiles + p;
+        runStart[run] = out;
+        out += ascCounts[p];
     }
     runStart[numRuns] = out;
     assert(out == n);
 
     // Reuse count storage as destination cursors.
     // Ascending piles fill left-to-right; descending piles fill right-to-left.
-    for (std::size_t p = 0; p < numAscPiles; ++p) {
-        ascCounts[p] = runStart[p];
-    }
     for (std::size_t p = 0; p < numDescPiles; ++p) {
-        const std::size_t run = numAscPiles + p;
-        descCounts[p] = runStart[run + 1];
+        descCounts[p] = runStart[p + 1];
+    }
+    for (std::size_t p = 0; p < numAscPiles; ++p) {
+        const std::size_t run = numDescPiles + p;
+        ascCounts[p] = runStart[run];
     }
 
     if (n <= static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
@@ -116,7 +117,7 @@ std::vector<std::size_t> flattenTaggedBlueprintInPlace(
 
 // Public V3 entry point: V2-style simulated insertion with in-place flattening.
 template <typename T, typename Less = std::less<T>>
-void sort(std::vector<T>& arr, Less less = Less{}) {
+void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::simulated_inplace_flatten::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -132,7 +133,7 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     bool branchlessRandomMerge = false;
     {
         jessesort::simulated::SimulatedInsertionResult<T> sim =
-            jessesort::simulated::simulatePatienceInsertionBlueprint(arr, less, true);
+            jessesort::simulated::simulatePatienceInsertionBlueprint(arr, less, true, naturalRunRoute);
 
         if (sim.alreadySortedAscending) {
             return;
@@ -145,13 +146,30 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
         const std::size_t finalPileCount =
             sim.ascCounts.size() + sim.descCounts.size();
         __extension__ typedef unsigned __int128 Wide;
+        const Wide finalPileSquare =
+            static_cast<Wide>(finalPileCount) * finalPileCount;
+        // E109 convergence baseline: V1/V2/V3 share 3.5 / 4.25 / 5.0.
+        // The small-size 3.5 threshold is cherry-picked from the more recent
+        // V1 evidence; mid/large thresholds already agree with revised E102.
+        bool densitySelectsBranchless = false;
+        if (arr.size() <= 20000) {
+            densitySelectsBranchless =
+                static_cast<Wide>(2) * finalPileSquare >=
+                    static_cast<Wide>(7) * arr.size();
+        } else if (arr.size() < 500000) {
+            densitySelectsBranchless =
+                static_cast<Wide>(4) * finalPileSquare >=
+                static_cast<Wide>(17) * arr.size();
+        } else {
+            densitySelectsBranchless =
+                finalPileSquare >= static_cast<Wide>(5) * arr.size();
+        }
         branchlessRandomMerge =
             arr.size() >= 10000 &&
             sim.earlyRandomLike &&
-            static_cast<Wide>(finalPileCount) * finalPileCount >=
-                static_cast<Wide>(5) * arr.size() &&
+            densitySelectsBranchless &&
             std::is_trivially_copyable_v<T> &&
-            sizeof(T) <= 2 * sizeof(void*);
+            sizeof(T) <= 96;
 
         runStart = flattenTaggedBlueprintInPlace(
             arr,
@@ -163,38 +181,27 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     std::vector<T> tmp;
     if constexpr (std::is_default_constructible_v<T>) {
         tmp.resize(arr.size());
-        // The shared merge implementation expects reconstructed runs in tmp and
-        // writable slots in arr. Swapping the vectors is O(1) and preserves the
-        // in-place flattening result as the first merge source.
         arr.swap(tmp);
     } else {
-        // Valid destination objects are required for assignment-based merging.
-        // Copy construction preserves support for deleted default constructors.
         tmp = arr;
     }
 
-    // V3 reconstructs the same ordered run layout as V2, but its cycle-based
-    // flattening has a different cost profile. Direct A/B testing showed that
-    // V2's selected PowerSort policy still provides repeatable gains for sparse
-    // noise and sufficiently imbalanced compact run sets without affecting
-    // balanced inputs. Keep the selection local to V3 rather than routing
-    // through jessesort::simulated::sort so flattening remains isolated.
-    if (jessesort::simulated::detail::shouldUsePowerSortMerge(
-            runStart, arr.size())) {
-        jessesort::simulated::detail::mergeRunsPowerSortStyle(
-            tmp,
-            arr,
-            std::move(runStart),
-            less);
-    } else {
-        jessesort::simulated::mergeRunsFromTmpToArr(
-            tmp,
-            arr,
-            std::move(runStart),
-            less,
-            jessesort::simulated::MergeSchedule::adjacent_pairs,
-            branchlessRandomMerge);
-    }
+    // E115: V1-V3 share the ends-based adjacent-pair merge driver.
+    // The driver computes its own E045 gallop trigger from final run lengths.
+    // E111: the reconciled V1/V2/V3 revalidation no longer supports the
+    // selective PowerSort path here. Keep the current adjacent-pair scheduler.
+    std::vector<std::size_t> ends(runStart.begin() + 1, runStart.end());
+    jessesort::simulated::mergeRunsAdjacentPairsEnds(
+        tmp, arr, ends, less, branchlessRandomMerge, bidirectionalBranchlessMerge);
+    arr = std::move(tmp);
+}
+
+// Public V3 entry point. E087 retains E085's bidirectional branchless kernel
+// only after a V3-specific causal A/B; sortImpl remains available internally
+// so the benchmark can compare the old E082 route in the same process.
+template <typename T, typename Less = std::less<T>>
+void sort(std::vector<T>& arr, Less less = Less{}) {
+    sortImpl(arr, less, true, true);
 }
 
 } // namespace jessesort::simulated_inplace_flatten

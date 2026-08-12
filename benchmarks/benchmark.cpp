@@ -1,3 +1,4 @@
+#include "benchmark_seed.h"
 #include <jessesort/v1_actual_piles.h>
 #include <jessesort/v2_simulated.h>
 #include <jessesort/v3_inplace_simulated.h>
@@ -212,13 +213,7 @@ static std::array<int, 8> execution_order(int trial) {
 }
 
 static unsigned trial_rng_seed(unsigned base_seed, std::size_t n, InputType input, int trial) {
-    // Stable deterministic mixing; each trial gets a fresh input but all algorithms
-    // within that trial receive exactly the same source vector.
-    std::uint64_t x = base_seed;
-    x ^= static_cast<std::uint64_t>(n) + 0x9e3779b97f4a7c15ULL + (x << 6) + (x >> 2);
-    x ^= static_cast<std::uint64_t>(input) * 0xbf58476d1ce4e5b9ULL;
-    x ^= static_cast<std::uint64_t>(trial) * 0x94d049bb133111ebULL;
-    return static_cast<unsigned>(x ^ (x >> 32));
+    return jessesort::bench::trial_seed(base_seed, n, static_cast<int>(input), trial);
 }
 
 static std::filesystem::path make_run_directory() {
@@ -456,7 +451,7 @@ int main(int argc, char** argv) {
     }
 
     const int warmups = argc > 3 ? std::max(0, std::atoi(argv[3])) : 2;
-    const unsigned base_seed = 0x8A5CD789u;
+    const unsigned base_seed = jessesort::bench::kCanonicalBaseSeed;
 
     const bool resuming = argc > 4 && std::string_view(argv[4]).size() > 0;
     const std::filesystem::path run_dir = resuming ? std::filesystem::path(argv[4]) : make_run_directory();

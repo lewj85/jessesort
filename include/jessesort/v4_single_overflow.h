@@ -109,7 +109,7 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithSingleOverflowRun(
 
 // Public V4 entry point: early freeze with one deferred overflow run.
 template <typename T, typename Less = std::less<T>>
-void sort(std::vector<T>& arr, Less less = Less{}) {
+void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::simulated_early_freeze_single_overflow::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -119,7 +119,7 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
 
     if (arr.size() < 2) return;
     auto sim = simulated_early_freeze::simulatePatienceInsertionBlueprintEarlyFreeze(
-        arr, less, simulated_early_freeze::FreezePolicy::power2_single_overflow);
+        arr, less, simulated_early_freeze::FreezePolicy::power2_single_overflow, naturalRunRoute);
     if (sim.alreadySortedAscending) return;
     if (sim.reverseSortedDescending) {
         std::reverse(arr.begin(), arr.end());
@@ -127,8 +127,7 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     }
 
     bool useRandomBranchlessMerge = false;
-    if constexpr (std::is_trivially_copyable_v<T> &&
-                  sizeof(T) <= 2 * sizeof(void*)) {
+    if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) <= 96) {
         useRandomBranchlessMerge =
             simulated_early_freeze::frozenInsertionLooksRandomLike(
                 sim, arr.size());
@@ -141,7 +140,8 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     if (useRandomBranchlessMerge) {
         simulated::mergeRunsFromTmpToArr(
             tmp, arr, std::move(runStart), less,
-            simulated::MergeSchedule::adjacent_pairs, true);
+            simulated::MergeSchedule::adjacent_pairs, true, 7,
+            bidirectionalBranchlessMerge);
     } else if (detail::shouldUsePowerSortMerge(
                    runStart, arr.size(), sim.overflowCount)) {
         simulated::detail::mergeRunsPowerSortStyle(
@@ -150,6 +150,11 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
         simulated::mergeRunsFromTmpToArr(
             tmp, arr, std::move(runStart), less);
     }
+}
+
+template <typename T, typename Less = std::less<T>>
+void sort(std::vector<T>& arr, Less less = Less{}) {
+    sortImpl(arr, less, true, true);
 }
 
 } // namespace jessesort::simulated_early_freeze_single_overflow
