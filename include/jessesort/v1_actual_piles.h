@@ -1,6 +1,7 @@
 #ifndef JESSESORT_ACTUAL_PILES_HPP
 #define JESSESORT_ACTUAL_PILES_HPP
 
+#include <jessesort/tiny_sort.h>
 #include <jessesort/v2_simulated.h>
 
 #include <algorithm>
@@ -71,7 +72,9 @@ std::size_t findDescendingPileBitWalk(const std::vector<T>& tails, const T& valu
 
 // Public V1 entry point: physical patience piles followed by run merging.
 template <class T, class Less = std::less<T>>
-void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false) {
+void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
+              bool naturalRunRoute = false, bool adjacentEqualFastPath = true,
+              bool enableSpecializedRoutes = false, bool enableCoherentValuePileCache = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::actual_piles::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -87,16 +90,30 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
 
     PrefixDirection prefixDirection = PrefixDirection::Unknown;
     std::size_t prefixEnd = 1;
-    for (; prefixEnd < n; ++prefixEnd) {
+
+    // E145: establish the monotone direction once, then test only the edge
+    // that can invalidate it. Equivalent edges do not end the prefix.
+    while (prefixEnd < n) {
         const T& previous = arr[prefixEnd - 1];
         const T& value = arr[prefixEnd];
         if (less(previous, value)) {
-            if (prefixDirection == PrefixDirection::Descending) break;
             prefixDirection = PrefixDirection::Ascending;
-        } else if (less(value, previous)) {
-            if (prefixDirection == PrefixDirection::Ascending) break;
-            prefixDirection = PrefixDirection::Descending;
+            ++prefixEnd;
+            break;
         }
+        if (less(value, previous)) {
+            prefixDirection = PrefixDirection::Descending;
+            ++prefixEnd;
+            break;
+        }
+        ++prefixEnd;
+    }
+    if (prefixDirection == PrefixDirection::Ascending) {
+        for (; prefixEnd < n; ++prefixEnd)
+            if (less(arr[prefixEnd], arr[prefixEnd - 1])) break;
+    } else if (prefixDirection == PrefixDirection::Descending) {
+        for (; prefixEnd < n; ++prefixEnd)
+            if (less(arr[prefixEnd - 1], arr[prefixEnd])) break;
     }
 
     if (prefixEnd == n) {
@@ -105,6 +122,62 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         }
         return;
     }
+
+    if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+        if (enableSpecializedRoutes) {
+            bool specialValuePrefixMayMix = true;
+            if (n >= 4) {
+                const bool firstThreeAscending =
+                    less(arr[0], arr[1]) && less(arr[1], arr[2]) && less(arr[2], arr[3]);
+                const bool firstThreeDescending =
+                    less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
+                specialValuePrefixMayMix = !(firstThreeAscending || firstThreeDescending);
+            }
+            if (specialValuePrefixMayMix) {
+                T dominant = arr[0];
+                if (jessesort::simulated::dominantValueSampleCandidate(arr, dominant, less)) {
+                    jessesort::simulated::highEntropyQuickSort(
+                        arr.data(), arr.size(),
+                        2 * static_cast<int>(std::bit_width(arr.size())), less,
+                        false, T{}, false, true, nullptr, false);
+                    return;
+                }
+
+                if (jessesort::simulated::lowCardinalityDirectionGate(arr, less) &&
+                    jessesort::simulated::lowCardinalitySampleCandidate(arr, less) &&
+                    jessesort::simulated::trySortLowCardinalityDirectConfirmed(arr, less)) {
+                    return;
+                }
+
+                bool highEntropyPrefixAlternates = false;
+                if (n >= 8) {
+                    int previousDirection = 0;
+                    highEntropyPrefixAlternates = true;
+                    for (std::size_t i = 1; i < 8; ++i) {
+                        int direction = 0;
+                        if (less(arr[i - 1], arr[i])) direction = 1;
+                        else if (less(arr[i], arr[i - 1])) direction = -1;
+                        if (direction == 0 ||
+                            (previousDirection != 0 && direction == previousDirection)) {
+                            highEntropyPrefixAlternates = false;
+                            break;
+                        }
+                        previousDirection = direction;
+                    }
+                }
+                if (!highEntropyPrefixAlternates &&
+                    jessesort::simulated::trySortHighEntropyPartitionDirect(arr, less)) {
+                    return;
+                }
+            }
+        }
+    }
+
+    // E143: physical-pile propagation of E142.  Classify before any source
+    // values are moved into physical piles; the continuation cache itself is
+    // maintained coherently by invalidating entries when baseArray tails change.
+    const bool coherentValuePileCacheCandidate = enableCoherentValuePileCache &&
+        jessesort::simulated::coherentValuePileCacheSampleCandidate(arr, less, n >= 50000);
 
     std::vector<std::vector<T>> ascPiles;
     std::vector<std::vector<T>> descPiles;
@@ -128,9 +201,20 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     std::size_t lastDescPile = static_cast<std::size_t>(-1);
     std::size_t probeHintAttempts = 0;
     std::size_t probeHintHits = 0;
+    std::size_t probeAdjacentEquivalent = 0;
 
-    if (prefixEnd >= MinPrefixPileLength &&
-        prefixDirection != PrefixDirection::Unknown) {
+    // E181: cold confirmation for short same-direction prefix handoff.
+    const bool confirmedShortSameDirectionPrefix =
+        prefixDirection != PrefixDirection::Unknown &&
+        prefixEnd < MinPrefixPileLength &&
+        jessesort::simulated::confirmedShortSameDirectionPrefix(
+            arr, prefixEnd, prefixDirection == PrefixDirection::Descending, less,
+            MinPrefixPileLength);
+    const bool materializePrefix =
+        prefixDirection != PrefixDirection::Unknown &&
+        (prefixEnd >= MinPrefixPileLength || confirmedShortSameDirectionPrefix);
+
+    if (materializePrefix) {
         processStart = prefixEnd;
         descendingMode = prefixDirection == PrefixDirection::Descending;
 
@@ -179,14 +263,41 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     };
 
     if (processStart == 0) {
-        previousValue = insertNormal(arr[0], false);
-        lastAscPile = 0;
+        const bool initialDescending =
+            prefixDirection == PrefixDirection::Descending;
+        previousValue = insertNormal(arr[0], initialDescending);
+        descendingMode = initialDescending;
+        if (initialDescending) lastDescPile = 0;
+        else lastAscPile = 0;
         processStart = 1;
     }
 
-    auto routeGame = [&](T& value) {
-        if (less(*previousValue, value)) descendingMode = false;
-        else if (less(value, *previousValue)) descendingMode = true;
+    // E145 retained: after a materialized natural prefix,
+    // override only the first post-prefix game decision.  Do not preinsert the
+    // value: the natural-run batcher must retain ownership of pile creation and
+    // reservation so long suffix runs stay allocation-efficient.
+    bool postPrefixDirectionOverride = false;
+    bool postPrefixOverrideDescending = false;
+    if (processStart == prefixEnd && materializePrefix &&
+        processStart + 1 < n) {
+        if (less(arr[processStart], arr[processStart + 1])) {
+            postPrefixDirectionOverride = true;
+            postPrefixOverrideDescending = false;
+        } else if (less(arr[processStart + 1], arr[processStart])) {
+            postPrefixDirectionOverride = true;
+            postPrefixOverrideDescending = true;
+        }
+    }
+
+    auto routeGame = [&](T& value) -> bool {
+        if (postPrefixDirectionOverride) {
+            descendingMode = postPrefixOverrideDescending;
+            postPrefixDirectionOverride = false;
+            return false;
+        }
+        if (less(*previousValue, value)) { descendingMode = false; return false; }
+        if (less(value, *previousValue)) { descendingMode = true; return false; }
+        return true;
     };
 
     bool naturalHandled = false;
@@ -204,8 +315,15 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
             else lastAscPile = ascPiles.size() ? findAscendingPile(ascBaseArray, *previousValue, less) : 0;
         };
         while (i < n) {
-            const bool asc = less(*previousValue, arr[i]);
-            const bool desc = !asc && less(arr[i], *previousValue);
+            bool asc;
+            bool desc;
+            if (postPrefixDirectionOverride) {
+                asc = !postPrefixOverrideDescending;
+                desc = postPrefixOverrideDescending;
+            } else {
+                asc = less(*previousValue, arr[i]);
+                desc = !asc && less(arr[i], *previousValue);
+            }
             if (!asc && !desc) { insertOneNatural(i++); continue; }
             std::size_t end = i + 1;
             if (asc) while (end < n && less(arr[end - 1], arr[end])) ++end;
@@ -235,6 +353,10 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                     previousValue = &pile.back();
                     descendingMode = !asc;
                     if (asc) lastAscPile = firstPile; else lastDescPile = firstPile;
+                    if (postPrefixDirectionOverride) {
+                        descendingMode = postPrefixOverrideDescending;
+                        postPrefixDirectionOverride = false;
+                    }
                     batched = true;
                 }
             }
@@ -252,7 +374,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         const std::size_t probeEnd = std::min<std::size_t>(n, 64);
         for (std::size_t i = processStart; i < probeEnd; ++i) {
             T& value = arr[i];
-            routeGame(value);
+            if (routeGame(value)) ++probeAdjacentEquivalent;
             auto& piles = descendingMode ? descPiles : ascPiles;
             auto& baseArray = descendingMode ? descBaseArray : ascBaseArray;
             std::size_t& lastPile = descendingMode ? lastDescPile : lastAscPile;
@@ -288,16 +410,158 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         probeHintAttempts >= 16 && ascPiles.size() + descPiles.size() >= 4 &&
         probeHintHits * 4 >= probeHintAttempts * 3;
 
-    if (earlyRandomLike) {
+    // E118: physical piles pay extra state tracking only when the 64-value probe
+    // actually observed adjacent equivalence. This preserves unique-random throughput.
+    const bool useAdjacentEqualFastPath = adjacentEqualFastPath &&
+        processStart == 64 && probeAdjacentEquivalent >= 2;
+
+    auto appendAdjacentEquivalent = [&](T& value) -> const T* {
+        auto& piles = descendingMode ? descPiles : ascPiles;
+        const std::size_t pileIndex = descendingMode ? lastDescPile : lastAscPile;
+        assert(pileIndex < piles.size());
+        piles[pileIndex].push_back(std::move(value));
+        return &piles[pileIndex].back();
+    };
+
+    auto insertNormalTracked = [&](T& value, bool useDescendingGame) -> const T* {
+        auto& piles = useDescendingGame ? descPiles : ascPiles;
+        auto& baseArray = useDescendingGame ? descBaseArray : ascBaseArray;
+        std::size_t& lastPile = useDescendingGame ? lastDescPile : lastAscPile;
+        const std::size_t pileIndex = useDescendingGame
+            ? findDescendingPile(baseArray, value, less)
+            : findAscendingPile(baseArray, value, less);
+        if (pileIndex == piles.size()) { baseArray.push_back(value); piles.emplace_back(); }
+        else baseArray[pileIndex] = value;
+        piles[pileIndex].push_back(std::move(value));
+        lastPile = pileIndex;
+        return &piles[pileIndex].back();
+    };
+
+    auto insertBitWalkTracked = [&](T& value, bool useDescendingGame) -> const T* {
+        auto& piles = useDescendingGame ? descPiles : ascPiles;
+        auto& baseArray = useDescendingGame ? descBaseArray : ascBaseArray;
+        std::size_t& lastPile = useDescendingGame ? lastDescPile : lastAscPile;
+        const std::size_t pileIndex = useDescendingGame
+            ? findDescendingPileBitWalk(baseArray, value, less)
+            : findAscendingPileBitWalk(baseArray, value, less);
+        if (pileIndex == piles.size()) { baseArray.push_back(value); piles.emplace_back(); }
+        else baseArray[pileIndex] = value;
+        piles[pileIndex].push_back(std::move(value));
+        lastPile = pileIndex;
+        return &piles[pileIndex].back();
+    };
+
+    const std::size_t e183ProbePiles = ascPiles.size() + descPiles.size();
+    const bool e183BoundaryCandidate = processStart == 64 && !earlyRandomLike &&
+        e183ProbePiles >= 3 && e183ProbePiles <= 12;
+
+    if (e183BoundaryCandidate) {
         for (std::size_t i = processStart; i < n; ++i) {
             T& value = arr[i];
-            routeGame(value);
-            previousValue = insertBitWalk(value, descendingMode);
+            bool equivalent = false;
+            if (previousValue != nullptr) {
+                if (less(*previousValue, value)) descendingMode = false;
+                else if (less(value, *previousValue)) descendingMode = true;
+                else equivalent = true;
+            }
+            if (descendingMode && i + 1 < n && less(value, arr[i + 1])) {
+                const bool wouldCreateDesc = descBaseArray.empty() || less(descBaseArray.back(), value);
+                const bool canContinueAsc = !ascBaseArray.empty() && !less(value, ascBaseArray.back());
+                if (wouldCreateDesc && canContinueAsc) descendingMode = false;
+            }
+            if (useAdjacentEqualFastPath && equivalent)
+                previousValue = appendAdjacentEquivalent(value);
+            else
+                previousValue = insertNormalTracked(value, descendingMode);
+        }
+    } else if (coherentValuePileCacheCandidate) {
+        if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+            struct CacheEntry {
+                std::uint64_t key = 0;
+                std::uint32_t pile = 0;
+                bool valid = false;
+            };
+            std::array<CacheEntry, 128> ascCache{}, descCache{};
+            auto keyOf = [](const T& value) -> std::uint64_t {
+                return static_cast<std::uint64_t>(
+                    static_cast<std::make_unsigned_t<T>>(value));
+            };
+            auto bucket = [&](const T& value) -> std::size_t {
+                return static_cast<std::size_t>(
+                    (keyOf(value) * 11400714819323198485ULL) >> 57);
+            };
+            auto seed = [&](const std::vector<T>& base, auto& cache) {
+                for (std::size_t p = 0; p < base.size(); ++p) {
+                    const std::size_t b = bucket(base[p]);
+                    cache[b] = CacheEntry{keyOf(base[p]),
+                        static_cast<std::uint32_t>(p), true};
+                }
+            };
+            seed(ascBaseArray, ascCache);
+            seed(descBaseArray, descCache);
+
+            for (std::size_t i = processStart; i < n; ++i) {
+                T& value = arr[i];
+                const bool equivalent = routeGame(value);
+                if (useAdjacentEqualFastPath && equivalent) {
+                    previousValue = appendAdjacentEquivalent(value);
+                    continue;
+                }
+
+                auto& piles = descendingMode ? descPiles : ascPiles;
+                auto& baseArray = descendingMode ? descBaseArray : ascBaseArray;
+                auto& cache = descendingMode ? descCache : ascCache;
+                std::size_t& lastPile = descendingMode ? lastDescPile : lastAscPile;
+                const std::uint64_t key = keyOf(value);
+                const std::size_t b = bucket(value);
+                auto& entry = cache[b];
+                std::size_t pileIndex;
+                if (entry.valid && entry.key == key && entry.pile < piles.size()) {
+                    pileIndex = entry.pile;
+                    piles[pileIndex].push_back(std::move(value));
+                } else {
+                    pileIndex = descendingMode
+                        ? findDescendingPile(baseArray, value, less)
+                        : findAscendingPile(baseArray, value, less);
+                    if (pileIndex == piles.size()) {
+                        baseArray.push_back(value);
+                        piles.emplace_back();
+                    } else {
+                        const T old = baseArray[pileIndex];
+                        const std::size_t oldBucket = bucket(old);
+                        auto& oldEntry = cache[oldBucket];
+                        if (oldEntry.valid && oldEntry.key == keyOf(old) &&
+                            oldEntry.pile == pileIndex) {
+                            oldEntry.valid = false;
+                        }
+                        baseArray[pileIndex] = value;
+                    }
+                    piles[pileIndex].push_back(std::move(value));
+                    cache[b] = CacheEntry{key, static_cast<std::uint32_t>(pileIndex), true};
+                }
+                lastPile = pileIndex;
+                previousValue = &piles[pileIndex].back();
+            }
+        }
+    } else if (earlyRandomLike) {
+        for (std::size_t i = processStart; i < n; ++i) {
+            T& value = arr[i];
+            const bool equivalent = routeGame(value);
+            if (useAdjacentEqualFastPath && equivalent)
+                previousValue = appendAdjacentEquivalent(value);
+            else
+                previousValue = useAdjacentEqualFastPath
+                    ? insertBitWalkTracked(value, descendingMode)
+                    : insertBitWalk(value, descendingMode);
         }
     } else if (highLocality) {
         for (std::size_t i = processStart; i < n; ++i) {
             T& value = arr[i];
-            routeGame(value);
+            const bool equivalent = routeGame(value);
+            if (useAdjacentEqualFastPath && equivalent) {
+                previousValue = appendAdjacentEquivalent(value);
+                continue;
+            }
             auto& piles = descendingMode ? descPiles : ascPiles;
             auto& baseArray = descendingMode ? descBaseArray : ascBaseArray;
             std::size_t& hint = descendingMode ? lastDescPile : lastAscPile;
@@ -327,8 +591,13 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     } else {
         for (std::size_t i = processStart; i < n; ++i) {
             T& value = arr[i];
-            routeGame(value);
-            previousValue = insertNormal(value, descendingMode);
+            const bool equivalent = routeGame(value);
+            if (useAdjacentEqualFastPath && equivalent)
+                previousValue = appendAdjacentEquivalent(value);
+            else
+                previousValue = useAdjacentEqualFastPath
+                    ? insertNormalTracked(value, descendingMode)
+                    : insertNormal(value, descendingMode);
         }
     }
 
@@ -400,7 +669,8 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
 
 template <class T, class Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
-    sortImpl(arr, less, true, true);
+    if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
+    sortImpl(arr, less, true, true, true, true, true);
 }
 
 } // namespace jessesort::actual_piles

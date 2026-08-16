@@ -1,6 +1,7 @@
 #ifndef JESSESORT_SIMULATED_EARLY_FREEZE_LIVE_HPP
 #define JESSESORT_SIMULATED_EARLY_FREEZE_LIVE_HPP
 
+#include <jessesort/tiny_sort.h>
 #include <jessesort/v5_deferred_bands.h>
 
 #include <algorithm>
@@ -217,11 +218,11 @@ void mergeRunsTimSortStyle(
 
 } // namespace detail
 
-// True live-overflow variation: overflow values are inserted immediately into
-// their current fixed-size sorted band during blueprint reconstruction.
-// Band size 32 was restored by the random-input audit after the selected
-// power-of-two freeze policy eliminated the organ-pipe overflow regime that
-// had previously favored 8-element bands.
+// True live-overflow variation. High-pile/noisy overflow keeps the established
+// fixed-size live-sorted bands. E175-final additionally allows low-pile
+// structured overflow to preserve its naturally ascending live runs directly,
+// avoiding thousands of artificial band boundaries that the merge probe would
+// otherwise rediscover and collapse.
 template <typename T, typename Less = std::less<T>>
 std::vector<std::size_t> reconstructFrozenBlueprintWithLiveOverflowBands(
     const std::vector<T>& arr,
@@ -230,9 +231,13 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithLiveOverflowBands(
     std::vector<std::size_t> descCounts,
     std::size_t overflowCount,
     std::vector<T>& tmp,
-    Less less = Less{}
+    Less less = Less{},
+    std::size_t bandSize = 32,
+    bool useNaturalOverflowRuns = false,
+    bool useBidirectionalNaturalRuns = false,
+    std::size_t minNaturalRun = 32
 ) {
-    constexpr std::size_t BandSize = 32;
+    const std::size_t BandSize = std::max<std::size_t>(1, bandSize);
     const std::size_t n = arr.size();
     const std::size_t normalCount = n - overflowCount;
     const std::size_t numAscPiles = ascCounts.size();
@@ -266,40 +271,157 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithLiveOverflowBands(
     }
 
     std::size_t overflowSeen = 0;
-    for (std::size_t i = 0; i < n; ++i) {
-        const uint32_t tag = blueprint[i];
-        if (tag == simulated::OVERFLOW_TAG) {
-            const std::size_t bandStart = normalCount + (overflowSeen / BandSize) * BandSize;
-            std::size_t pos = normalCount + overflowSeen;
-            while (pos > bandStart && less(arr[i], tmp[pos - 1])) {
+
+    // E176 experimental state. Weak structure is absorbed into a minimum-size
+    // live-sorted band; strong natural structure can grow without a fixed cap.
+    enum class OverflowDirection : unsigned char { unknown, ascending, descending };
+    OverflowDirection naturalDirection = OverflowDirection::unknown;
+    std::size_t naturalStart = normalCount;
+    bool fallbackBand = false;
+
+    auto insertionSortRange = [&](std::size_t first, std::size_t last) {
+        for (std::size_t k = first + 1; k < last; ++k) {
+            T value = std::move(tmp[k]);
+            std::size_t pos = k;
+            while (pos > first && less(value, tmp[pos - 1])) {
                 tmp[pos] = std::move(tmp[pos - 1]);
                 --pos;
             }
-            tmp[pos] = arr[i];
+            tmp[pos] = std::move(value);
+        }
+    };
+
+    auto finalizeNaturalRun = [&](std::size_t first, std::size_t last,
+                                  OverflowDirection direction) {
+        if (last <= first) return;
+        if (direction == OverflowDirection::descending)
+            std::reverse(
+                tmp.begin() + static_cast<std::ptrdiff_t>(first),
+                tmp.begin() + static_cast<std::ptrdiff_t>(last));
+        runStart.push_back(last);
+    };
+
+    for (std::size_t i = 0; i < n; ++i) {
+        const uint32_t tag = blueprint[i];
+        if (tag == simulated::OVERFLOW_TAG) {
+            const std::size_t bandStart =
+                normalCount + (overflowSeen / BandSize) * BandSize;
+            const std::size_t bandEnd = normalCount + overflowSeen;
+
+            if (useBidirectionalNaturalRuns) {
+                tmp[bandEnd] = arr[i];
+
+                if (overflowSeen == 0) {
+                    naturalStart = bandEnd;
+                    naturalDirection = OverflowDirection::unknown;
+                    fallbackBand = false;
+                } else if (fallbackBand) {
+                    // The current weakly structured minimum-size band is kept
+                    // live-sorted using the historical V6 insertion behavior.
+                    T value = std::move(tmp[bandEnd]);
+                    std::size_t pos = bandEnd;
+                    while (pos > naturalStart && less(value, tmp[pos - 1])) {
+                        tmp[pos] = std::move(tmp[pos - 1]);
+                        --pos;
+                    }
+                    tmp[pos] = std::move(value);
+
+                    if (bandEnd + 1 - naturalStart >= minNaturalRun) {
+                        runStart.push_back(bandEnd + 1);
+                        naturalStart = bandEnd + 1;
+                        naturalDirection = OverflowDirection::unknown;
+                        fallbackBand = false;
+                    }
+                } else {
+                    const std::size_t previous = bandEnd - 1;
+                    bool continues = true;
+                    if (naturalDirection == OverflowDirection::unknown) {
+                        if (less(tmp[previous], tmp[bandEnd]))
+                            naturalDirection = OverflowDirection::ascending;
+                        else if (less(tmp[bandEnd], tmp[previous]))
+                            naturalDirection = OverflowDirection::descending;
+                    } else if (naturalDirection == OverflowDirection::ascending) {
+                        continues = !less(tmp[bandEnd], tmp[previous]);
+                    } else {
+                        continues = !less(tmp[previous], tmp[bandEnd]);
+                    }
+
+                    if (!continues) {
+                        const std::size_t naturalLength = bandEnd - naturalStart;
+                        if (naturalLength >= minNaturalRun) {
+                            finalizeNaturalRun(
+                                naturalStart, bandEnd, naturalDirection);
+                            naturalStart = bandEnd;
+                            naturalDirection = OverflowDirection::unknown;
+                        } else {
+                            // Do not emit tiny natural runs. Normalize the
+                            // short candidate accumulated so far, then keep
+                            // inserting live until the 32-element minimum fills.
+                            insertionSortRange(naturalStart, bandEnd + 1);
+                            fallbackBand = true;
+                            naturalDirection = OverflowDirection::unknown;
+                            if (bandEnd + 1 - naturalStart >= minNaturalRun) {
+                                runStart.push_back(bandEnd + 1);
+                                naturalStart = bandEnd + 1;
+                                fallbackBand = false;
+                            }
+                        }
+                    }
+                }
+            } else if (useNaturalOverflowRuns) {
+                // E175-final baseline: ascending-only natural runs.
+                if (overflowSeen != 0 && less(arr[i], tmp[bandEnd - 1])) {
+                    runStart.push_back(bandEnd);
+                }
+                tmp[bandEnd] = arr[i];
+            } else {
+                std::size_t pos = bandEnd;
+                while (pos > bandStart && less(arr[i], tmp[pos - 1])) {
+                    tmp[pos] = std::move(tmp[pos - 1]);
+                    --pos;
+                }
+                tmp[pos] = arr[i];
+            }
+
             ++overflowSeen;
             continue;
         }
 
         const bool desc = simulated::isDescTag(tag);
-        const std::size_t local = static_cast<std::size_t>(simulated::localPileId(tag));
+        const std::size_t local =
+            static_cast<std::size_t>(simulated::localPileId(tag));
         if (desc) tmp[--descCounts[local]] = arr[i];
         else tmp[ascCounts[local]++] = arr[i];
     }
     assert(overflowSeen == overflowCount);
 
-    for (std::size_t end = normalCount + std::min(BandSize, overflowCount);
-         end <= n && end > normalCount;
-         end += BandSize) {
-        runStart.push_back(end);
-        if (end == n) break;
-        if (n - end < BandSize) end = n - BandSize;
+    if (useBidirectionalNaturalRuns) {
+        if (overflowCount != 0 && naturalStart < n) {
+            if (fallbackBand) {
+                // A single undersized tail is acceptable; sort it once.
+                insertionSortRange(naturalStart, n);
+                runStart.push_back(n);
+            } else {
+                finalizeNaturalRun(naturalStart, n, naturalDirection);
+            }
+        }
+    } else if (useNaturalOverflowRuns) {
+        if (overflowCount != 0) runStart.push_back(n);
+    } else {
+        for (std::size_t end = normalCount + std::min(BandSize, overflowCount);
+             end <= n && end > normalCount;
+             end += BandSize) {
+            runStart.push_back(end);
+            if (end == n) break;
+            if (n - end < BandSize) end = n - BandSize;
+        }
     }
     return runStart;
 }
 
 // Public V6 entry point: early freeze with live-sorted overflow bands.
 template <typename T, typename Less = std::less<T>>
-void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false) {
+void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false, bool enableSpecializedRoutes = false, bool enableCoherentValuePileCache = true, bool enableBidirectionalNaturalOverflow = false, bool enableAdaptiveOverflowRouter = false, bool enableValleyRescue = false, bool enableExactBalanceRoute = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::simulated_early_freeze_live::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -308,8 +430,19 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                   "Comparator must be callable as bool(const T&, const T&)");
 
     if (arr.size() < 2) return;
+    if constexpr (simulated::specializedIntegralEligible<T, Less>) {
+        if (enableSpecializedRoutes) {
+            bool prefixMayMix = true;
+            if (arr.size() >= 4) {
+                const bool asc = less(arr[0], arr[1]) && less(arr[1], arr[2]) && less(arr[2], arr[3]);
+                const bool desc = less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
+                prefixMayMix = !(asc || desc);
+            }
+            if (prefixMayMix && simulated::trySpecializedPrePatienceRoutes(arr, less)) return;
+        }
+    }
     auto sim = simulated_early_freeze::simulatePatienceInsertionBlueprintEarlyFreeze(
-        arr, less, simulated_early_freeze::FreezePolicy::power2_broad, naturalRunRoute, true);
+        arr, less, simulated_early_freeze::FreezePolicy::power2_broad, naturalRunRoute, true, enableCoherentValuePileCache, 50, enableAdaptiveOverflowRouter, enableValleyRescue);
     if (sim.alreadySortedAscending) return;
     if (sim.reverseSortedDescending) {
         std::reverse(arr.begin(), arr.end());
@@ -322,10 +455,55 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                 sim, arr.size());
     }
 
+    // E179 geometry-first STRICT multi-tier router. For <=64 piles, strong
+    // asc/desc pile-count dominance routes directly without overflow sampling;
+    // ambiguous low-pile and qualifying high-pile cases retain the STRICT sample.
+    // The legacy E178 path remains available behind enableAdaptiveOverflowRouter=false.
+    const std::size_t finalPileCount = sim.ascCounts.size() + sim.descCounts.size();
+    bool useAscendingNaturalOverflow = false;
+    bool useBidirectionalNaturalOverflow = false;
+    if (enableAdaptiveOverflowRouter) {
+        const std::size_t ascPileCount = sim.ascCounts.size();
+        const std::size_t descPileCount = sim.descCounts.size();
+        const bool lowPileAscObvious = finalPileCount <= 64 &&
+            ascPileCount >= 3 * std::max<std::size_t>(descPileCount, 1);
+        const bool lowPileDescObvious = finalPileCount <= 64 &&
+            descPileCount >= 3 * std::max<std::size_t>(ascPileCount, 1);
+        const bool strongSample = sim.overflowCount != 0 &&
+            sim.overflowSampleCount == 32 &&
+            sim.overflowSampleDirectionChanges <= 1 &&
+            sim.overflowSampleLongest >= 24;
+        if (sim.overflowCount != 0 && lowPileAscObvious) {
+            useAscendingNaturalOverflow = true;
+        } else if (sim.overflowCount != 0 && lowPileDescObvious) {
+            useBidirectionalNaturalOverflow = true;
+        } else if (enableExactBalanceRoute && sim.overflowCount != 0 &&
+                   finalPileCount <= 64 && ascPileCount == descPileCount) {
+            useBidirectionalNaturalOverflow = true;
+        } else if (strongSample && finalPileCount <= 64) {
+            if (sim.overflowSampleAscAdj >= sim.overflowSampleDescAdj)
+                useAscendingNaturalOverflow = true;
+            else
+                useBidirectionalNaturalOverflow = true;
+        } else if (strongSample &&
+                   sim.overflowCount * 100 >= arr.size() * 2 &&
+                   static_cast<long double>(finalPileCount) <=
+                       0.006L * static_cast<long double>(arr.size())) {
+            useBidirectionalNaturalOverflow = true;
+        }
+    } else {
+        const bool legacyNatural = sim.overflowCount != 0 && finalPileCount <= 64;
+        useAscendingNaturalOverflow = legacyNatural && !enableBidirectionalNaturalOverflow;
+        useBidirectionalNaturalOverflow = legacyNatural && enableBidirectionalNaturalOverflow;
+    }
+
     std::vector<T> tmp;
     auto runStart = reconstructFrozenBlueprintWithLiveOverflowBands(
         arr, sim.blueprint, std::move(sim.ascCounts), std::move(sim.descCounts),
-        sim.overflowCount, tmp, less);
+        sim.overflowCount, tmp, less, 32,
+        useAscendingNaturalOverflow,
+        useBidirectionalNaturalOverflow,
+        32);
     if (useRandomBranchlessMerge) {
         simulated::mergeRunsFromTmpToArr(
             tmp, arr, std::move(runStart), less,
@@ -342,7 +520,8 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
 
 template <typename T, typename Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
-    sortImpl(arr, less, true, true);
+    if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
+    sortImpl(arr, less, true, true, true, true, false, true, true, true);
 }
 
 } // namespace jessesort::simulated_early_freeze_live

@@ -1,6 +1,9 @@
 #ifndef JESSESORT_SIMULATED_SIMD_V7_HPP
 #define JESSESORT_SIMULATED_SIMD_V7_HPP
 
+#include <jessesort/tiny_sort.h>
+#include <jessesort/v2_simulated.h>
+
 #include <vector>
 #include <cstdint>
 #include <cstddef>
@@ -580,6 +583,46 @@ inline void simulateInsertValueAscendingPilesSplit(
 #endif
 
 template <bool UseSplit, typename T, typename Less>
+JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertionValleyRescue(
+    const std::vector<T>& arr,
+    std::size_t start,
+    SimulatedInsertionResult<T>& result,
+    std::size_t& lastPileIndexAscending,
+    std::size_t& lastPileIndexDescending,
+    bool& descendingMode,
+    Less less,
+    bool enableWindowAvx = false
+) {
+    auto process = [&](const T& previous, const T& value, std::size_t i) {
+        bool desc = less(value, previous);
+        bool asc = !desc && less(previous, value);
+        if (desc && i + 1 < arr.size() && less(value, arr[i + 1])) {
+            const bool wouldCreateDesc = result.descTails.empty() || less(result.descTails.back(), value);
+            const bool canContinueAsc = !result.ascTails.empty() && !less(value, result.ascTails.back());
+            if (wouldCreateDesc && canContinueAsc) { desc = false; asc = true; }
+        }
+        if (asc) descendingMode = false; else if (desc) descendingMode = true;
+        if (descendingMode) {
+            if constexpr (UseSplit) simulateInsertValueDescendingPilesSplit(
+                result.descTails, lastPileIndexDescending, value, i, result.blueprint, result.descCounts, less);
+            else simulateInsertValueDescendingPiles(
+                result.descTails, lastPileIndexDescending, value, i, result.blueprint, result.descCounts, less, enableWindowAvx);
+        } else {
+            if constexpr (UseSplit) simulateInsertValueAscendingPilesSplit(
+                result.ascTails, lastPileIndexAscending, value, i, result.blueprint, result.ascCounts, less);
+            else simulateInsertValueAscendingPiles(
+                result.ascTails, lastPileIndexAscending, value, i, result.blueprint, result.ascCounts, less, enableWindowAvx);
+        }
+    };
+    if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) <= 2 * sizeof(void*)) {
+        T previous = arr[start - 1];
+        for (std::size_t i = start; i < arr.size(); ++i) { const T value = arr[i]; process(previous, value, i); previous = value; }
+    } else {
+        for (std::size_t i = start; i < arr.size(); ++i) process(arr[i - 1], arr[i], i);
+    }
+}
+
+template <bool UseSplit, typename T, typename Less>
 JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertion(
     const std::vector<T>& arr,
     std::size_t start,
@@ -684,6 +727,80 @@ JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertionNoHint(
     }
 }
 
+
+template <typename T, typename Less>
+JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertionCoherentCache(
+    const std::vector<T>& arr,
+    std::size_t start,
+    SimulatedInsertionResult<T>& result,
+    std::size_t& lastPileIndexAscending,
+    std::size_t& lastPileIndexDescending,
+    bool& descendingMode,
+    Less less
+) {
+    static_assert(jessesort::simulated::specializedIntegralEligible<T, Less>);
+    struct Entry { std::uint64_t key = 0; std::uint32_t pile = 0; bool valid = false; };
+    std::array<Entry, 128> ascCache{}, descCache{};
+    auto keyOf = [](const T& value) -> std::uint64_t {
+        return static_cast<std::uint64_t>(static_cast<std::make_unsigned_t<T>>(value));
+    };
+    auto bucketKey = [](std::uint64_t key) -> std::size_t {
+        return static_cast<std::size_t>((key * 11400714819323198485ULL) >> 57);
+    };
+    auto seed = [&](const std::vector<T>& tails, auto& cache) {
+        for (std::size_t p = 0; p < tails.size(); ++p) {
+            const std::uint64_t key = keyOf(tails[p]);
+            cache[bucketKey(key)] = Entry{key, static_cast<std::uint32_t>(p), true};
+        }
+    };
+    seed(result.ascTails, ascCache);
+    seed(result.descTails, descCache);
+
+    auto process = [&](const T& previous, const T& value, std::size_t i) {
+        if (less(previous, value)) descendingMode = false;
+        else if (less(value, previous)) descendingMode = true;
+        auto& tails = descendingMode ? result.descTails : result.ascTails;
+        auto& counts = descendingMode ? result.descCounts : result.ascCounts;
+        auto& cache = descendingMode ? descCache : ascCache;
+        auto& lastPile = descendingMode ? lastPileIndexDescending : lastPileIndexAscending;
+        const std::uint64_t key = keyOf(value);
+        const std::size_t b = bucketKey(key);
+        auto& e = cache[b];
+        std::size_t p;
+        if (e.valid && e.key == key && e.pile < tails.size()) {
+            p = e.pile;
+            ++counts[p];
+        } else {
+            p = descendingMode
+                ? findDescendingPileWithTailsNoHint(tails, value, less)
+                : findAscendingPileWithTailsNoHint(tails, value, less);
+            if (p < tails.size()) {
+                const std::uint64_t oldKey = keyOf(tails[p]);
+                auto& old = cache[bucketKey(oldKey)];
+                if (old.valid && old.key == oldKey && old.pile == p) old.valid = false;
+                tails[p] = value;
+                ++counts[p];
+            } else {
+                assert(p <= PILE_MASK);
+                tails.push_back(value);
+                counts.push_back(1);
+            }
+            cache[b] = Entry{key, static_cast<std::uint32_t>(p), true};
+        }
+        lastPile = p;
+        result.blueprint[i] = descendingMode
+            ? makeDescTag(static_cast<std::uint32_t>(p))
+            : makeAscTag(static_cast<std::uint32_t>(p));
+    };
+
+    T previous = arr[start - 1];
+    for (std::size_t i = start; i < arr.size(); ++i) {
+        const T value = arr[i];
+        process(previous, value, i);
+        previous = value;
+    }
+}
+
 #undef JESSESORT_CONTINUE_NOINLINE
 
 template <typename T, typename Less = std::less<T>>
@@ -694,7 +811,8 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
     std::size_t probePileCap = 0,
     std::size_t probeValues = 64,
     bool enableNaturalRunRoute = false,
-    bool enableWindowAvx = false
+    bool enableWindowAvx = false,
+    bool enableCoherentValuePileCache = false
 ) {
     constexpr std::size_t MinPrefixPileLength = 32;
     const std::size_t n = arr.size();
@@ -704,16 +822,27 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
     enum class PrefixDirection { Unknown, Ascending, Descending };
     PrefixDirection prefixDirection = PrefixDirection::Unknown;
     std::size_t prefixEnd = 1;
-    for (; prefixEnd < n; ++prefixEnd) {
+    while (prefixEnd < n) {
         const T& previous = arr[prefixEnd - 1];
         const T& value = arr[prefixEnd];
         if (less(previous, value)) {
-            if (prefixDirection == PrefixDirection::Descending) break;
             prefixDirection = PrefixDirection::Ascending;
-        } else if (less(value, previous)) {
-            if (prefixDirection == PrefixDirection::Ascending) break;
-            prefixDirection = PrefixDirection::Descending;
+            ++prefixEnd;
+            break;
         }
+        if (less(value, previous)) {
+            prefixDirection = PrefixDirection::Descending;
+            ++prefixEnd;
+            break;
+        }
+        ++prefixEnd;
+    }
+    if (prefixDirection == PrefixDirection::Ascending) {
+        for (; prefixEnd < n; ++prefixEnd)
+            if (less(arr[prefixEnd], arr[prefixEnd - 1])) break;
+    } else if (prefixDirection == PrefixDirection::Descending) {
+        for (; prefixEnd < n; ++prefixEnd)
+            if (less(arr[prefixEnd - 1], arr[prefixEnd])) break;
     }
 
     if (prefixEnd == n) {
@@ -738,8 +867,18 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
     bool descendingMode = false;
     std::size_t processStart = 1;
 
-    if (prefixEnd >= MinPrefixPileLength &&
-        prefixDirection != PrefixDirection::Unknown) {
+    // E181: cold confirmation for short same-direction prefix handoff.
+    const bool confirmedShortSameDirectionPrefix =
+        prefixDirection != PrefixDirection::Unknown &&
+        prefixEnd < MinPrefixPileLength &&
+        jessesort::simulated::confirmedShortSameDirectionPrefix(
+            arr, prefixEnd, prefixDirection == PrefixDirection::Descending, less,
+            MinPrefixPileLength);
+    const bool materializePrefix =
+        prefixDirection != PrefixDirection::Unknown &&
+        (prefixEnd >= MinPrefixPileLength || confirmedShortSameDirectionPrefix);
+
+    if (materializePrefix) {
         processStart = prefixEnd;
         if (prefixDirection == PrefixDirection::Ascending) {
             result.ascTails.push_back(arr[prefixEnd - 1]);
@@ -753,13 +892,37 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
             descendingMode = true;
         }
     } else {
-        result.ascTails.push_back(arr[0]);
-        result.ascCounts.push_back(1);
-        result.blueprint[0] = makeAscTag(0);
+        if (prefixDirection == PrefixDirection::Descending) {
+            result.descTails.push_back(arr[0]);
+            result.descCounts.push_back(1);
+            result.blueprint[0] = makeDescTag(0);
+            descendingMode = true;
+        } else {
+            result.ascTails.push_back(arr[0]);
+            result.ascCounts.push_back(1);
+            result.blueprint[0] = makeAscTag(0);
+            descendingMode = false;
+        }
+    }
+
+    bool postPrefixDirectionOverride = false;
+    bool postPrefixOverrideDescending = false;
+    if (processStart == prefixEnd && materializePrefix &&
+        processStart + 1 < n) {
+        if (less(arr[processStart], arr[processStart + 1])) {
+            postPrefixDirectionOverride = true;
+            postPrefixOverrideDescending = false;
+        } else if (less(arr[processStart + 1], arr[processStart])) {
+            postPrefixDirectionOverride = true;
+            postPrefixOverrideDescending = true;
+        }
     }
 
     auto processValueSample = [&](const T& previous, const T& value, std::size_t i) {
-        if (less(previous, value)) descendingMode = false;
+        if (postPrefixDirectionOverride) {
+            descendingMode = postPrefixOverrideDescending;
+            postPrefixDirectionOverride = false;
+        } else if (less(previous, value)) descendingMode = false;
         else if (less(value, previous)) descendingMode = true;
 
         const bool capProbe = probePileCap != 0 && i < probeValues;
@@ -882,7 +1045,10 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
         auto insertOne = [&](std::size_t j) {
             const T& previous = arr[j - 1];
             const T& value = arr[j];
-            if (less(previous, value)) descendingMode = false;
+            if (postPrefixDirectionOverride) {
+                descendingMode = postPrefixOverrideDescending;
+                postPrefixDirectionOverride = false;
+            } else if (less(previous, value)) descendingMode = false;
             else if (less(value, previous)) descendingMode = true;
             if (descendingMode) {
                 const std::size_t pileIndex = findDescendingPileWithTailsNoHint(result.descTails, value, less);
@@ -899,8 +1065,15 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
             }
         };
         while (i < n) {
-            const bool asc = less(arr[i-1], arr[i]);
-            const bool desc = !asc && less(arr[i], arr[i-1]);
+            bool asc;
+            bool desc;
+            if (postPrefixDirectionOverride) {
+                asc = !postPrefixOverrideDescending;
+                desc = postPrefixOverrideDescending;
+            } else {
+                asc = less(arr[i-1], arr[i]);
+                desc = !asc && less(arr[i], arr[i-1]);
+            }
             if (!asc && !desc) { insertOne(i++); continue; }
             std::size_t end = i + 1;
             if (asc) while (end < n && less(arr[end-1], arr[end])) ++end;
@@ -915,7 +1088,7 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
                         if (firstPile < result.ascTails.size()) { result.ascTails[firstPile] = arr[end-1]; result.ascCounts[firstPile] += len; }
                         else { result.ascTails.push_back(arr[end-1]); result.ascCounts.push_back(len); }
                         std::fill(result.blueprint.begin()+static_cast<std::ptrdiff_t>(i), result.blueprint.begin()+static_cast<std::ptrdiff_t>(end), makeAscTag(static_cast<uint32_t>(firstPile)));
-                        lastPileIndexAscending = firstPile; descendingMode = false; batched = true;
+                        lastPileIndexAscending = firstPile; descendingMode = false; postPrefixDirectionOverride = false; batched = true;
                     }
                 } else {
                     const auto firstPile = findDescendingPileWithTailsNoHint(result.descTails, arr[i], less);
@@ -924,7 +1097,7 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
                         if (firstPile < result.descTails.size()) { result.descTails[firstPile] = arr[end-1]; result.descCounts[firstPile] += len; }
                         else { result.descTails.push_back(arr[end-1]); result.descCounts.push_back(len); }
                         std::fill(result.blueprint.begin()+static_cast<std::ptrdiff_t>(i), result.blueprint.begin()+static_cast<std::ptrdiff_t>(end), makeDescTag(static_cast<uint32_t>(firstPile)));
-                        lastPileIndexDescending = firstPile; descendingMode = true; batched = true;
+                        lastPileIndexDescending = firstPile; descendingMode = true; postPrefixDirectionOverride = false; batched = true;
                     }
                 }
             }
@@ -940,7 +1113,9 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
     // retain the ordinary inline search. The decision is made outside the hot loop.
     const std::size_t SampleValues = probePileCap != 0 ? probeValues : 64;
     const std::size_t StructureProbeValues = probePileCap != 0 ? probeValues : 64;
-    const std::size_t sampleEnd = std::min(n, std::max(processStart, SampleValues));
+    const std::size_t sampleEnd = processStart < SampleValues
+        ? std::min(n, SampleValues)
+        : std::min(n, processStart + SampleValues);
     std::size_t sampleHits = 0;
     std::size_t sampleCount = 0;
 
@@ -973,8 +1148,25 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
         // rare-miss window becomes too small a fraction of insertion work.
         const bool windowRoute = enableWindowAvx && n >= 5000 && n <= 20000 &&
             result.ascTails.size() + result.descTails.size() <= 12;
+        bool coherentCacheCandidate = false;
+        if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+            coherentCacheCandidate = enableCoherentValuePileCache &&
+                result.earlyRandomLike &&
+                jessesort::simulated::coherentValuePileCacheSampleCandidate(arr, less, n >= 50000);
+        }
+        const std::size_t e183ProbePiles = result.ascCounts.size() + result.descCounts.size();
+        const bool e183ValleyRescue = n >= 10000 && e183ProbePiles >= 3 && e183ProbePiles <= 12;
         if (i < n) {
-            if (earlyRandomInsertion) continuePatienceInsertionNoHint(
+            if (e183ValleyRescue) {
+                if (useSplit) continuePatienceInsertionValleyRescue<true>(
+                    arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less, false);
+                else continuePatienceInsertionValleyRescue<false>(
+                    arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less, windowRoute);
+            } else if (coherentCacheCandidate) {
+                if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>)
+                    continuePatienceInsertionCoherentCache(
+                        arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
+            } else if (earlyRandomInsertion) continuePatienceInsertionNoHint(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
             else if (useSplit) continuePatienceInsertion<true>(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less, false);
@@ -1007,8 +1199,25 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
         // rare-miss window becomes too small a fraction of insertion work.
         const bool windowRoute = enableWindowAvx && n >= 5000 && n <= 20000 &&
             result.ascTails.size() + result.descTails.size() <= 12;
+        bool coherentCacheCandidate = false;
+        if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+            coherentCacheCandidate = enableCoherentValuePileCache &&
+                result.earlyRandomLike &&
+                jessesort::simulated::coherentValuePileCacheSampleCandidate(arr, less, n >= 50000);
+        }
+        const std::size_t e183ProbePiles = result.ascCounts.size() + result.descCounts.size();
+        const bool e183ValleyRescue = n >= 10000 && e183ProbePiles >= 3 && e183ProbePiles <= 12;
         if (i < n) {
-            if (earlyRandomInsertion) continuePatienceInsertionNoHint(
+            if (e183ValleyRescue) {
+                if (useSplit) continuePatienceInsertionValleyRescue<true>(
+                    arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less, false);
+                else continuePatienceInsertionValleyRescue<false>(
+                    arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less, windowRoute);
+            } else if (coherentCacheCandidate) {
+                if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>)
+                    continuePatienceInsertionCoherentCache(
+                        arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
+            } else if (earlyRandomInsertion) continuePatienceInsertionNoHint(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
             else if (useSplit) continuePatienceInsertion<true>(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less, false);
@@ -1130,7 +1339,8 @@ std::vector<std::size_t> reconstructTaggedBlueprintNormalizedForV7(
     std::vector<std::size_t> ascCounts, std::vector<std::size_t> descCounts,
     std::vector<T>& tmp, bool reverseAscRuns, bool reverseDescRuns,
     const std::vector<T>* probeOverflowSorted, std::size_t probeOverflowTargetAscPile,
-    Less less = Less{}
+    Less less = Less{},
+    bool enableRawBulkSpanDecode = false
 ) {
     const std::size_t n=arr.size(), na=ascCounts.size(), nd=descCounts.size(), nr=na+nd;
     std::vector<std::size_t> start(nr+1,0); std::size_t out=0;
@@ -1141,15 +1351,63 @@ std::vector<std::size_t> reconstructTaggedBlueprintNormalizedForV7(
     std::vector<std::size_t> cursor(nr);
     for(std::size_t p=0;p<nd;++p) cursor[p]=reverseDescRuns?start[p+1]-1:start[p];
     for(std::size_t p=0;p<na;++p){const auto r=nd+p;cursor[r]=reverseAscRuns?start[r+1]-1:start[r];}
-    for(std::size_t i=0;i<n;++i){const auto tag=blueprint[i]; if(tag==OVERFLOW_TAG) continue; const auto local=(std::size_t)localPileId(tag); blueprint[i]=(uint32_t)(isDescTag(tag)?local:nd+local);}
-    // E096: V7's production normalized layout always reverses descending runs
-    // and keeps ascending runs forward. Global run IDs therefore encode the
-    // direction directly, avoiding a separate random-access step[] stream.
-    if (reverseDescRuns && !reverseAscRuns) {
-        for(std::size_t i=0;i<n;++i){const auto tag=blueprint[i]; if(tag==OVERFLOW_TAG) continue; const auto r=(std::size_t)tag; const auto pos=cursor[r]; cursor[r] += (r < nd) ? static_cast<std::size_t>(-1) : 1u; tmp[pos]=arr[i];}
+    // E162 candidate gate: only repeated NON-overflow raw tags count as evidence.
+    // Repeated OVERFLOW_TAG values from the capped probe are not pile locality.
+    std::size_t comparableAdj = 0, sameNonOverflowAdj = 0;
+    const std::size_t tagProbeEnd = std::min<std::size_t>(n, 64);
+    for (std::size_t i = 1; i < tagProbeEnd; ++i) {
+        const auto a = blueprint[i - 1], b = blueprint[i];
+        if (a == OVERFLOW_TAG || b == OVERFLOW_TAG) continue;
+        ++comparableAdj;
+        sameNonOverflowAdj += a == b ? 1u : 0u;
+    }
+    // E189: restore E162's retained raw bulk-span path, which had later fallen
+    // out of the public V7 call. The original 75% gate regresses the newer
+    // canonical Noise10 row, so require 95% same non-overflow adjacency.
+    const bool rawBulk =
+        enableRawBulkSpanDecode && comparableAdj >= 12 &&
+        sameNonOverflowAdj * 100 >= comparableAdj * 95;
+
+    if (!rawBulk) {
+        for(std::size_t i=0;i<n;++i){const auto tag=blueprint[i]; if(tag==OVERFLOW_TAG) continue; const auto local=(std::size_t)localPileId(tag); blueprint[i]=(uint32_t)(isDescTag(tag)?local:nd+local);}
+        // E096: V7's production normalized layout always reverses descending runs
+        // and keeps ascending runs forward. Global run IDs therefore encode the
+        // direction directly, avoiding a separate random-access step[] stream.
+        if (reverseDescRuns && !reverseAscRuns) {
+            for(std::size_t i=0;i<n;++i){const auto tag=blueprint[i]; if(tag==OVERFLOW_TAG) continue; const auto r=(std::size_t)tag; const auto pos=cursor[r]; cursor[r] += (r < nd) ? static_cast<std::size_t>(-1) : 1u; tmp[pos]=arr[i];}
+        } else {
+            for(std::size_t i=0;i<n;++i){const auto tag=blueprint[i]; if(tag==OVERFLOW_TAG) continue; const auto r=(std::size_t)tag; const auto pos=cursor[r]; const bool backwards=(r<nd)?reverseDescRuns:reverseAscRuns; cursor[r] += backwards ? static_cast<std::size_t>(-1) : 1u; tmp[pos]=arr[i];}
+        }
     } else {
-        // Preserve the helper's generic contract for non-production callers.
-        for(std::size_t i=0;i<n;++i){const auto tag=blueprint[i]; if(tag==OVERFLOW_TAG) continue; const auto r=(std::size_t)tag; const auto pos=cursor[r]; const bool backwards=(r<nd)?reverseDescRuns:reverseAscRuns; cursor[r] += backwards ? static_cast<std::size_t>(-1) : 1u; tmp[pos]=arr[i];}
+        std::size_t i = 0;
+        while (i < n) {
+            const uint32_t rawTag = blueprint[i];
+            std::size_t j = i + 1;
+            while (j < n && blueprint[j] == rawTag) ++j;
+            if (rawTag != OVERFLOW_TAG) {
+                const std::size_t local = static_cast<std::size_t>(localPileId(rawTag));
+                const std::size_t r = isDescTag(rawTag) ? local : nd + local;
+                const std::size_t len = j - i;
+                const bool backwards = (r < nd) ? reverseDescRuns : reverseAscRuns;
+                if (backwards) {
+                    const std::size_t pos = cursor[r];
+                    const std::size_t first = pos + 1 - len;
+                    std::reverse_copy(
+                        arr.begin() + static_cast<std::ptrdiff_t>(i),
+                        arr.begin() + static_cast<std::ptrdiff_t>(j),
+                        tmp.begin() + static_cast<std::ptrdiff_t>(first));
+                    cursor[r] -= len;
+                } else {
+                    const std::size_t pos = cursor[r];
+                    std::copy(
+                        arr.begin() + static_cast<std::ptrdiff_t>(i),
+                        arr.begin() + static_cast<std::ptrdiff_t>(j),
+                        tmp.begin() + static_cast<std::ptrdiff_t>(pos));
+                    cursor[r] += len;
+                }
+            }
+            i = j;
+        }
     }
     if(probeOverflowSorted && !probeOverflowSorted->empty() && probeOverflowTargetAscPile<na && !reverseAscRuns){
         const auto r=nd+probeOverflowTargetAscPile, begin=start[r], end=start[r+1], oc=probeOverflowSorted->size(), normalEnd=end-oc;
@@ -1801,7 +2059,7 @@ ReconstructedRuns simulateAndReconstructRunsToTemp(
 // AVX2 exact-eight-tail specialization does not apply.
 
 template <typename T, typename Less = std::less<T>>
-void sortWithProbePileCap(std::vector<T>& arr, std::size_t probePileCap, std::size_t probeValues, Less less, bool bidirectionalBranchlessMerge, bool normalizedReconstruction = true, bool naturalRunRoute = false, bool enableWindowAvx = false) {
+void sortWithProbePileCap(std::vector<T>& arr, std::size_t probePileCap, std::size_t probeValues, Less less, bool bidirectionalBranchlessMerge, bool normalizedReconstruction = true, bool naturalRunRoute = false, bool enableWindowAvx = false, bool enableSpecializedRoutes = false, bool enableCoherentValuePileCache = true, bool enableRawBulkSpanDecode = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::simulated_simd_v7::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -1813,8 +2071,20 @@ void sortWithProbePileCap(std::vector<T>& arr, std::size_t probePileCap, std::si
         return;
     }
 
+    if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+        if (enableSpecializedRoutes) {
+            bool prefixMayMix = true;
+            if (arr.size() >= 4) {
+                const bool asc = less(arr[0], arr[1]) && less(arr[1], arr[2]) && less(arr[2], arr[3]);
+                const bool desc = less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
+                prefixMayMix = !(asc || desc);
+            }
+            if (prefixMayMix && jessesort::simulated::trySpecializedPrePatienceRoutes(arr, less)) return;
+        }
+    }
+
     SimulatedInsertionResult<T> sim =
-        simulatePatienceInsertionBlueprint(arr, less, true, probePileCap, probeValues, naturalRunRoute, enableWindowAvx);
+        simulatePatienceInsertionBlueprint(arr, less, true, probePileCap, probeValues, naturalRunRoute, enableWindowAvx, enableCoherentValuePileCache);
 
     if (sim.alreadySortedAscending) {
         return;
@@ -1868,7 +2138,8 @@ void sortWithProbePileCap(std::vector<T>& arr, std::size_t probePileCap, std::si
             true,  // descending-game piles reverse to become ascending
             &sim.probeOverflowSorted,
             sim.probeOverflowTargetAscPile,
-            less
+            less,
+            enableRawBulkSpanDecode
         );
     } else {
         runStart = reconstructTaggedBlueprintToTemp_WithSplitCounts(
@@ -1923,12 +2194,13 @@ void sortWithProbePileCap(std::vector<T>& arr, std::size_t probePileCap, std::si
 
 template <typename T, typename Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
+    if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
     // E076: default V7 deliberately uses the 8-pile / 128-element capped
     // probe so the validated single-register AVX2 lookup is exercised
     // regularly on Random-like inputs. E075 measured this at ~0.32% slower
     // than uncapped V7, so this is retained as a SIMD-use demonstration,
     // not as a claimed speed optimization.
-    sortWithProbePileCap(arr, 8, 128, less, true, true, true, true);
+    sortWithProbePileCap(arr, 8, 128, less, true, true, true, true, true, true, true);
 }
 
 } // namespace jessesort::simulated_simd_v7

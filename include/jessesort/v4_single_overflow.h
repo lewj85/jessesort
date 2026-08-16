@@ -1,6 +1,7 @@
 #ifndef JESSESORT_SIMULATED_EARLY_FREEZE_SINGLE_OVERFLOW_HPP
 #define JESSESORT_SIMULATED_EARLY_FREEZE_SINGLE_OVERFLOW_HPP
 
+#include <jessesort/tiny_sort.h>
 #include <jessesort/v5_deferred_bands.h>
 
 #include <algorithm>
@@ -48,7 +49,8 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithSingleOverflowRun(
     std::vector<std::size_t> descCounts,
     std::size_t overflowCount,
     std::vector<T>& tmp,
-    Less less = Less{}
+    Less less = Less{},
+    bool patienceSortOverflow = false
 ) {
     const std::size_t n = arr.size();
     const std::size_t normalCount = n - overflowCount;
@@ -98,18 +100,28 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithSingleOverflowRun(
     assert(overflowSeen == overflowCount);
 
     if (overflowCount != 0) {
-        std::sort(
-            tmp.begin() + static_cast<std::ptrdiff_t>(normalCount),
-            tmp.end(),
-            less);
+        if (patienceSortOverflow) {
+            std::vector<T> overflow(
+                tmp.begin() + static_cast<std::ptrdiff_t>(normalCount), tmp.end());
+            simulated::sortImplCore(overflow, less, true, false, false, false);
+            std::move(overflow.begin(), overflow.end(),
+                      tmp.begin() + static_cast<std::ptrdiff_t>(normalCount));
+        } else {
+            std::sort(
+                tmp.begin() + static_cast<std::ptrdiff_t>(normalCount),
+                tmp.end(),
+                less);
+        }
         runStart.push_back(n);
     }
     return runStart;
 }
 
 // Public V4 entry point: early freeze with one deferred overflow run.
+// E170 swept later freeze points but production intentionally remains at 50%
+// so V4 preserves its single-overflow architecture rather than converging on V2.
 template <typename T, typename Less = std::less<T>>
-void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false) {
+void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false, bool enableSpecializedRoutes = false, bool patienceSortOverflow = false, bool enableCoherentValuePileCache = true) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::simulated_early_freeze_single_overflow::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -118,8 +130,20 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                   "Comparator must be callable as bool(const T&, const T&)");
 
     if (arr.size() < 2) return;
+    if constexpr (simulated::specializedIntegralEligible<T, Less>) {
+        if (enableSpecializedRoutes) {
+            bool prefixMayMix = true;
+            if (arr.size() >= 4) {
+                const bool asc = less(arr[0], arr[1]) && less(arr[1], arr[2]) && less(arr[2], arr[3]);
+                const bool desc = less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
+                prefixMayMix = !(asc || desc);
+            }
+            if (prefixMayMix && simulated::trySpecializedPrePatienceRoutes(arr, less)) return;
+        }
+    }
     auto sim = simulated_early_freeze::simulatePatienceInsertionBlueprintEarlyFreeze(
-        arr, less, simulated_early_freeze::FreezePolicy::power2_single_overflow, naturalRunRoute);
+        arr, less, simulated_early_freeze::FreezePolicy::power2_single_overflow,
+        naturalRunRoute, false, enableCoherentValuePileCache, 50, false, true);
     if (sim.alreadySortedAscending) return;
     if (sim.reverseSortedDescending) {
         std::reverse(arr.begin(), arr.end());
@@ -133,10 +157,13 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                 sim, arr.size());
     }
 
+    const bool routedPatienceOverflow = patienceSortOverflow &&
+        arr.size() >= 50000 &&
+        (sim.ascCounts.size() + sim.descCounts.size()) <= 4096;
     std::vector<T> tmp;
     auto runStart = reconstructFrozenBlueprintWithSingleOverflowRun(
         arr, sim.blueprint, std::move(sim.ascCounts), std::move(sim.descCounts),
-        sim.overflowCount, tmp, less);
+        sim.overflowCount, tmp, less, routedPatienceOverflow);
     if (useRandomBranchlessMerge) {
         simulated::mergeRunsFromTmpToArr(
             tmp, arr, std::move(runStart), less,
@@ -154,7 +181,8 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
 
 template <typename T, typename Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
-    sortImpl(arr, less, true, true);
+    if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
+    sortImpl(arr, less, true, true, true, true, true);
 }
 
 } // namespace jessesort::simulated_early_freeze_single_overflow

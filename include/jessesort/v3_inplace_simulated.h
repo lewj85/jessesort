@@ -1,6 +1,7 @@
 #ifndef JESSESORT_SIMULATED_INPLACE_FLATTEN_HPP
 #define JESSESORT_SIMULATED_INPLACE_FLATTEN_HPP
 
+#include <jessesort/tiny_sort.h>
 #include <jessesort/v2_simulated.h>
 
 #include <algorithm>
@@ -115,9 +116,14 @@ std::vector<std::size_t> flattenTaggedBlueprintInPlace(
     return runStart;
 }
 
+
+// E133/E156 audit: V3 deliberately shares V2's specialized pre-Patience
+// router. Keep the policy in one implementation so later V2 routing changes
+// cannot silently fail to propagate to V3.
+
 // Public V3 entry point: V2-style simulated insertion with in-place flattening.
 template <typename T, typename Less = std::less<T>>
-void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false) {
+void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false, bool enableSpecializedRoutes = false, bool enableCoherentValuePileCache = true) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::simulated_inplace_flatten::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -129,53 +135,43 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         return;
     }
 
+    if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+        if (enableSpecializedRoutes) {
+            bool specialValuePrefixMayMix = true;
+            if (arr.size() >= 4) {
+                const bool firstThreeAscending =
+                    less(arr[0], arr[1]) && less(arr[1], arr[2]) && less(arr[2], arr[3]);
+                const bool firstThreeDescending =
+                    less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
+                specialValuePrefixMayMix = !(firstThreeAscending || firstThreeDescending);
+            }
+            if (specialValuePrefixMayMix && jessesort::simulated::trySpecializedPrePatienceRoutes(arr, less)) {
+                return;
+            }
+        }
+    }
+
     std::vector<std::size_t> runStart;
     bool branchlessRandomMerge = false;
     {
         jessesort::simulated::SimulatedInsertionResult<T> sim =
-            jessesort::simulated::simulatePatienceInsertionBlueprint(arr, less, true, naturalRunRoute);
+            jessesort::simulated::simulatePatienceInsertionBlueprint(
+                arr, less, true, naturalRunRoute, enableCoherentValuePileCache);
 
-        if (sim.alreadySortedAscending) {
-            return;
-        }
+        if (sim.alreadySortedAscending) return;
         if (sim.reverseSortedDescending) {
             std::reverse(arr.begin(), arr.end());
             return;
         }
 
-        const std::size_t finalPileCount =
-            sim.ascCounts.size() + sim.descCounts.size();
-        __extension__ typedef unsigned __int128 Wide;
-        const Wide finalPileSquare =
-            static_cast<Wide>(finalPileCount) * finalPileCount;
-        // E109 convergence baseline: V1/V2/V3 share 3.5 / 4.25 / 5.0.
-        // The small-size 3.5 threshold is cherry-picked from the more recent
-        // V1 evidence; mid/large thresholds already agree with revised E102.
-        bool densitySelectsBranchless = false;
-        if (arr.size() <= 20000) {
-            densitySelectsBranchless =
-                static_cast<Wide>(2) * finalPileSquare >=
-                    static_cast<Wide>(7) * arr.size();
-        } else if (arr.size() < 500000) {
-            densitySelectsBranchless =
-                static_cast<Wide>(4) * finalPileSquare >=
-                static_cast<Wide>(17) * arr.size();
-        } else {
-            densitySelectsBranchless =
-                finalPileSquare >= static_cast<Wide>(5) * arr.size();
-        }
         branchlessRandomMerge =
-            arr.size() >= 10000 &&
-            sim.earlyRandomLike &&
-            densitySelectsBranchless &&
-            std::is_trivially_copyable_v<T> &&
-            sizeof(T) <= 96;
+            jessesort::simulated::shouldUseRandomBranchlessMerge(sim, arr.size());
 
+        // V3's defining difference from V2: resolve the exact same simulated
+        // blueprint into the same run order by permutation-cycle flattening
+        // directly in arr instead of V2's streaming reconstruction into tmp.
         runStart = flattenTaggedBlueprintInPlace(
-            arr,
-            sim.blueprint,
-            std::move(sim.ascCounts),
-            std::move(sim.descCounts));
+            arr, sim.blueprint, std::move(sim.ascCounts), std::move(sim.descCounts));
     } // Release blueprint and pile-tail metadata before allocating merge storage.
 
     std::vector<T> tmp;
@@ -201,7 +197,8 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
 // so the benchmark can compare the old E082 route in the same process.
 template <typename T, typename Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
-    sortImpl(arr, less, true, true);
+    if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
+    sortImpl(arr, less, true, true, true, true);
 }
 
 } // namespace jessesort::simulated_inplace_flatten

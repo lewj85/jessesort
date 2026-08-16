@@ -1,20 +1,48 @@
 #ifndef JESSESORT_SIMULATED_HPP
 #define JESSESORT_SIMULATED_HPP
 
+#include <jessesort/tiny_sort.h>
 #include <vector>
 #include <cstdint>
+#include <cstring>
 #include <cstddef>
 #include <cmath>
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <type_traits>
 #include <utility>
 #include <climits>
 #include <cassert>
 #include <bit>
+#include <array>
 
 
 namespace jessesort::simulated {
+
+#if defined(__GNUC__) || defined(__clang__)
+#define JESSESORT_PREFIX_CONFIRM_NOINLINE __attribute__((noinline))
+#else
+#define JESSESORT_PREFIX_CONFIRM_NOINLINE
+#endif
+
+template <class T, class Less>
+JESSESORT_PREFIX_CONFIRM_NOINLINE bool confirmedShortSameDirectionPrefix(
+    const std::vector<T>& arr, std::size_t prefixEnd,
+    bool prefixDescending, Less less, std::size_t confirmationLength = 32) {
+    if (prefixEnd < 2 || prefixEnd >= confirmationLength ||
+        prefixEnd + confirmationLength > arr.size()) return false;
+    for (std::size_t j = prefixEnd + 1; j < prefixEnd + confirmationLength; ++j) {
+        if (prefixDescending) {
+            if (less(arr[j - 1], arr[j])) return false;
+        } else {
+            if (less(arr[j], arr[j - 1])) return false;
+        }
+    }
+    return true;
+}
+
+#undef JESSESORT_PREFIX_CONFIRM_NOINLINE
 // =========================================================
 // Simulated JesseSort patience insertion + reconstruction + merge
 // =========================================================
@@ -466,7 +494,75 @@ inline void simulateInsertValueAscendingPilesSplit(
 #define JESSESORT_CONTINUE_NOINLINE
 #endif
 
-template <bool UseSplit, typename T, typename Less>
+// E117: adjacent equivalent values remain in the same game/pile as their
+// predecessor.  Reuse that destination rather than repeating the tail search.
+template <typename T>
+inline void simulateInsertAdjacentEquivalent(
+    SimulatedInsertionResult<T>& result,
+    bool descendingMode,
+    std::size_t lastPileIndexAscending,
+    std::size_t lastPileIndexDescending,
+    std::size_t originalIndex
+) {
+    if (descendingMode) {
+        assert(lastPileIndexDescending < result.descCounts.size());
+        ++result.descCounts[lastPileIndexDescending];
+        result.blueprint[originalIndex] =
+            makeDescTag(static_cast<uint32_t>(lastPileIndexDescending));
+    } else {
+        assert(lastPileIndexAscending < result.ascCounts.size());
+        ++result.ascCounts[lastPileIndexAscending];
+        result.blueprint[originalIndex] =
+            makeAscTag(static_cast<uint32_t>(lastPileIndexAscending));
+    }
+}
+
+// E183 candidate: on a structurally gated mostly-sorted input, rescue a strict local
+// valley only when ordinary descending ownership would create a new pile and the
+// value can instead continue an existing ascending pile. The gate is selected
+// outside this hot continuation loop.
+template <bool EnableAdjacentEqualFastPath, typename T, typename Less>
+JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertionValleyRescue(
+    const std::vector<T>& arr,
+    std::size_t start,
+    SimulatedInsertionResult<T>& result,
+    std::size_t& lastPileIndexAscending,
+    std::size_t& lastPileIndexDescending,
+    bool& descendingMode,
+    Less less
+) {
+    auto process = [&](const T& previous, const T& value, std::size_t i) {
+        bool desc = less(value, previous);
+        bool asc = !desc && less(previous, value);
+        if (desc && i + 1 < arr.size() && less(value, arr[i + 1])) {
+            const bool wouldCreateDesc = result.descTails.empty() || less(result.descTails.back(), value);
+            const bool canContinueAsc = !result.ascTails.empty() && !less(value, result.ascTails.back());
+            if (wouldCreateDesc && canContinueAsc) { desc = false; asc = true; }
+        }
+        if (asc) descendingMode = false;
+        else if (desc) descendingMode = true;
+        else if constexpr (EnableAdjacentEqualFastPath) {
+            simulateInsertAdjacentEquivalent(result, descendingMode, lastPileIndexAscending,
+                                              lastPileIndexDescending, i);
+            return;
+        }
+        if (descendingMode) {
+            simulateInsertValueDescendingPiles(result.descTails, lastPileIndexDescending, value, i,
+                                               result.blueprint, result.descCounts, less);
+        } else {
+            simulateInsertValueAscendingPiles(result.ascTails, lastPileIndexAscending, value, i,
+                                              result.blueprint, result.ascCounts, less);
+        }
+    };
+    if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) <= 2 * sizeof(void*)) {
+        T previous = arr[start - 1];
+        for (std::size_t i = start; i < arr.size(); ++i) { const T value = arr[i]; process(previous, value, i); previous = value; }
+    } else {
+        for (std::size_t i = start; i < arr.size(); ++i) process(arr[i - 1], arr[i], i);
+    }
+}
+
+template <bool EnableAdjacentEqualFastPath, bool UseSplit, typename T, typename Less>
 JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertion(
     const std::vector<T>& arr,
     std::size_t start,
@@ -479,6 +575,12 @@ JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertion(
     auto process = [&](const T& previous, const T& value, std::size_t i) {
         if (less(previous, value)) descendingMode = false;
         else if (less(value, previous)) descendingMode = true;
+        else if constexpr (EnableAdjacentEqualFastPath) {
+            simulateInsertAdjacentEquivalent(
+                result, descendingMode, lastPileIndexAscending,
+                lastPileIndexDescending, i);
+            return;
+        }
         if (descendingMode) {
             if constexpr (UseSplit) {
                 simulateInsertValueDescendingPilesSplit(
@@ -514,7 +616,108 @@ JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertion(
     }
 }
 
+
+
+
+// E142: coherent direct-mapped value->pile cache for uniform low/moderate
+// cardinality Patience insertion. Cache entries are invalidated when their
+// pile tail changes, so a matching cache hit needs no live-tail validation.
 template <typename T, typename Less>
+inline bool coherentValuePileCacheSampleCandidate(const std::vector<T>& arr, Less less, bool allowModerateUniform = true) {
+    if constexpr (!(std::is_integral_v<T> && sizeof(T) <= sizeof(std::uint64_t) && std::is_same_v<std::remove_cv_t<std::remove_reference_t<Less>>, std::less<T>>)) {
+        (void)arr; (void)less; return false;
+    } else {
+        if (arr.size() < 10000) return false;
+        struct Slot { std::uint64_t key = 0; unsigned char count = 0; bool valid = false; };
+        std::array<Slot, 128> table{};
+        std::size_t distinct = 0, maxFreq = 0;
+        const std::size_t end = std::min<std::size_t>(64, arr.size());
+        for (std::size_t i = 0; i < end; ++i) {
+            const std::uint64_t key = static_cast<std::uint64_t>(static_cast<std::make_unsigned_t<T>>(arr[i]));
+            std::size_t slot = static_cast<std::size_t>((key * 11400714819323198485ULL) >> 57);
+            for (;;) {
+                auto& e = table[slot];
+                if (!e.valid) { e.valid = true; e.key = key; e.count = 1; ++distinct; maxFreq = std::max<std::size_t>(maxFreq, 1); break; }
+                if (e.key == key) { if (e.count != 255) ++e.count; maxFreq = std::max<std::size_t>(maxFreq, e.count); break; }
+                slot = (slot + 1) & 127u;
+            }
+        }
+        if (distinct < 8) return false;
+        return distinct <= 32 || (allowModerateUniform && distinct <= 50 && maxFreq <= 4);
+    }
+}
+
+template <bool EnableAdjacentEqualFastPath, typename T, typename Less>
+JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertionCoherentCache(
+    const std::vector<T>& arr,
+    std::size_t start,
+    SimulatedInsertionResult<T>& result,
+    std::size_t& lastPileIndexAscending,
+    std::size_t& lastPileIndexDescending,
+    bool& descendingMode,
+    Less less
+) {
+    static_assert((std::is_integral_v<T> && sizeof(T) <= sizeof(std::uint64_t) && std::is_same_v<std::remove_cv_t<std::remove_reference_t<Less>>, std::less<T>>));
+    struct Entry { std::uint64_t key = 0; std::uint32_t pile = 0; bool valid = false; };
+    std::array<Entry, 128> ascCache{}, descCache{};
+    auto bucket = [&](const T& v) -> std::size_t {
+        return static_cast<std::size_t>((static_cast<std::uint64_t>(static_cast<std::make_unsigned_t<T>>(v)) * 11400714819323198485ULL) >> 57);
+    };
+    auto seed = [&](const std::vector<T>& tails, auto& cache) {
+        for (std::size_t p = 0; p < tails.size(); ++p) {
+            const std::size_t b = bucket(tails[p]);
+            cache[b] = Entry{static_cast<std::uint64_t>(static_cast<std::make_unsigned_t<T>>(tails[p])), static_cast<std::uint32_t>(p), true};
+        }
+    };
+    seed(result.ascTails, ascCache); seed(result.descTails, descCache);
+
+    auto process = [&](const T& previous, const T& value, std::size_t i) {
+        if (less(previous, value)) descendingMode = false;
+        else if (less(value, previous)) descendingMode = true;
+        else if constexpr (EnableAdjacentEqualFastPath) {
+            simulateInsertAdjacentEquivalent(result, descendingMode,
+                lastPileIndexAscending, lastPileIndexDescending, i);
+            return;
+        }
+        auto& tails = descendingMode ? result.descTails : result.ascTails;
+        auto& counts = descendingMode ? result.descCounts : result.ascCounts;
+        auto& cache = descendingMode ? descCache : ascCache;
+        const std::uint64_t key = static_cast<std::uint64_t>(static_cast<std::make_unsigned_t<T>>(value));
+        const std::size_t b = bucket(value);
+        auto& e = cache[b];
+        if (e.valid && e.key == key && e.pile < tails.size()) {
+            const std::size_t p = e.pile;
+            ++counts[p];
+            if (descendingMode) { lastPileIndexDescending = p; result.blueprint[i] = makeDescTag(static_cast<std::uint32_t>(p)); }
+            else { lastPileIndexAscending = p; result.blueprint[i] = makeAscTag(static_cast<std::uint32_t>(p)); }
+            return;
+        }
+        const std::size_t p = descendingMode
+            ? findDescendingPileWithTailsNoHint(tails, value, less)
+            : findAscendingPileWithTailsNoHint(tails, value, less);
+        if (p < tails.size()) {
+            const T old = tails[p];
+            const std::size_t ob = bucket(old);
+            auto& oe = cache[ob];
+            if (oe.valid && oe.key == static_cast<std::uint64_t>(static_cast<std::make_unsigned_t<T>>(old)) && oe.pile == p) oe.valid = false;
+            tails[p] = value; ++counts[p];
+        } else {
+            tails.push_back(value); counts.push_back(1);
+        }
+        cache[b] = Entry{key, static_cast<std::uint32_t>(p), true};
+        if (descendingMode) { lastPileIndexDescending = p; result.blueprint[i] = makeDescTag(static_cast<std::uint32_t>(p)); }
+        else { lastPileIndexAscending = p; result.blueprint[i] = makeAscTag(static_cast<std::uint32_t>(p)); }
+    };
+
+    if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) <= 2 * sizeof(void*)) {
+        T previous = arr[start - 1];
+        for (std::size_t i = start; i < arr.size(); ++i) { const T value = arr[i]; process(previous, value, i); previous = value; }
+    } else {
+        for (std::size_t i = start; i < arr.size(); ++i) process(arr[i - 1], arr[i], i);
+    }
+}
+
+template <bool EnableAdjacentEqualFastPath, typename T, typename Less>
 JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertionNoHint(
     const std::vector<T>& arr,
     std::size_t start,
@@ -527,6 +730,12 @@ JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertionNoHint(
     auto process = [&](const T& previous, const T& value, std::size_t i) {
         if (less(previous, value)) descendingMode = false;
         else if (less(value, previous)) descendingMode = true;
+        else if constexpr (EnableAdjacentEqualFastPath) {
+            simulateInsertAdjacentEquivalent(
+                result, descendingMode, lastPileIndexAscending,
+                lastPileIndexDescending, i);
+            return;
+        }
 
         if (descendingMode) {
             const std::size_t pileIndex =
@@ -576,7 +785,7 @@ JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertionNoHint(
 // very long initial monotone prefix. Later strict monotone source runs are
 // bulk-assigned only when both endpoints resolve to the same current pile;
 // otherwise that run falls back to ordinary per-element hinted insertion.
-template <typename T, typename Less>
+template <bool EnableAdjacentEqualFastPath, typename T, typename Less>
 inline void continuePatienceInsertionNaturalRuns(
     const std::vector<T>& arr,
     std::size_t start,
@@ -585,16 +794,28 @@ inline void continuePatienceInsertionNaturalRuns(
     std::size_t& lastPileIndexDescending,
     bool& descendingMode,
     Less less,
-    std::size_t minRunLength = 8
+    std::size_t minRunLength = 8,
+    bool initialDirectionOverride = false,
+    bool initialOverrideDescending = false
 ) {
     const std::size_t n = arr.size();
     std::size_t i = start;
+    bool overridePending = initialDirectionOverride;
 
     auto insertOne = [&](std::size_t j) {
         const T& previous = arr[j - 1];
         const T& value = arr[j];
-        if (less(previous, value)) descendingMode = false;
+        if (overridePending) {
+            descendingMode = initialOverrideDescending;
+            overridePending = false;
+        } else if (less(previous, value)) descendingMode = false;
         else if (less(value, previous)) descendingMode = true;
+        else if constexpr (EnableAdjacentEqualFastPath) {
+            simulateInsertAdjacentEquivalent(
+                result, descendingMode, lastPileIndexAscending,
+                lastPileIndexDescending, j);
+            return;
+        }
         if (descendingMode) {
             simulateInsertValueDescendingPiles(
                 result.descTails, lastPileIndexDescending, value, j,
@@ -607,8 +828,15 @@ inline void continuePatienceInsertionNaturalRuns(
     };
 
     while (i < n) {
-        const bool asc = less(arr[i - 1], arr[i]);
-        const bool desc = !asc && less(arr[i], arr[i - 1]);
+        bool asc;
+        bool desc;
+        if (overridePending) {
+            asc = !initialOverrideDescending;
+            desc = initialOverrideDescending;
+        } else {
+            asc = less(arr[i - 1], arr[i]);
+            desc = !asc && less(arr[i], arr[i - 1]);
+        }
         if (!asc && !desc) {
             insertOne(i++);
             continue;
@@ -643,6 +871,7 @@ inline void continuePatienceInsertionNaturalRuns(
                               result.blueprint.begin() + static_cast<std::ptrdiff_t>(end), tag);
                     lastPileIndexAscending = firstPile;
                     descendingMode = false;
+                    overridePending = false;
                     batched = true;
                 }
             } else {
@@ -664,6 +893,7 @@ inline void continuePatienceInsertionNaturalRuns(
                               result.blueprint.begin() + static_cast<std::ptrdiff_t>(end), tag);
                     lastPileIndexDescending = firstPile;
                     descendingMode = true;
+                    overridePending = false;
                     batched = true;
                 }
             }
@@ -675,12 +905,13 @@ inline void continuePatienceInsertionNaturalRuns(
     }
 }
 
-template <typename T, typename Less = std::less<T>>
-SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
+template <bool EnableAdjacentEqualFastPath, typename T, typename Less = std::less<T>>
+SimulatedInsertionResult<T> simulatePatienceInsertionBlueprintImpl(
     const std::vector<T>& arr,
     Less less = Less{},
     bool enableEarlyRandomInsertionRoute = false,
-    bool enableNaturalRunRoute = false
+    bool enableNaturalRunRoute = false,
+    bool enableCoherentValuePileCache = false
 ) {
     constexpr std::size_t MinPrefixPileLength = 32;
     const std::size_t n = arr.size();
@@ -693,11 +924,13 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
     for (; prefixEnd < n; ++prefixEnd) {
         const T& previous = arr[prefixEnd - 1];
         const T& value = arr[prefixEnd];
-        if (less(previous, value)) {
-            if (prefixDirection == PrefixDirection::Descending) break;
+        if (prefixDirection == PrefixDirection::Ascending) {
+            if (less(value, previous)) break;
+        } else if (prefixDirection == PrefixDirection::Descending) {
+            if (less(previous, value)) break;
+        } else if (less(previous, value)) {
             prefixDirection = PrefixDirection::Ascending;
         } else if (less(value, previous)) {
-            if (prefixDirection == PrefixDirection::Ascending) break;
             prefixDirection = PrefixDirection::Descending;
         }
     }
@@ -724,8 +957,19 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
     bool descendingMode = false;
     std::size_t processStart = 1;
 
-    if (prefixEnd >= MinPrefixPileLength &&
-        prefixDirection != PrefixDirection::Unknown) {
+    // E181: only materialize a short initial run when a cold 32-value
+    // confirmation proves the post-boundary continuation has the same direction.
+    const bool confirmedShortSameDirectionPrefix =
+        prefixDirection != PrefixDirection::Unknown &&
+        prefixEnd < MinPrefixPileLength &&
+        jessesort::simulated::confirmedShortSameDirectionPrefix(
+            arr, prefixEnd, prefixDirection == PrefixDirection::Descending, less,
+            MinPrefixPileLength);
+    const bool materializePrefix =
+        prefixDirection != PrefixDirection::Unknown &&
+        (prefixEnd >= MinPrefixPileLength || confirmedShortSameDirectionPrefix);
+
+    if (materializePrefix) {
         processStart = prefixEnd;
         if (prefixDirection == PrefixDirection::Ascending) {
             result.ascTails.push_back(arr[prefixEnd - 1]);
@@ -739,9 +983,30 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
             descendingMode = true;
         }
     } else {
-        result.ascTails.push_back(arr[0]);
-        result.ascCounts.push_back(1);
-        result.blueprint[0] = makeAscTag(0);
+        if (prefixDirection == PrefixDirection::Descending) {
+            result.descTails.push_back(arr[0]);
+            result.descCounts.push_back(1);
+            result.blueprint[0] = makeDescTag(0);
+            descendingMode = true;
+        } else {
+            result.ascTails.push_back(arr[0]);
+            result.ascCounts.push_back(1);
+            result.blueprint[0] = makeAscTag(0);
+            descendingMode = false;
+        }
+    }
+
+    bool postPrefixDirectionOverride = false;
+    bool postPrefixOverrideDescending = false;
+    if (processStart == prefixEnd && materializePrefix &&
+        processStart + 1 < n) {
+        if (less(arr[processStart], arr[processStart + 1])) {
+            postPrefixDirectionOverride = true;
+            postPrefixOverrideDescending = false;
+        } else if (less(arr[processStart + 1], arr[processStart])) {
+            postPrefixDirectionOverride = true;
+            postPrefixOverrideDescending = true;
+        }
     }
 
     const bool naturalRunCandidate =
@@ -750,16 +1015,26 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
         prefixEnd >= MinPrefixPileLength &&
         prefixEnd * 8 >= n;
     if (naturalRunCandidate && processStart < n) {
-        continuePatienceInsertionNaturalRuns(
+        continuePatienceInsertionNaturalRuns<EnableAdjacentEqualFastPath>(
             arr, processStart, result,
             lastPileIndexAscending, lastPileIndexDescending,
-            descendingMode, less, 8);
+            descendingMode, less, 8,
+            postPrefixDirectionOverride, postPrefixOverrideDescending);
         return result;
     }
 
     auto processValueSample = [&](const T& previous, const T& value, std::size_t i) {
-        if (less(previous, value)) descendingMode = false;
+        if (postPrefixDirectionOverride) {
+            descendingMode = postPrefixOverrideDescending;
+            postPrefixDirectionOverride = false;
+        } else if (less(previous, value)) descendingMode = false;
         else if (less(value, previous)) descendingMode = true;
+        else if constexpr (EnableAdjacentEqualFastPath) {
+            simulateInsertAdjacentEquivalent(
+                result, descendingMode, lastPileIndexAscending,
+                lastPileIndexDescending, i);
+            return true;
+        }
         bool hit;
         if (descendingMode) {
             const bool hadPiles = !result.descTails.empty();
@@ -788,7 +1063,6 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
     const std::size_t sampleEnd = std::min(n, processStart + SampleValues);
     std::size_t sampleHits = 0;
     std::size_t sampleCount = 0;
-
     if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) <= 2 * sizeof(void*)) {
         T previous = arr[processStart - 1];
         std::size_t i = processStart;
@@ -796,7 +1070,8 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
             const T value = arr[i];
             sampleHits += processValueSample(previous, value, i) ? 1u : 0u;
             ++sampleCount;
-            if (i + 1 == StructureProbeValues) {
+            if ((processStart >= StructureProbeValues && sampleCount == StructureProbeValues) ||
+                (processStart < StructureProbeValues && i + 1 == StructureProbeValues)) {
                 result.earlyRandomLike =
                     result.ascCounts.size() >= 6 && result.descCounts.size() >= 6;
             }
@@ -808,13 +1083,24 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
             result.earlyRandomLike &&
             std::is_trivially_copyable_v<T> &&
             sizeof(T) <= 2 * sizeof(void*);
+        const bool useCoherentCache = enableCoherentValuePileCache &&
+            result.earlyRandomLike &&
+            coherentValuePileCacheSampleCandidate(arr, less);
         const bool useSplit = sampleCount != 0 && sampleHits * 4 >= sampleCount * 3;
+        const std::size_t e183ProbePiles = result.ascCounts.size() + result.descCounts.size();
+        const bool useValleyRescue = n >= 10000 && e183ProbePiles >= 3 && e183ProbePiles <= 12;
         if (i < n) {
-            if (earlyRandomInsertion) continuePatienceInsertionNoHint(
+            if (useValleyRescue) continuePatienceInsertionValleyRescue<EnableAdjacentEqualFastPath>(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
-            else if (useSplit) continuePatienceInsertion<true>(
+            else if (useCoherentCache) {
+                if constexpr ((std::is_integral_v<T> && sizeof(T) <= sizeof(std::uint64_t) && std::is_same_v<std::remove_cv_t<std::remove_reference_t<Less>>, std::less<T>>))
+                    continuePatienceInsertionCoherentCache<EnableAdjacentEqualFastPath>(
+                        arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
+            } else if (earlyRandomInsertion) continuePatienceInsertionNoHint<EnableAdjacentEqualFastPath>(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
-            else continuePatienceInsertion<false>(
+            else if (useSplit) continuePatienceInsertion<EnableAdjacentEqualFastPath, true>(
+                arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
+            else continuePatienceInsertion<EnableAdjacentEqualFastPath, false>(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
         }
     } else {
@@ -822,7 +1108,8 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
         for (; i < sampleEnd; ++i) {
             sampleHits += processValueSample(arr[i - 1], arr[i], i) ? 1u : 0u;
             ++sampleCount;
-            if (i + 1 == StructureProbeValues) {
+            if ((processStart >= StructureProbeValues && sampleCount == StructureProbeValues) ||
+                (processStart < StructureProbeValues && i + 1 == StructureProbeValues)) {
                 result.earlyRandomLike =
                     result.ascCounts.size() >= 6 && result.descCounts.size() >= 6;
             }
@@ -833,17 +1120,42 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
             result.earlyRandomLike &&
             std::is_trivially_copyable_v<T> &&
             sizeof(T) <= 2 * sizeof(void*);
+        const bool useCoherentCache = enableCoherentValuePileCache &&
+            result.earlyRandomLike &&
+            coherentValuePileCacheSampleCandidate(arr, less);
         const bool useSplit = sampleCount != 0 && sampleHits * 4 >= sampleCount * 3;
+        const std::size_t e183ProbePiles = result.ascCounts.size() + result.descCounts.size();
+        const bool useValleyRescue = n >= 10000 && e183ProbePiles >= 3 && e183ProbePiles <= 12;
         if (i < n) {
-            if (earlyRandomInsertion) continuePatienceInsertionNoHint(
+            if (useValleyRescue) continuePatienceInsertionValleyRescue<EnableAdjacentEqualFastPath>(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
-            else if (useSplit) continuePatienceInsertion<true>(
+            else if (useCoherentCache) {
+                if constexpr ((std::is_integral_v<T> && sizeof(T) <= sizeof(std::uint64_t) && std::is_same_v<std::remove_cv_t<std::remove_reference_t<Less>>, std::less<T>>))
+                    continuePatienceInsertionCoherentCache<EnableAdjacentEqualFastPath>(
+                        arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
+            } else if (earlyRandomInsertion) continuePatienceInsertionNoHint<EnableAdjacentEqualFastPath>(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
-            else continuePatienceInsertion<false>(
+            else if (useSplit) continuePatienceInsertion<EnableAdjacentEqualFastPath, true>(
+                arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
+            else continuePatienceInsertion<EnableAdjacentEqualFastPath, false>(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
         }
     }
     return result;
+}
+
+// Production route: E117 is enabled for the simulated blueprint path.
+template <typename T, typename Less = std::less<T>>
+SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
+    const std::vector<T>& arr,
+    Less less = Less{},
+    bool enableEarlyRandomInsertionRoute = false,
+    bool enableNaturalRunRoute = false,
+    bool enableCoherentValuePileCache = false
+) {
+    return simulatePatienceInsertionBlueprintImpl<true>(
+        arr, less, enableEarlyRandomInsertionRoute, enableNaturalRunRoute,
+        enableCoherentValuePileCache);
 }
 
 // =========================================================
@@ -944,7 +1256,9 @@ std::vector<std::size_t> reconstructTaggedBlueprintNormalizedForV2(
     std::vector<std::size_t> descCounts,
     std::vector<T>& tmp,
     bool reverseAscRuns = false,
-    bool reverseDescRuns = true
+    bool reverseDescRuns = true,
+    bool enableBulkTagSpans = true,
+    bool enableOnTheFlyBulkDecode = false
 ) {
     const std::size_t n = arr.size();
     const std::size_t numAscPiles = ascCounts.size();
@@ -990,24 +1304,66 @@ std::vector<std::size_t> reconstructTaggedBlueprintNormalizedForV2(
         }
     }
 
-    for (std::size_t i = 0; i < n; ++i) {
-        const uint32_t tag = blueprint[i];
-        const std::size_t local = static_cast<std::size_t>(localPileId(tag));
-        blueprint[i] = static_cast<uint32_t>(
-            isDescTag(tag) ? local : numDescPiles + local);
-    }
-    for (std::size_t i = 0; i < n; ++i) {
-        const std::size_t r = static_cast<std::size_t>(blueprint[i]);
-        const std::size_t pos = cursor[r];
-        if (deriveStepFromRunId) {
-            // Production V2 calls this helper with descending runs reversed and
-            // ascending runs forward; normalized IDs expose that split directly.
-            cursor[r] += (r < numDescPiles) ? static_cast<std::size_t>(-1) : 1u;
-        } else {
-            cursor[r] = static_cast<std::size_t>(
-                static_cast<std::ptrdiff_t>(cursor[r]) + step[r]);
+    std::size_t tagAdjacencyHits = 0;
+    const std::size_t tagProbeEnd = std::min<std::size_t>(n, 64);
+    for (std::size_t i = 1; i < tagProbeEnd; ++i)
+        tagAdjacencyHits += blueprint[i] == blueprint[i - 1] ? 1u : 0u;
+    const bool useBulkTagSpans = enableBulkTagSpans && tagProbeEnd >= 16 &&
+        tagAdjacencyHits * 4 >= (tagProbeEnd - 1) * 3;
+
+    const bool decodeBulkTagsOnTheFly =
+        enableOnTheFlyBulkDecode && useBulkTagSpans;
+
+    if (!decodeBulkTagsOnTheFly) {
+        for (std::size_t i = 0; i < n; ++i) {
+            const uint32_t tag = blueprint[i];
+            const std::size_t local = static_cast<std::size_t>(localPileId(tag));
+            blueprint[i] = static_cast<uint32_t>(
+                isDescTag(tag) ? local : numDescPiles + local);
         }
-        tmp[pos] = arr[i];
+    }
+
+    if (useBulkTagSpans) {
+        std::size_t i = 0;
+        while (i < n) {
+            const uint32_t tag = blueprint[i];
+            const std::size_t r = decodeBulkTagsOnTheFly
+                ? (isDescTag(tag)
+                    ? static_cast<std::size_t>(localPileId(tag))
+                    : numDescPiles + static_cast<std::size_t>(localPileId(tag)))
+                : static_cast<std::size_t>(tag);
+            std::size_t j = i + 1;
+            while (j < n && blueprint[j] == tag) ++j;
+            const std::size_t len = j - i;
+            const bool reverseRun = r < numDescPiles ? reverseDescRuns : reverseAscRuns;
+            if (!reverseRun) {
+                const std::size_t pos = cursor[r];
+                std::copy(arr.begin() + static_cast<std::ptrdiff_t>(i),
+                          arr.begin() + static_cast<std::ptrdiff_t>(j),
+                          tmp.begin() + static_cast<std::ptrdiff_t>(pos));
+                cursor[r] += len;
+            } else {
+                const std::size_t pos = cursor[r];
+                const std::size_t first = pos + 1 - len;
+                std::reverse_copy(arr.begin() + static_cast<std::ptrdiff_t>(i),
+                                  arr.begin() + static_cast<std::ptrdiff_t>(j),
+                                  tmp.begin() + static_cast<std::ptrdiff_t>(first));
+                cursor[r] -= len;
+            }
+            i = j;
+        }
+    } else {
+        for (std::size_t i = 0; i < n; ++i) {
+            const std::size_t r = static_cast<std::size_t>(blueprint[i]);
+            const std::size_t pos = cursor[r];
+            if (deriveStepFromRunId) {
+                cursor[r] += (r < numDescPiles) ? static_cast<std::size_t>(-1) : 1u;
+            } else {
+                cursor[r] = static_cast<std::size_t>(
+                    static_cast<std::ptrdiff_t>(cursor[r]) + step[r]);
+            }
+            tmp[pos] = arr[i];
+        }
     }
     return start;
 }
@@ -1885,6 +2241,670 @@ ReconstructedRuns simulateAndReconstructRunsToTemp(
     };
 }
 
+
+// =========================================================
+// E123 / E128 / E129 specialized primitive backends
+// =========================================================
+
+template <typename T, typename Less>
+inline constexpr bool specializedIntegralEligible =
+    std::is_integral_v<T> && sizeof(T) <= sizeof(std::uint64_t) &&
+    std::is_same_v<std::remove_cv_t<std::remove_reference_t<Less>>, std::less<T>>;
+
+template <typename T>
+inline std::uint64_t specializedIntegralKey(const T& value) {
+    using U = std::make_unsigned_t<T>;
+    return static_cast<std::uint64_t>(static_cast<U>(value));
+}
+
+template <typename T>
+inline std::uint64_t lowCardinalityHash(const T& value) {
+    return static_cast<std::uint64_t>(static_cast<std::make_unsigned_t<T>>(value)) * 11400714819323198485ULL;
+}
+
+template <typename T, typename Less>
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+bool lowCardinalityDirectionGate(const std::vector<T>& arr, Less less) {
+    if constexpr (!specializedIntegralEligible<T, Less>) {
+        (void)arr; (void)less; return false;
+    } else {
+        if (arr.size() < 10000 || arr.size() < 8) return false;
+        bool sawAsc = false, sawDesc = false;
+        for (std::size_t i = 1; i < 8; ++i) {
+            if (less(arr[i - 1], arr[i])) sawAsc = true;
+            else if (less(arr[i], arr[i - 1])) sawDesc = true;
+        }
+        return sawAsc && sawDesc;
+    }
+}
+
+template <typename T, typename Less>
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+bool lowCardinalitySampleCandidate(const std::vector<T>& arr, Less less) {
+    if constexpr (!specializedIntegralEligible<T, Less>) {
+        (void)arr; (void)less; return false;
+    } else {
+        std::array<std::uint64_t, 128> keys{};
+        std::array<unsigned char, 128> valid{};
+        std::size_t distinct = 0;
+        const std::size_t end = std::min<std::size_t>(64, arr.size());
+        for (std::size_t i = 0; i < end; ++i) {
+            const std::uint64_t key = specializedIntegralKey(arr[i]);
+            std::size_t slot = static_cast<std::size_t>(lowCardinalityHash(arr[i]) >> 57);
+            for (;;) {
+                if (!valid[slot]) { valid[slot] = 1; keys[slot] = key; ++distinct; break; }
+                if (keys[slot] == key) break;
+                slot = (slot + 1) & 127u;
+            }
+        }
+        return distinct >= 8 && distinct <= 50;
+    }
+}
+
+template <typename T>
+struct LowCardinalityEntry {
+    T key;
+    std::size_t count;
+};
+
+template <typename T, typename Less>
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+bool trySortLowCardinalityDirectConfirmed(std::vector<T>& arr, Less less) {
+    if constexpr (!specializedIntegralEligible<T, Less>) {
+        (void)arr; (void)less; return false;
+    } else {
+        struct Slot { T key{}; std::size_t count = 0; bool valid = false; };
+        std::array<Slot, 256> table{};
+        std::size_t unique = 0;
+        for (const T& value : arr) {
+            std::size_t slot = static_cast<std::size_t>(lowCardinalityHash(value) >> 56);
+            for (;;) {
+                auto& e = table[slot];
+                if (!e.valid) {
+                    if (unique == 128) return false;
+                    e.valid = true; e.key = value; e.count = 1; ++unique; break;
+                }
+                if (e.key == value) { ++e.count; break; }
+                slot = (slot + 1) & 255u;
+            }
+        }
+        std::array<LowCardinalityEntry<T>, 128> entries{};
+        std::size_t used = 0;
+        for (const auto& e : table) if (e.valid) entries[used++] = {e.key, e.count};
+        std::sort(entries.begin(), entries.begin() + static_cast<std::ptrdiff_t>(used),
+                  [&](const auto& a, const auto& b) { return less(a.key, b.key); });
+        std::size_t out = 0;
+        for (std::size_t i = 0; i < used; ++i) {
+            std::fill_n(arr.begin() + static_cast<std::ptrdiff_t>(out), entries[i].count, entries[i].key);
+            out += entries[i].count;
+        }
+        return true;
+    }
+}
+
+template <typename T, typename Less>
+inline void highEntropyCompareExchange(T* a, std::size_t i, std::size_t j, Less less) {
+    T x = a[i], y = a[j];
+    const bool swap = less(y, x);
+    a[i] = swap ? y : x;
+    a[j] = swap ? x : y;
+}
+
+template <typename T, typename Less>
+inline void highEntropyNetwork9(T* a, Less less) {
+    static constexpr unsigned p[][2] = {{0,3},{1,7},{2,5},{4,8},{0,7},{2,4},{3,8},{5,6},{0,2},{1,3},{4,5},{7,8},{1,4},{3,6},{5,7},{0,1},{2,4},{3,5},{6,8},{2,3},{4,5},{6,7},{1,2},{3,4},{5,6}};
+    for (const auto& q : p) highEntropyCompareExchange(a, q[0], q[1], less);
+}
+
+template <typename T, typename Less>
+inline void highEntropyNetwork13(T* a, Less less) {
+    static constexpr unsigned p[][2] = {{0,12},{1,10},{2,9},{3,7},{5,11},{6,8},{1,6},{2,3},{4,11},{7,9},{8,10},{0,4},{1,2},{3,6},{7,8},{9,10},{11,12},{4,6},{5,9},{8,11},{10,12},{0,5},{3,8},{4,7},{6,11},{9,10},{0,1},{2,5},{6,9},{7,8},{10,11},{1,3},{2,4},{5,6},{9,10},{1,2},{3,4},{5,7},{6,8},{2,3},{4,5},{6,7},{8,9},{3,4},{5,6}};
+    for (const auto& q : p) highEntropyCompareExchange(a, q[0], q[1], less);
+}
+
+template <typename T, typename Less>
+inline void highEntropyInsertionFinish(T* a, std::size_t n, Less less) {
+    if (n < 2) return;
+    std::size_t pre = 1;
+    if (n >= 13) { highEntropyNetwork13(a, less); pre = 13; }
+    else if (n >= 9) { highEntropyNetwork9(a, less); pre = 9; }
+    for (std::size_t i = pre; i < n; ++i) {
+        T x = a[i];
+        if (!less(x, a[i - 1])) continue;
+        std::size_t j = i;
+        do { a[j] = a[j - 1]; --j; } while (j && less(x, a[j - 1]));
+        a[j] = x;
+    }
+}
+
+template <typename T, typename Less>
+inline void highEntropySmallSortBaseline(T* a, std::size_t n, Less less) {
+    if (n < 18) {
+        highEntropyInsertionFinish(a, n, less);
+        return;
+    }
+
+    const std::size_t mid = n / 2;
+    highEntropyInsertionFinish(a, mid, less);
+    highEntropyInsertionFinish(a + mid, n - mid, less);
+
+    std::array<T, 32> scratch{};
+    std::size_t left = 0;
+    std::size_t right = mid;
+    std::ptrdiff_t leftRev = static_cast<std::ptrdiff_t>(mid) - 1;
+    std::ptrdiff_t rightRev = static_cast<std::ptrdiff_t>(n) - 1;
+    std::size_t out = 0;
+    std::ptrdiff_t outRev = static_cast<std::ptrdiff_t>(n) - 1;
+
+    for (std::size_t i = 0; i < mid; ++i) {
+        const bool takeRight = less(a[right], a[left]);
+        scratch[out++] = takeRight ? a[right++] : a[left++];
+
+        const bool takeRightRev =
+            !less(a[static_cast<std::size_t>(rightRev)],
+                  a[static_cast<std::size_t>(leftRev)]);
+        scratch[static_cast<std::size_t>(outRev--)] =
+            takeRightRev ? a[static_cast<std::size_t>(rightRev--)]
+                         : a[static_cast<std::size_t>(leftRev--)];
+    }
+
+    if ((n & 1u) != 0u) {
+        const bool leftNonempty =
+            static_cast<std::ptrdiff_t>(left) <= leftRev;
+        scratch[out] = leftNonempty ? a[left] : a[right];
+    }
+    std::copy_n(scratch.begin(), n, a);
+}
+
+template <typename T, typename Less>
+inline void highEntropySmallSortIpnsortStyle(T* a, std::size_t n, Less less) {
+    // Rust's current integer network path is already algorithmically almost
+    // identical to Jesse's: 9/13 network + insertion completion, then a
+    // bidirectional merge for len>=18. E166 tests its remaining branchless
+    // pointer-arithmetic merge shape and single-loop half finishing.
+    if (n < 18) {
+        highEntropyInsertionFinish(a, n, less);
+        return;
+    }
+
+    const std::size_t mid = n / 2;
+
+    // Use one loop-shaped dispatch to mirror Rust's anti-unrolling structure.
+    T* region = a;
+    std::size_t regionLen = mid;
+    for (;;) {
+        highEntropyInsertionFinish(region, regionLen, less);
+        if (region != a) break;
+        region = a + mid;
+        regionLen = n - mid;
+    }
+
+    std::array<T, 32> scratch{};
+    const T* left = a;
+    const T* right = a + mid;
+    const T* leftRev = a + mid - 1;
+    const T* rightRev = a + n - 1;
+    T* dst = scratch.data();
+    T* dstRev = scratch.data() + n - 1;
+
+    for (std::size_t k = 0; k < mid; ++k) {
+        const bool takeLeft = !less(*right, *left);
+        const T* srcUp = takeLeft ? left : right;
+        *dst++ = *srcUp;
+        left += static_cast<std::size_t>(takeLeft);
+        right += static_cast<std::size_t>(!takeLeft);
+
+        const bool takeRightRev = !less(*rightRev, *leftRev);
+        const T* srcDown = takeRightRev ? rightRev : leftRev;
+        *dstRev-- = *srcDown;
+        rightRev -= static_cast<std::size_t>(takeRightRev);
+        leftRev -= static_cast<std::size_t>(!takeRightRev);
+    }
+
+    if ((n & 1u) != 0u) {
+        const T* leftEnd = leftRev + 1;
+        const bool leftNonempty = left < leftEnd;
+        *dst = *(leftNonempty ? left : right);
+    }
+
+    if constexpr (std::is_trivially_copyable_v<T>) {
+        std::memcpy(a, scratch.data(), n * sizeof(T));
+    } else {
+        std::copy_n(scratch.begin(), n, a);
+    }
+}
+
+struct HighEntropySmallSortMetrics {
+    std::uint64_t calls = 0;
+    std::uint64_t elements = 0;
+    std::uint64_t nanoseconds = 0;
+};
+
+template <typename T, typename Less>
+inline void highEntropySmallSort(
+    T* a, std::size_t n, Less less,
+    bool enableIpnsortStyleSmallSort = false,
+    HighEntropySmallSortMetrics* metrics = nullptr
+) {
+    using SmallClock = std::chrono::steady_clock;
+    const auto begin = metrics ? SmallClock::now() : SmallClock::time_point{};
+
+    if (enableIpnsortStyleSmallSort && n >= 18)
+        highEntropySmallSortIpnsortStyle(a, n, less);
+    else
+        highEntropySmallSortBaseline(a, n, less);
+
+    if (metrics) {
+        const auto end = SmallClock::now();
+        ++metrics->calls;
+        metrics->elements += n;
+        metrics->nanoseconds += static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count());
+    }
+}
+
+template <typename T, typename Less>
+inline std::size_t highEntropyMedian3Index(T* a, std::size_t x, std::size_t y, std::size_t z, Less less) {
+    if (less(a[y], a[x])) std::swap(x, y);
+    if (less(a[z], a[y])) std::swap(y, z);
+    if (less(a[y], a[x])) std::swap(x, y);
+    return y;
+}
+
+template <typename T, typename Less>
+inline std::size_t highEntropyAdaptiveMedian3Rec(
+    T* a,
+    std::size_t x,
+    std::size_t y,
+    std::size_t z,
+    std::size_t sectionSize,
+    Less less
+) {
+    // E164: C++ translation of ipnsort's adaptive pseudomedian geometry.
+    // Each level samples the starts of the 0/8, 4/8, and 7/8 subregions.
+    if (sectionSize * 8 >= 64) {
+        const std::size_t s = sectionSize / 8;
+        if (s != 0) {
+            x = highEntropyAdaptiveMedian3Rec(
+                a, x, x + 4 * s, x + 7 * s, s, less);
+            y = highEntropyAdaptiveMedian3Rec(
+                a, y, y + 4 * s, y + 7 * s, s, less);
+            z = highEntropyAdaptiveMedian3Rec(
+                a, z, z + 4 * s, z + 7 * s, s, less);
+        }
+    }
+    return highEntropyMedian3Index(a, x, y, z, less);
+}
+
+template <typename T, typename Less>
+inline std::size_t highEntropyPivotIndex(
+    T* a, std::size_t n, Less less, bool enableAdaptiveLargePivot = true
+) {
+    // E164: recursive adaptive sampling pays for itself only on large high-entropy
+    // partitions. Dominant-value/equality-filtered routes explicitly keep the
+    // previous median-of-3 / fixed-ninther policy.
+    if (enableAdaptiveLargePivot && n >= 8192) {
+        const std::size_t s = n / 8;
+        return highEntropyAdaptiveMedian3Rec(
+            a, 0, 4 * s, 7 * s, s, less);
+    }
+    if (n < 128) return highEntropyMedian3Index(a, 0, n / 2, n - 1, less);
+    const std::size_t s = n / 8, m = n / 2;
+    const std::size_t a1 = highEntropyMedian3Index(a, 0, s, 2 * s, less);
+    const std::size_t a2 = highEntropyMedian3Index(a, m - s, m, m + s, less);
+    const std::size_t a3 = highEntropyMedian3Index(a, n - 1 - 2 * s, n - 1 - s, n - 1, less);
+    return highEntropyMedian3Index(a, a1, a2, a3, less);
+}
+
+template <typename T, typename Pred>
+inline std::size_t highEntropyCyclicPred(T* a, std::size_t len, Pred pred) {
+    if (len == 0) return 0;
+    T gap = a[0];
+    T* gapPos = a;
+    std::size_t num = 0;
+    std::size_t i = 1;
+    auto body = [&](T x, T* right) {
+        const bool take = pred(x);
+        T* left = a + num;
+        *gapPos = *left;
+        *left = x;
+        gapPos = right;
+        num += static_cast<std::size_t>(take);
+    };
+    for (; i + 1 < len; i += 2) { body(a[i], a + i); body(a[i + 1], a + i + 1); }
+    for (; i < len; ++i) body(a[i], a + i);
+    const bool take = pred(gap);
+    T* left = a + num;
+    *gapPos = *left;
+    *left = gap;
+    num += static_cast<std::size_t>(take);
+    return num;
+}
+
+template <typename T, typename Pred>
+inline std::size_t highEntropyCyclicPredIpnsortStyle8(
+    T* v, std::size_t len, Pred pred
+) {
+    if (len == 0) return 0;
+
+    T gapValue;
+    std::memcpy(&gapValue, v, sizeof(T));
+    T* gapPos = v;
+    T* right = v + 1;
+    std::size_t numLt = 0;
+
+    auto body = [&](T* rightPtr) {
+        const bool rightIsLt = pred(*rightPtr);
+        T* left = v + numLt;
+        std::memmove(gapPos, left, sizeof(T));
+        std::memcpy(left, rightPtr, sizeof(T));
+        gapPos = rightPtr;
+        numLt += static_cast<std::size_t>(rightIsLt);
+    };
+
+    T* const end = v + len;
+    T* const unrollEnd = v + len - 1;
+    while (right < unrollEnd) {
+        body(right); ++right;
+        body(right); ++right;
+    }
+    while (right < end) {
+        body(right);
+        ++right;
+    }
+
+    const bool gapIsLt = pred(gapValue);
+    T* left = v + numLt;
+    std::memmove(gapPos, left, sizeof(T));
+    std::memcpy(left, &gapValue, sizeof(T));
+    numLt += static_cast<std::size_t>(gapIsLt);
+    return numLt;
+}
+
+template <typename T, typename Less>
+inline std::size_t highEntropyPartition(
+    T* a, std::size_t n, std::size_t pivotIndex, Less less
+) {
+    // E165 follow-up: source-integrated u64 testing found a small but consistent
+    // local gain for the ipnsort-style gap loop. Keep it compile-time isolated
+    // to eligible 8-byte integral primitives; canonical 4-byte int retains the
+    // prior Jesse kernel exactly.
+    if constexpr (specializedIntegralEligible<T, Less> && sizeof(T) == 8) {
+        std::swap(a[0], a[pivotIndex]);
+        const T pivot = a[0];
+        const std::size_t p = highEntropyCyclicPredIpnsortStyle8(
+            a + 1, n - 1, [&](const T& x) { return less(x, pivot); });
+        std::swap(a[0], a[p]);
+        return p;
+    } else {
+        std::swap(a[pivotIndex], a[n - 1]);
+        const T pivot = a[n - 1];
+        const std::size_t p = highEntropyCyclicPred(
+            a, n - 1, [&](const T& x) { return less(x, pivot); });
+        std::swap(a[p], a[n - 1]);
+        return p;
+    }
+}
+
+struct HighEntropyControlFlowMetrics {
+    std::uint64_t functionEntries = 0;
+    std::uint64_t loopIterations = 0;
+    std::uint64_t maxCallDepth = 0;
+};
+
+template <typename T, typename Less>
+void highEntropyQuickSort(T* a, std::size_t n, int depth, Less less,
+                          bool hasAncestor = false, T ancestor = T{},
+                          bool enableAdaptiveLargePivot = true,
+                          bool enableIpnsortStyleSmallSort = true,
+                          HighEntropySmallSortMetrics* smallSortMetrics = nullptr,
+                          bool iterateRight = true,
+                          HighEntropyControlFlowMetrics* controlMetrics = nullptr,
+                          std::uint64_t callDepth = 1) {
+    if (controlMetrics) {
+        ++controlMetrics->functionEntries;
+        controlMetrics->maxCallDepth =
+            std::max(controlMetrics->maxCallDepth, callDepth);
+    }
+
+    for (;;) {
+        if (controlMetrics) ++controlMetrics->loopIterations;
+
+        if (n <= 32) {
+            using SmallClock = std::chrono::steady_clock;
+            const auto smallBegin =
+                smallSortMetrics ? SmallClock::now() : SmallClock::time_point{};
+
+            if (n < 18) {
+                highEntropyInsertionFinish(a, n, less);
+            } else if constexpr (specializedIntegralEligible<T, Less>) {
+                if (enableIpnsortStyleSmallSort)
+                    highEntropySmallSortIpnsortStyle(a, n, less);
+                else
+                    highEntropySmallSortBaseline(a, n, less);
+            } else {
+                highEntropySmallSortBaseline(a, n, less);
+            }
+
+            if (smallSortMetrics) {
+                const auto smallEnd = SmallClock::now();
+                ++smallSortMetrics->calls;
+                smallSortMetrics->elements += n;
+                smallSortMetrics->nanoseconds += static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        smallEnd - smallBegin).count());
+            }
+            return;
+        }
+
+        if (depth <= 0) {
+            std::make_heap(a, a + n, less);
+            std::sort_heap(a, a + n, less);
+            return;
+        }
+
+        const std::size_t pi =
+            highEntropyPivotIndex(a, n, less, enableAdaptiveLargePivot);
+        const T pivot = a[pi];
+
+        if (hasAncestor && !less(ancestor, pivot)) {
+            const std::size_t eq = highEntropyCyclicPred(
+                a, n, [&](const T& x) { return !less(ancestor, x); });
+
+            if (!iterateRight) {
+                highEntropyQuickSort(
+                    a + eq, n - eq, depth - 1, less, false, T{},
+                    enableAdaptiveLargePivot, enableIpnsortStyleSmallSort,
+                    smallSortMetrics, false, controlMetrics, callDepth + 1);
+                return;
+            }
+
+            a += eq;
+            n -= eq;
+            --depth;
+            hasAncestor = false;
+            ancestor = T{};
+            continue;
+        }
+
+        const std::size_t p = highEntropyPartition(a, n, pi, less);
+
+        if (!iterateRight) {
+            highEntropyQuickSort(
+                a, p, depth - 1, less, false, T{},
+                enableAdaptiveLargePivot, enableIpnsortStyleSmallSort,
+                smallSortMetrics, false, controlMetrics, callDepth + 1);
+            highEntropyQuickSort(
+                a + p + 1, n - p - 1, depth - 1, less, true, pivot,
+                enableAdaptiveLargePivot, enableIpnsortStyleSmallSort,
+                smallSortMetrics, false, controlMetrics, callDepth + 1);
+            return;
+        }
+
+        // E167 candidate: recurse only into the left partition and iterate on
+        // the right, matching ipnsort's control-flow shape.
+        highEntropyQuickSort(
+            a, p, depth - 1, less, false, T{},
+            enableAdaptiveLargePivot, enableIpnsortStyleSmallSort,
+            smallSortMetrics, true, controlMetrics, callDepth + 1);
+
+        a += p + 1;
+        n -= p + 1;
+        --depth;
+        hasAncestor = true;
+        ancestor = pivot;
+    }
+}
+
+template <typename T, typename Less>
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+bool highEntropySampleCandidate(const std::vector<T>& arr, Less less) {
+    if constexpr (!specializedIntegralEligible<T, Less>) {
+        (void)arr; (void)less; return false;
+    } else {
+        if (arr.size() < 10000) return false;
+        std::array<std::uint64_t, 128> keys{};
+        std::array<unsigned char, 128> valid{};
+        std::size_t distinct = 0;
+        const std::size_t end = std::min<std::size_t>(64, arr.size());
+        for (std::size_t i = 0; i < end; ++i) {
+            const std::uint64_t key = specializedIntegralKey(arr[i]);
+            std::size_t slot = static_cast<std::size_t>((key * 11400714819323198485ULL) >> 57);
+            for (;;) {
+                if (!valid[slot]) { valid[slot] = 1; keys[slot] = key; ++distinct; break; }
+                if (keys[slot] == key) break;
+                slot = (slot + 1) & 127u;
+            }
+        }
+        return distinct >= 44;
+    }
+}
+
+template <typename T, typename Less>
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+bool trySortHighEntropyPartitionDirect(std::vector<T>& arr, Less less) {
+    if constexpr (!specializedIntegralEligible<T, Less>) {
+        (void)arr; (void)less; return false;
+    } else {
+        if (!highEntropySampleCandidate(arr, less)) return false;
+        highEntropyQuickSort(
+            arr.data(), arr.size(),
+            2 * static_cast<int>(std::bit_width(arr.size())), less,
+            false, T{}, true, true, nullptr, true);
+        return true;
+    }
+}
+
+template <typename T, typename Less>
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+bool dominantValueSampleCandidate(const std::vector<T>& arr, T& dominant, Less less) {
+    if constexpr (!specializedIntegralEligible<T, Less>) {
+        (void)arr; (void)dominant; (void)less; return false;
+    } else {
+        if (arr.size() < 10000) return false;
+        T candidate = arr[0];
+        int balance = 0;
+        for (std::size_t i = 0; i < 8; ++i) {
+            if (arr[i] == candidate) ++balance;
+            else if (--balance < 0) { candidate = arr[i]; balance = 1; }
+        }
+        std::size_t firstEight = 0;
+        for (std::size_t i = 0; i < 8; ++i) firstEight += arr[i] == candidate ? 1u : 0u;
+        if (firstEight < 6) return false;
+        std::size_t sampleCount = 0;
+        const std::size_t end = std::min<std::size_t>(64, arr.size());
+        for (std::size_t i = 0; i < end; ++i) sampleCount += arr[i] == candidate ? 1u : 0u;
+        if (sampleCount < 56) return false;
+        dominant = candidate;
+        return true;
+    }
+}
+
+
+// Shared pre-Patience router used by V1-V7 propagation experiments.  The
+// caller is responsible for cheap structural/monotonic guards before entering
+// this helper.  Returning true means the input was fully sorted by a
+// specialized backend and no pile representation should be built.
+template <typename T, typename Less>
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+bool trySpecializedPrePatienceRoutes(std::vector<T>& arr, Less less) {
+    if constexpr (!specializedIntegralEligible<T, Less>) {
+        (void)arr; (void)less;
+        return false;
+    } else {
+        T dominant = arr[0];
+        if (dominantValueSampleCandidate(arr, dominant, less)) {
+            highEntropyQuickSort(
+                arr.data(), arr.size(),
+                2 * static_cast<int>(std::bit_width(arr.size())), less,
+                false, T{}, false,
+                true, nullptr, false);
+            return true;
+        }
+
+        if (lowCardinalityDirectionGate(arr, less) &&
+            lowCardinalitySampleCandidate(arr, less) &&
+            trySortLowCardinalityDirectConfirmed(arr, less)) {
+            return true;
+        }
+
+        bool highEntropyPrefixAlternates = false;
+        if (arr.size() >= 8) {
+            int previousDirection = 0;
+            highEntropyPrefixAlternates = true;
+            for (std::size_t i = 1; i < 8; ++i) {
+                int direction = 0;
+                if (less(arr[i - 1], arr[i])) direction = 1;
+                else if (less(arr[i], arr[i - 1])) direction = -1;
+                if (direction == 0 ||
+                    (previousDirection != 0 && direction == previousDirection)) {
+                    highEntropyPrefixAlternates = false;
+                    break;
+                }
+                previousDirection = direction;
+            }
+        }
+        if (!highEntropyPrefixAlternates &&
+            trySortHighEntropyPartitionDirect(arr, less)) {
+            return true;
+        }
+        return false;
+    }
+}
+
+template <typename T>
+inline bool shouldUseRandomBranchlessMerge(
+    const SimulatedInsertionResult<T>& sim, std::size_t n
+) {
+    const std::size_t finalPileCount = sim.ascCounts.size() + sim.descCounts.size();
+    __extension__ typedef unsigned __int128 Wide;
+    const Wide finalPileSquare = static_cast<Wide>(finalPileCount) * finalPileCount;
+    bool density = false;
+    if (n <= 20000) {
+        density = static_cast<Wide>(2) * finalPileSquare >= static_cast<Wide>(7) * n;
+    } else if (n < 500000) {
+        density = static_cast<Wide>(4) * finalPileSquare >= static_cast<Wide>(17) * n;
+    } else {
+        density = finalPileSquare >= static_cast<Wide>(5) * n;
+    }
+    return n >= 10000 && sim.earlyRandomLike && density &&
+           std::is_trivially_copyable_v<T> && sizeof(T) <= 96;
+}
+
 // =========================================================
 // Public sort entry point
 // =========================================================
@@ -1892,7 +2912,11 @@ ReconstructedRuns simulateAndReconstructRunsToTemp(
 // Sorts arr in place. Internal reconstruction buffers remain an implementation detail.
 
 template <typename T, typename Less = std::less<T>>
-void sortImpl(std::vector<T>& arr, Less less, bool enableNaturalRunRoute) {
+void sortImplCore(std::vector<T>& arr, Less less, bool enableNaturalRunRoute,
+                  bool enableLowCardinalityDirect = true,
+                  bool enableDominantValueDirect = true,
+                  bool enableHighEntropyPartition = true,
+                  bool enableCoherentValuePileCache = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::simulated::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -1904,8 +2928,60 @@ void sortImpl(std::vector<T>& arr, Less less, bool enableNaturalRunRoute) {
         return;
     }
 
+    bool specialValuePrefixMayMix = true;
+    if (arr.size() >= 4) {
+        const bool firstThreeAscending =
+            less(arr[0], arr[1]) && less(arr[1], arr[2]) && less(arr[2], arr[3]);
+        const bool firstThreeDescending =
+            less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
+        specialValuePrefixMayMix = !(firstThreeAscending || firstThreeDescending);
+    }
+
+    if constexpr (specializedIntegralEligible<T, Less>) {
+        if (enableDominantValueDirect && specialValuePrefixMayMix) {
+            T dominant = arr[0];
+            if (dominantValueSampleCandidate(arr, dominant, less)) {
+                highEntropyQuickSort(
+                    arr.data(), arr.size(),
+                    2 * static_cast<int>(std::bit_width(arr.size())), less,
+                    false, T{}, false, true, nullptr, false);
+                return;
+            }
+        }
+
+        if (enableLowCardinalityDirect && specialValuePrefixMayMix &&
+            lowCardinalityDirectionGate(arr, less) &&
+            lowCardinalitySampleCandidate(arr, less) &&
+            trySortLowCardinalityDirectConfirmed(arr, less)) {
+            return;
+        }
+
+        bool highEntropyPrefixAlternates = false;
+        if (enableHighEntropyPartition && specialValuePrefixMayMix && arr.size() >= 8) {
+            int previousDirection = 0;
+            highEntropyPrefixAlternates = true;
+            for (std::size_t i = 1; i < 8; ++i) {
+                int direction = 0;
+                if (less(arr[i - 1], arr[i])) direction = 1;
+                else if (less(arr[i], arr[i - 1])) direction = -1;
+                if (direction == 0 ||
+                    (previousDirection != 0 && direction == previousDirection)) {
+                    highEntropyPrefixAlternates = false;
+                    break;
+                }
+                previousDirection = direction;
+            }
+        }
+        if (enableHighEntropyPartition && specialValuePrefixMayMix &&
+            !highEntropyPrefixAlternates &&
+            trySortHighEntropyPartitionDirect(arr, less)) {
+            return;
+        }
+    }
+
     SimulatedInsertionResult<T> sim =
-        simulatePatienceInsertionBlueprint(arr, less, true, enableNaturalRunRoute);
+        simulatePatienceInsertionBlueprint(arr, less, true, enableNaturalRunRoute,
+                                            enableCoherentValuePileCache);
 
     if (sim.alreadySortedAscending) {
         return;
@@ -1916,40 +2992,8 @@ void sortImpl(std::vector<T>& arr, Less less, bool enableNaturalRunRoute) {
         return;
     }
 
-    const std::size_t finalPileCount =
-        sim.ascCounts.size() + sim.descCounts.size();
-    __extension__ typedef unsigned __int128 Wide;
-    const Wide finalPileSquare =
-        static_cast<Wide>(finalPileCount) * finalPileCount;
-    // E109 convergence baseline: V1/V2/V3 now share the most recent
-    // non-freezing density policy.  This deliberately supersedes V2's older
-    // pre-E085 E053 thresholds so later tuning starts from one common rule:
-    // 3.5 at <=20k, 4.25 through the mid-size regime, and 5.0 at >=500k.
-    bool randomDensitySelectsBranchless = false;
-    if (arr.size() <= 20000) {
-        randomDensitySelectsBranchless =
-            static_cast<Wide>(2) * finalPileSquare >=
-                static_cast<Wide>(7) * arr.size();
-    } else if (arr.size() < 500000) {
-        randomDensitySelectsBranchless =
-            static_cast<Wide>(4) * finalPileSquare >=
-            static_cast<Wide>(17) * arr.size();
-    } else {
-        randomDensitySelectsBranchless =
-            finalPileSquare >= static_cast<Wide>(5) * arr.size();
-    }
-    // E092: merge-kernel routing has a materially wider profitable type range
-    // than insertion's copy-by-value fast paths. Direct paired tests on Random
-    // PODs found the bidirectional branchless merge strongly faster through
-    // 64 bytes and still beneficial at 96 bytes; 128 bytes crossed to neutral/
-    // slightly slower. Keep this threshold local to merge routing rather than
-    // mechanically widening the separate insertion/reconstruction cutoffs.
     const bool useRandomBranchlessMerge =
-        arr.size() >= 10000 &&
-        sim.earlyRandomLike &&
-        randomDensitySelectsBranchless &&
-        std::is_trivially_copyable_v<T> &&
-        sizeof(T) <= 96;
+        shouldUseRandomBranchlessMerge(sim, arr.size());
 
     std::vector<T> tmp;
 
@@ -1961,7 +3005,9 @@ void sortImpl(std::vector<T>& arr, Less less, bool enableNaturalRunRoute) {
             std::move(sim.descCounts),
             tmp,
             false, // ascending-game piles preserve encounter order
-            true   // descending-game piles reverse to become ascending
+            true,  // descending-game piles reverse to become ascending
+            true,  // E121 bulk same-tag spans enabled
+            true   // E161 decode raw bulk tags on the fly; skip normalization pass
         );
 
     // E115: V1-V3 now share the ends-based adjacent-pair merge driver.
@@ -1977,7 +3023,13 @@ void sortImpl(std::vector<T>& arr, Less less, bool enableNaturalRunRoute) {
 
 
 template <typename T, typename Less = std::less<T>>
+void sortImpl(std::vector<T>& arr, Less less, bool enableNaturalRunRoute) {
+    sortImplCore(arr, less, enableNaturalRunRoute, true, true, true, true);
+}
+
+template <typename T, typename Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
+    if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
     sortImpl(arr, less, true);
 }
 

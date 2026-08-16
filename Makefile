@@ -57,7 +57,7 @@ src/%.clang.o: src/%.cpp $(HEADERS)
 benchmarks/benchmark.clang.o: $(BENCHMARK_SOURCE) $(HEADERS)
 	$(CLANG_CXX) $(CPPFLAGS) $(CLANG_CXXFLAGS) -c $< -o $@
 
-# Canonical benchmark: 500 distinct paired inputs at 1k/10k/100k and 50 at 1m.
+# Canonical benchmark: 12 official inputs; 500 paired trials at 1k/10k/100k and 50 at 1m.
 # Every trial uses a new deterministic seed shared by V1-V7 and std::sort.
 run run500 bench500: $(TARGET)
 	./$(TARGET) 500 all 2

@@ -29,8 +29,9 @@
 #include <vector>
 
 enum class InputType {
-    Random, Sorted, Reverse, NearlySorted, Random100,
-    Alternating, Sawtooth, BlockSorted, OrganPipe, Rotated
+    Random = 0, Sorted = 1, Reverse = 2, NearlySorted = 3, Random25 = 4,
+    Alternating = 5, Sawtooth = 6, BlockSorted = 7, OrganPipe = 8, Rotated = 9,
+    SortedNoise10 = 12, MixedDirectionRuns = 13
 };
 
 static std::string_view name(InputType t) {
@@ -39,10 +40,12 @@ static std::string_view name(InputType t) {
         case InputType::Sorted: return "Sorted";
         case InputType::Reverse: return "Reverse";
         case InputType::NearlySorted: return "Sorted+Noise(5%)";
-        case InputType::Random100: return "Random%100";
+        case InputType::Random25: return "Random%25";
         case InputType::Alternating: return "Alternating";
         case InputType::Sawtooth: return "Sawtooth";
         case InputType::BlockSorted: return "BlockSorted";
+        case InputType::SortedNoise10: return "Sorted+Noise(10%)";
+        case InputType::MixedDirectionRuns: return "MixedDirectionRuns";
         case InputType::OrganPipe: return "OrganPipe";
         case InputType::Rotated: return "Rotated";
     }
@@ -53,16 +56,24 @@ static constexpr std::array<std::string_view, 8> kAlgorithmNames{
     "V1", "V2", "V3", "V4", "V5", "V6", "V7", "std::sort"
 };
 
-static constexpr std::array<InputType, 10> kInputs{
+static constexpr std::array<InputType, 12> kInputs{
     InputType::Random, InputType::Sorted, InputType::Reverse,
-    InputType::NearlySorted, InputType::Random100, InputType::Alternating,
-    InputType::Sawtooth, InputType::BlockSorted, InputType::OrganPipe,
-    InputType::Rotated
+    InputType::NearlySorted, InputType::SortedNoise10, InputType::Random25,
+    InputType::Alternating, InputType::Sawtooth, InputType::MixedDirectionRuns,
+    InputType::BlockSorted, InputType::OrganPipe, InputType::Rotated
 };
 
 static constexpr std::array<std::size_t, 4> kDefaultSizes{
     1000, 10000, 100000, 1000000
 };
+
+static std::size_t structured_scale(std::size_t n) {
+    // Balanced sublinear structural scale: both typical run length and run count
+    // grow with n. n^(2/3) yields about 100/464/2154/10000 elements per
+    // run at 1k/10k/100k/1m, respectively.
+    return std::max<std::size_t>(8, static_cast<std::size_t>(
+        std::pow(static_cast<double>(n), 2.0 / 3.0)));
+}
 
 static std::string size_label(std::size_t n) {
     if (n == 1000) return "1k";
@@ -94,8 +105,15 @@ static void generate(std::vector<int>& v, InputType t, std::mt19937& rng) {
             for (int& x : v) if (change(rng)) x = d(rng);
             break;
         }
-        case InputType::Random100: {
-            std::uniform_int_distribution<int> d(0, 99);
+        case InputType::SortedNoise10: {
+            std::iota(v.begin(), v.end(), 0);
+            std::bernoulli_distribution change(0.10);
+            std::uniform_int_distribution<int> d(0, static_cast<int>(n) - 1);
+            for (int& x : v) if (change(rng)) x = d(rng);
+            break;
+        }
+        case InputType::Random25: {
+            std::uniform_int_distribution<int> d(0, 24);
             for (int& x : v) x = d(rng);
             break;
         }
@@ -107,24 +125,78 @@ static void generate(std::vector<int>& v, InputType t, std::mt19937& rng) {
             break;
         }
         case InputType::Sawtooth: {
-            const std::size_t period = std::max<std::size_t>(1, n / 20);
+            // Classic repeated ascending ramp with a hard reset, but scale the
+            // period sublinearly so both run length and run count grow with n.
+            // target ~= n^(2/3): about 10x100 at 1k, 22x464 at 10k,
+            // 47x2154 at 100k, and 100x10000 at 1m.
+            const std::size_t period = structured_scale(n);
             for (std::size_t i = 0; i < n; ++i)
                 v[i] = static_cast<int>(i % period);
             break;
         }
+        case InputType::MixedDirectionRuns: {
+            // Seeded family of natural monotone runs. Both run count and run length
+            // scale with n: target length ~= n^(2/3), with substantial per-run
+            // variation. Direction, starting range, and positive step size vary
+            // independently so this is not a repeated sawtooth or shuffled-block proxy.
+            const std::size_t target = structured_scale(n);
+            const std::size_t minLen = std::max<std::size_t>(4, target / 2);
+            const std::size_t maxLen = std::max(minLen, target + target / 2);
+            std::uniform_int_distribution<std::size_t> lenDist(minLen, maxLen);
+            std::bernoulli_distribution descending(0.5);
+            std::uniform_int_distribution<int> stepDist(1, 7);
+            const long long span = std::min<long long>(
+                static_cast<long long>(std::numeric_limits<int>::max()) / 8,
+                std::max<long long>(1024, static_cast<long long>(n) * 8));
+            std::uniform_int_distribution<long long> startDist(-span, span);
+
+            std::size_t pos = 0;
+            while (pos < n) {
+                const std::size_t len = std::min(lenDist(rng), n - pos);
+                const int step = stepDist(rng);
+                const bool desc = descending(rng);
+                long long startValue = startDist(rng);
+                const long long runSpan = static_cast<long long>(len - 1) * step;
+                if (desc && startValue - runSpan < std::numeric_limits<int>::min())
+                    startValue = static_cast<long long>(std::numeric_limits<int>::min()) + runSpan;
+                if (!desc && startValue + runSpan > std::numeric_limits<int>::max())
+                    startValue = static_cast<long long>(std::numeric_limits<int>::max()) - runSpan;
+                for (std::size_t k = 0; k < len; ++k) {
+                    const long long delta = static_cast<long long>(k) * step;
+                    v[pos + k] = static_cast<int>(desc ? startValue - delta : startValue + delta);
+                }
+                pos += len;
+            }
+            break;
+        }
         case InputType::BlockSorted: {
+            // Globally sorted unique values partitioned into variable-length
+            // ascending blocks and then shuffled. Like MixedDirectionRuns, the
+            // structural scale is centered on n^(2/3), but every block remains
+            // ascending and retains its original disjoint value interval.
             std::iota(v.begin(), v.end(), 0);
-            const std::size_t blockSize = std::max<std::size_t>(1, n / 20);
-            const std::size_t fullBlocks = n / blockSize;
-            std::vector<std::size_t> ids(fullBlocks);
-            std::iota(ids.begin(), ids.end(), 0);
-            std::shuffle(ids.begin(), ids.end(), rng);
+            const std::size_t target = structured_scale(n);
+            const std::size_t minLen = std::max<std::size_t>(4, target / 2);
+            const std::size_t maxLen = std::max(minLen, target + target / 2);
+            std::uniform_int_distribution<std::size_t> lenDist(minLen, maxLen);
+
+            struct Block { std::size_t begin; std::size_t len; };
+            std::vector<Block> blocks;
+            for (std::size_t pos = 0; pos < n;) {
+                const std::size_t len = std::min(lenDist(rng), n - pos);
+                blocks.push_back({pos, len});
+                pos += len;
+            }
+            std::shuffle(blocks.begin(), blocks.end(), rng);
+
             const auto source = v;
-            for (std::size_t dest = 0; dest < fullBlocks; ++dest) {
+            std::size_t dest = 0;
+            for (const Block& block : blocks) {
                 std::copy_n(
-                    source.begin() + static_cast<std::ptrdiff_t>(ids[dest] * blockSize),
-                    blockSize,
-                    v.begin() + static_cast<std::ptrdiff_t>(dest * blockSize));
+                    source.begin() + static_cast<std::ptrdiff_t>(block.begin),
+                    block.len,
+                    v.begin() + static_cast<std::ptrdiff_t>(dest));
+                dest += block.len;
             }
             break;
         }

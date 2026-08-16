@@ -1,6 +1,7 @@
 #ifndef JESSESORT_SIMULATED_EARLY_FREEZE_HPP
 #define JESSESORT_SIMULATED_EARLY_FREEZE_HPP
 
+#include <jessesort/tiny_sort.h>
 #include <jessesort/v2_simulated.h>
 
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -190,12 +192,13 @@ inline bool shouldExtendToPowerOfTwo(
            static_cast<Wide>(pileCount) * 5;
 }
 
-inline std::size_t calculateEarlyFreezePoint(std::size_t n) {
+inline std::size_t calculateEarlyFreezePoint(
+    std::size_t n, unsigned freezePercent = 50
+) {
     if (n == 0) return 0;
 
-    // The half-input point is the default freeze point and the decision point for
-    // optional selected power-of-two extension policies.
-    const long double sampled = static_cast<long double>(n) * 0.5L;
+    const long double sampled =
+        static_cast<long double>(n) * static_cast<long double>(freezePercent) / 100.0L;
     const std::size_t freezePoint =
         static_cast<std::size_t>(std::llround(sampled));
     return std::clamp<std::size_t>(freezePoint, 1, n);
@@ -216,21 +219,72 @@ struct FrozenInsertionResult {
     // Elements with indices [0, freezePoint) may create piles; elements at and
     // after freezePoint may only enter existing piles or overflow.
     std::size_t freezePoint = 0;
+
+    // Optional E177/E179 overflow-shape sample. Populated only when
+    // sampleOverflowShape=true; production behavior is unchanged otherwise.
+    std::size_t overflowSampleCount = 0;
+    std::size_t overflowSampleAscAdj = 0;
+    std::size_t overflowSampleDescAdj = 0;
+    std::size_t overflowSampleEqAdj = 0;
+    std::size_t overflowSampleDirectionChanges = 0;
+    std::size_t overflowSampleLongest = 0;
+    std::size_t overflowSampleLongValues32 = 0;
 };
 
-template <bool UseHint, typename T, typename Less = std::less<T>>
+template <bool UseHint, bool EnableValleyRescue = false, typename T, typename Less = std::less<T>>
 FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
     const std::vector<T>& arr,
     Less less = Less{},
     FreezePolicy freezePolicy = FreezePolicy::fixed_half,
     bool naturalRunRoute = false,
-    bool naturalRequireFirstContinuationLong = false
+    bool naturalRequireFirstContinuationLong = false,
+    bool enableCoherentValuePileCache = false,
+    unsigned freezePercent = 50,
+    bool sampleOverflowShape = false
 ) {
     constexpr std::size_t MinPrefixPileLength = 32;
 
     const std::size_t n = arr.size();
     FrozenInsertionResult<T> result;
-    result.freezePoint = calculateEarlyFreezePoint(n);
+
+    enum class OverflowSampleDirection : unsigned char { unknown, ascending, descending };
+    OverflowSampleDirection overflowSampleDirection = OverflowSampleDirection::unknown;
+    std::size_t overflowSampleRunStart = 0;
+    std::optional<T> previousOverflowSample;
+    bool overflowSamplingEnabled = sampleOverflowShape;
+    auto observeOverflowSample = [&](const T& value) {
+        if (!overflowSamplingEnabled || result.overflowSampleCount >= 32) return;
+        const std::size_t k = result.overflowSampleCount;
+        if (previousOverflowSample) {
+            const T& previous = *previousOverflowSample;
+            int rel = 0;
+            if (less(previous, value)) { ++result.overflowSampleAscAdj; rel = 1; }
+            else if (less(value, previous)) { ++result.overflowSampleDescAdj; rel = -1; }
+            else ++result.overflowSampleEqAdj;
+
+            if (overflowSampleDirection == OverflowSampleDirection::unknown) {
+                if (rel > 0) overflowSampleDirection = OverflowSampleDirection::ascending;
+                else if (rel < 0) overflowSampleDirection = OverflowSampleDirection::descending;
+            } else {
+                const bool continues = overflowSampleDirection == OverflowSampleDirection::ascending
+                    ? rel >= 0 : rel <= 0;
+                if (!continues) {
+                    ++result.overflowSampleDirectionChanges;
+                    result.overflowSampleLongest = std::max(
+                        result.overflowSampleLongest, k - overflowSampleRunStart);
+                    overflowSampleRunStart = k;
+                    overflowSampleDirection = OverflowSampleDirection::unknown;
+                }
+            }
+        }
+        previousOverflowSample = value;
+        ++result.overflowSampleCount;
+        result.overflowSampleLongest = std::max(
+            result.overflowSampleLongest, result.overflowSampleCount - overflowSampleRunStart);
+        if (result.overflowSampleCount == 32 && result.overflowSampleLongest >= 32)
+            result.overflowSampleLongValues32 = 32;
+    };
+    result.freezePoint = calculateEarlyFreezePoint(n, freezePercent);
     if (n == 0) return result;
 
     // Inspect the initial monotonic run before allocating the O(n) blueprint.
@@ -238,17 +292,27 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
     PrefixDirection prefixDirection = PrefixDirection::Unknown;
     std::size_t prefixEnd = 1;
 
-    for (; prefixEnd < n; ++prefixEnd) {
+    while (prefixEnd < n) {
         const T& previous = arr[prefixEnd - 1];
         const T& value = arr[prefixEnd];
-
         if (less(previous, value)) {
-            if (prefixDirection == PrefixDirection::Descending) break;
             prefixDirection = PrefixDirection::Ascending;
-        } else if (less(value, previous)) {
-            if (prefixDirection == PrefixDirection::Ascending) break;
-            prefixDirection = PrefixDirection::Descending;
+            ++prefixEnd;
+            break;
         }
+        if (less(value, previous)) {
+            prefixDirection = PrefixDirection::Descending;
+            ++prefixEnd;
+            break;
+        }
+        ++prefixEnd;
+    }
+    if (prefixDirection == PrefixDirection::Ascending) {
+        for (; prefixEnd < n; ++prefixEnd)
+            if (less(arr[prefixEnd], arr[prefixEnd - 1])) break;
+    } else if (prefixDirection == PrefixDirection::Descending) {
+        for (; prefixEnd < n; ++prefixEnd)
+            if (less(arr[prefixEnd - 1], arr[prefixEnd])) break;
     }
 
     if (prefixEnd == n) {
@@ -281,8 +345,18 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
     bool descendingMode = false;
     std::size_t processStart = 1;
 
-    if (prefixEnd >= MinPrefixPileLength &&
-        prefixDirection != PrefixDirection::Unknown) {
+    // E181: cold confirmation for short same-direction prefix handoff.
+    const bool confirmedShortSameDirectionPrefix =
+        prefixDirection != PrefixDirection::Unknown &&
+        prefixEnd < MinPrefixPileLength &&
+        jessesort::simulated::confirmedShortSameDirectionPrefix(
+            arr, prefixEnd, prefixDirection == PrefixDirection::Descending, less,
+            MinPrefixPileLength);
+    const bool materializePrefix =
+        prefixDirection != PrefixDirection::Unknown &&
+        (prefixEnd >= MinPrefixPileLength || confirmedShortSameDirectionPrefix);
+
+    if (materializePrefix) {
         processStart = prefixEnd;
         if (prefixDirection == PrefixDirection::Ascending) {
             result.ascTails.push_back(arr[prefixEnd - 1]);
@@ -296,18 +370,49 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
             descendingMode = true;
         }
     } else {
-        result.ascTails.push_back(arr[0]);
-        result.ascCounts.push_back(1);
-        result.blueprint[0] = simulated::makeAscTag(0);
+        if (prefixDirection == PrefixDirection::Descending) {
+            result.descTails.push_back(arr[0]);
+            result.descCounts.push_back(1);
+            result.blueprint[0] = simulated::makeDescTag(0);
+            descendingMode = true;
+        } else {
+            result.ascTails.push_back(arr[0]);
+            result.ascCounts.push_back(1);
+            result.blueprint[0] = simulated::makeAscTag(0);
+            descendingMode = false;
+        }
+    }
+
+    bool postPrefixDirectionOverride = false;
+    bool postPrefixOverrideDescending = false;
+    if (processStart == prefixEnd && materializePrefix &&
+        processStart + 1 < n) {
+        if (less(arr[processStart], arr[processStart + 1])) {
+            postPrefixDirectionOverride = true;
+            postPrefixOverrideDescending = false;
+        } else if (less(arr[processStart + 1], arr[processStart])) {
+            postPrefixDirectionOverride = true;
+            postPrefixOverrideDescending = true;
+        }
     }
 
     auto updateDirection = [&](const T& previous, const T& value) {
-        if (less(previous, value)) descendingMode = false;
+        if (postPrefixDirectionOverride) {
+            descendingMode = postPrefixOverrideDescending;
+            postPrefixDirectionOverride = false;
+        } else if (less(previous, value)) descendingMode = false;
         else if (less(value, previous)) descendingMode = true;
     };
 
     auto processUnfrozen = [&](const T& previous, const T& value, std::size_t i) {
         updateDirection(previous, value);
+        if constexpr (EnableValleyRescue) {
+            if (descendingMode && i + 1 < n && less(value, arr[i + 1])) {
+                const bool wouldCreateDesc = result.descTails.empty() || less(result.descTails.back(), value);
+                const bool canContinueAsc = !result.ascTails.empty() && !less(value, result.ascTails.back());
+                if (wouldCreateDesc && canContinueAsc) descendingMode = false;
+            }
+        }
         if (descendingMode) {
             simulateInsertValueDescendingPiles<UseHint>(
                 result.descTails, lastPileIndexDescending, value, i,
@@ -321,6 +426,13 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
 
     auto processFrozen = [&](const T& previous, const T& value, std::size_t i) {
         updateDirection(previous, value);
+        if constexpr (EnableValleyRescue) {
+            if (descendingMode && i + 1 < n && less(value, arr[i + 1])) {
+                const bool wouldCreateDesc = result.descTails.empty() || less(result.descTails.back(), value);
+                const bool canContinueAsc = !result.ascTails.empty() && !less(value, result.ascTails.back());
+                if (wouldCreateDesc && canContinueAsc) descendingMode = false;
+            }
+        }
         bool overflow;
         if (descendingMode) {
             overflow = result.descTails.empty() ||
@@ -340,6 +452,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
             }
         }
         if (overflow) {
+            observeOverflowSample(value);
             result.blueprint[i] = simulated::OVERFLOW_TAG;
             ++result.overflowCount;
         }
@@ -351,13 +464,29 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
     auto pileCount = [&]() {
         return result.ascCounts.size() + result.descCounts.size();
     };
+    auto configureOverflowSampling = [&]() {
+        if (!sampleOverflowShape) { overflowSamplingEnabled = false; return; }
+        const std::size_t piles = pileCount();
+        const std::size_t ascPiles = result.ascCounts.size();
+        const std::size_t descPiles = result.descCounts.size();
+        const bool lowPileDirectionObvious = piles <= 64 &&
+            ((ascPiles >= 3 * std::max<std::size_t>(descPiles, 1)) ||
+             (descPiles >= 3 * std::max<std::size_t>(ascPiles, 1)));
+        overflowSamplingEnabled = !lowPileDirectionObvious &&
+            (piles <= 64 ||
+             static_cast<long double>(piles) <= 0.006L * static_cast<long double>(n));
+    };
 
     bool naturalRunCandidate = naturalRunRoute &&
         prefixDirection != PrefixDirection::Unknown &&
         prefixEnd >= MinPrefixPileLength && prefixEnd * 8 >= n;
     if (naturalRunCandidate && naturalRequireFirstContinuationLong && processStart < n) {
-        const bool firstAsc = less(arr[processStart - 1], arr[processStart]);
-        const bool firstDesc = !firstAsc && less(arr[processStart], arr[processStart - 1]);
+        const bool firstAsc = postPrefixDirectionOverride
+            ? !postPrefixOverrideDescending
+            : less(arr[processStart - 1], arr[processStart]);
+        const bool firstDesc = postPrefixDirectionOverride
+            ? postPrefixOverrideDescending
+            : (!firstAsc && less(arr[processStart], arr[processStart - 1]));
         std::size_t firstEnd = processStart + 1;
         if (firstAsc) {
             while (firstEnd < n && less(arr[firstEnd - 1], arr[firstEnd])) ++firstEnd;
@@ -374,8 +503,15 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
                 else processUnfrozen(arr[j - 1], arr[j], j);
             };
             while (i < end) {
-                const bool asc = less(arr[i - 1], arr[i]);
-                const bool desc = !asc && less(arr[i], arr[i - 1]);
+                bool asc;
+                bool desc;
+                if (postPrefixDirectionOverride) {
+                    asc = !postPrefixOverrideDescending;
+                    desc = postPrefixOverrideDescending;
+                } else {
+                    asc = less(arr[i - 1], arr[i]);
+                    desc = !asc && less(arr[i], arr[i - 1]);
+                }
                 if (!asc && !desc) { insertOne(i++); continue; }
                 std::size_t runEnd = i + 1;
                 if (asc) while (runEnd < end && less(arr[runEnd - 1], arr[runEnd])) ++runEnd;
@@ -402,6 +538,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
                                       simulated::makeAscTag(static_cast<uint32_t>(firstPile)));
                             lastPileIndexAscending = firstPile;
                             descendingMode = false;
+                            postPrefixDirectionOverride = false;
                             batched = true;
                         }
                     } else {
@@ -423,6 +560,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
                                       simulated::makeDescTag(static_cast<uint32_t>(firstPile)));
                             lastPileIndexDescending = firstPile;
                             descendingMode = true;
+                            postPrefixDirectionOverride = false;
                             batched = true;
                         }
                     }
@@ -444,8 +582,114 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
                 processUnfrozen(arr[i - 1], arr[i], i);
             result.freezePoint = i;
         }
+        configureOverflowSampling();
         if (i < n) processRangeNatural(i, n, true);
         return result;
+    }
+
+    const bool coherentCacheCandidate = enableCoherentValuePileCache &&
+        simulated::coherentValuePileCacheSampleCandidate(arr, less, arr.size() >= 50000);
+    if (coherentCacheCandidate) {
+        if constexpr (simulated::specializedIntegralEligible<T, Less>) {
+            struct CacheEntry {
+                std::uint64_t key = 0;
+                std::uint32_t pile = 0;
+                bool valid = false;
+            };
+            std::array<CacheEntry, 128> ascCache{}, descCache{};
+            auto keyOf = [](const T& value) -> std::uint64_t {
+                return static_cast<std::uint64_t>(static_cast<std::make_unsigned_t<T>>(value));
+            };
+            auto bucket = [&](const T& value) -> std::size_t {
+                return static_cast<std::size_t>((keyOf(value) * 11400714819323198485ULL) >> 57);
+            };
+            auto seed = [&](const std::vector<T>& tails, auto& cache) {
+                for (std::size_t p = 0; p < tails.size(); ++p) {
+                    const std::size_t b = bucket(tails[p]);
+                    cache[b] = CacheEntry{keyOf(tails[p]), static_cast<std::uint32_t>(p), true};
+                }
+            };
+            seed(result.ascTails, ascCache);
+            seed(result.descTails, descCache);
+
+            auto processCached = [&](const T& previous, const T& value,
+                                     std::size_t originalIndex, bool frozen) {
+                updateDirection(previous, value);
+                auto& tails = descendingMode ? result.descTails : result.ascTails;
+                auto& counts = descendingMode ? result.descCounts : result.ascCounts;
+                auto& cache = descendingMode ? descCache : ascCache;
+                int& lastPile = descendingMode ? lastPileIndexDescending : lastPileIndexAscending;
+                const std::uint64_t key = keyOf(value);
+                const std::size_t b = bucket(value);
+                auto& entry = cache[b];
+                if (entry.valid && entry.key == key && entry.pile < tails.size()) {
+                    const std::size_t p = entry.pile;
+                    ++counts[p];
+                    lastPile = static_cast<int>(p);
+                    result.blueprint[originalIndex] = descendingMode
+                        ? simulated::makeDescTag(static_cast<std::uint32_t>(p))
+                        : simulated::makeAscTag(static_cast<std::uint32_t>(p));
+                    return;
+                }
+
+                int hint = tails.empty() ? 0 : std::clamp(lastPile, 0, static_cast<int>(tails.size()) - 1);
+                int pileIndex = 0;
+                if (!tails.empty()) {
+                    pileIndex = descendingMode
+                        ? findDescendingPileWithTails<false>(tails, hint, value, less)
+                        : findAscendingPileWithTails<false>(tails, hint, value, less);
+                }
+                if (pileIndex == static_cast<int>(tails.size()) && frozen) {
+                    observeOverflowSample(value);
+                    result.blueprint[originalIndex] = simulated::OVERFLOW_TAG;
+                    ++result.overflowCount;
+                    return;
+                }
+                const std::size_t p = static_cast<std::size_t>(pileIndex);
+                if (p < tails.size()) {
+                    const T old = tails[p];
+                    const std::size_t ob = bucket(old);
+                    auto& oldEntry = cache[ob];
+                    if (oldEntry.valid && oldEntry.key == keyOf(old) && oldEntry.pile == p)
+                        oldEntry.valid = false;
+                    tails[p] = value;
+                    ++counts[p];
+                } else {
+                    tails.push_back(value);
+                    counts.push_back(1);
+                }
+                cache[b] = CacheEntry{key, static_cast<std::uint32_t>(p), true};
+                lastPile = pileIndex;
+                result.blueprint[originalIndex] = descendingMode
+                    ? simulated::makeDescTag(static_cast<std::uint32_t>(p))
+                    : simulated::makeAscTag(static_cast<std::uint32_t>(p));
+            };
+
+            std::size_t i = processStart;
+            T previous = arr[processStart - 1];
+            for (; i < unfrozenEnd; ++i) {
+                const T value = arr[i];
+                processCached(previous, value, i, false);
+                previous = value;
+            }
+            const std::size_t pilesAtHalf = pileCount();
+            if (shouldExtendToPowerOfTwo(freezePolicy, n, pilesAtHalf)) {
+                const std::size_t pileCap = nextPowerOfTwoStrict(pilesAtHalf);
+                for (; i < n && pileCount() < pileCap; ++i) {
+                    const T value = arr[i];
+                    processCached(previous, value, i, false);
+                    previous = value;
+                }
+                result.freezePoint = i;
+            }
+            configureOverflowSampling();
+            for (; i < n; ++i) {
+                const T value = arr[i];
+                processCached(previous, value, i, true);
+                previous = value;
+            }
+            return result;
+        }
     }
 
     if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) <= 2 * sizeof(void*)) {
@@ -468,6 +712,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
             result.freezePoint = i;
         }
 
+        configureOverflowSampling();
         for (; i < n; ++i) {
             const T value = arr[i];
             processFrozen(previous, value, i);
@@ -488,6 +733,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
             result.freezePoint = i;
         }
 
+        configureOverflowSampling();
         for (; i < n; ++i) {
             processFrozen(arr[i - 1], arr[i], i);
         }
@@ -505,10 +751,13 @@ inline bool insertionPrefixLooksRandomLike(
     const std::vector<T>& arr,
     Less less = Less{},
     std::size_t prefixElements = 64,
-    std::size_t minPilesPerGame = 6
+    std::size_t minPilesPerGame = 6,
+    std::size_t* totalPilesOut = nullptr
 ) {
+    if (totalPilesOut) *totalPilesOut = 0;
     if (arr.size() < prefixElements) return false;
     if constexpr (!(std::is_trivially_copyable_v<T> &&
+                    std::is_default_constructible_v<T> &&
                     sizeof(T) <= 2 * sizeof(void*))) {
         return false;
     } else {
@@ -570,6 +819,7 @@ inline bool insertionPrefixLooksRandomLike(
                 if (p == ascCount) ++ascCount;
             }
         }
+        if (totalPilesOut) *totalPilesOut = ascCount + descCount;
         return ascCount >= minPilesPerGame && descCount >= minPilesPerGame;
     }
 }
@@ -580,16 +830,26 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreeze(
     Less less = Less{},
     FreezePolicy freezePolicy = FreezePolicy::fixed_half,
     bool naturalRunRoute = false,
-    bool naturalRequireFirstContinuationLong = false
+    bool naturalRequireFirstContinuationLong = false,
+    bool enableCoherentValuePileCache = false,
+    unsigned freezePercent = 50,
+    bool sampleOverflowShape = false,
+    bool enableValleyRescue = false
 ) {
+    std::size_t prefixPiles = 0;
     const bool noHintRoute =
-        arr.size() >= 10000 && insertionPrefixLooksRandomLike(arr, less);
+        arr.size() >= 10000 && insertionPrefixLooksRandomLike(arr, less, 64, 6, &prefixPiles);
+    const bool valleyRoute = enableValleyRescue && arr.size() >= 10000 && prefixPiles >= 3 && prefixPiles <= 12;
     if (noHintRoute) {
-        return simulatePatienceInsertionBlueprintEarlyFreezeImpl<false>(
-            arr, less, freezePolicy, naturalRunRoute, naturalRequireFirstContinuationLong);
+        if (valleyRoute) return simulatePatienceInsertionBlueprintEarlyFreezeImpl<false, true>(
+            arr, less, freezePolicy, naturalRunRoute, naturalRequireFirstContinuationLong, enableCoherentValuePileCache, freezePercent, sampleOverflowShape);
+        return simulatePatienceInsertionBlueprintEarlyFreezeImpl<false, false>(
+            arr, less, freezePolicy, naturalRunRoute, naturalRequireFirstContinuationLong, enableCoherentValuePileCache, freezePercent, sampleOverflowShape);
     }
-    return simulatePatienceInsertionBlueprintEarlyFreezeImpl<true>(
-        arr, less, freezePolicy, naturalRunRoute, naturalRequireFirstContinuationLong);
+    if (valleyRoute) return simulatePatienceInsertionBlueprintEarlyFreezeImpl<true, true>(
+        arr, less, freezePolicy, naturalRunRoute, naturalRequireFirstContinuationLong, enableCoherentValuePileCache, freezePercent, sampleOverflowShape);
+    return simulatePatienceInsertionBlueprintEarlyFreezeImpl<true, false>(
+        arr, less, freezePolicy, naturalRunRoute, naturalRequireFirstContinuationLong, enableCoherentValuePileCache, freezePercent, sampleOverflowShape);
 }
 
 
@@ -673,7 +933,8 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithOverflowBands(
     std::size_t overflowCount,
     std::vector<T>& tmp,
     Less less = Less{},
-    bool useE090SmallSort = false
+    bool useE090SmallSort = false,
+    bool patienceSortOverflow = false
 ) {
     constexpr std::size_t BandSize = 32;
     const std::size_t n = arr.size();
@@ -735,18 +996,27 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithOverflowBands(
     }
     assert(overflowSeen == overflowCount);
 
-    for (std::size_t pos = normalCount; pos < n; pos += BandSize) {
-        const std::size_t end = std::min(n, pos + BandSize);
-        if (useE090SmallSort && end - pos == BandSize &&
-            std::is_trivially_copyable_v<T>) {
-            e090Bitonic32(tmp.data() + pos, less);
-        } else {
-            std::sort(
-                tmp.begin() + static_cast<std::ptrdiff_t>(pos),
-                tmp.begin() + static_cast<std::ptrdiff_t>(end),
-                less);
+    if (overflowCount != 0 && patienceSortOverflow) {
+        std::vector<T> overflow(
+            tmp.begin() + static_cast<std::ptrdiff_t>(normalCount), tmp.end());
+        simulated::sortImplCore(overflow, less, true, false, false, false);
+        std::move(overflow.begin(), overflow.end(),
+                  tmp.begin() + static_cast<std::ptrdiff_t>(normalCount));
+        runStart.push_back(n);
+    } else {
+        for (std::size_t pos = normalCount; pos < n; pos += BandSize) {
+            const std::size_t end = std::min(n, pos + BandSize);
+            if (useE090SmallSort && end - pos == BandSize &&
+                std::is_trivially_copyable_v<T>) {
+                e090Bitonic32(tmp.data() + pos, less);
+            } else {
+                std::sort(
+                    tmp.begin() + static_cast<std::ptrdiff_t>(pos),
+                    tmp.begin() + static_cast<std::ptrdiff_t>(end),
+                    less);
+            }
+            runStart.push_back(end);
         }
-        runStart.push_back(end);
     }
     return runStart;
 }
@@ -755,7 +1025,7 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithOverflowBands(
 
 // Public V5 entry point: early freeze with deferred-sort overflow bands.
 template <typename T, typename Less = std::less<T>>
-void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool useE090SmallSort = false, bool naturalRunRoute = false) {
+void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool useE090SmallSort = false, bool naturalRunRoute = false, bool enableSpecializedRoutes = false, bool enableCoherentValuePileCache = true, bool patienceSortOverflow = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
                   "jessesort::simulated_early_freeze::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
@@ -764,9 +1034,20 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                   "Comparator must be callable as bool(const T&, const T&)");
 
     if (arr.size() < 2) return;
+    if constexpr (simulated::specializedIntegralEligible<T, Less>) {
+        if (enableSpecializedRoutes) {
+            bool prefixMayMix = true;
+            if (arr.size() >= 4) {
+                const bool asc = less(arr[0], arr[1]) && less(arr[1], arr[2]) && less(arr[2], arr[3]);
+                const bool desc = less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
+                prefixMayMix = !(asc || desc);
+            }
+            if (prefixMayMix && simulated::trySpecializedPrePatienceRoutes(arr, less)) return;
+        }
+    }
     FrozenInsertionResult<T> sim =
         simulatePatienceInsertionBlueprintEarlyFreeze(
-            arr, less, FreezePolicy::power2_broad, naturalRunRoute, true);
+            arr, less, FreezePolicy::power2_broad, naturalRunRoute, true, enableCoherentValuePileCache, 50, false, true);
     if (sim.alreadySortedAscending) return;
     if (sim.reverseSortedDescending) {
         std::reverse(arr.begin(), arr.end());
@@ -778,11 +1059,16 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
             frozenInsertionLooksRandomLike(sim, arr.size());
     }
 
+    const bool routedPatienceOverflow = patienceSortOverflow &&
+        arr.size() >= 50000 &&
+        sim.overflowCount >= 4096 &&
+        (sim.ascCounts.size() + sim.descCounts.size()) <= 4096;
     std::vector<T> tmp;
     std::vector<std::size_t> runStart =
         reconstructFrozenBlueprintWithOverflowBands(
             arr, sim.blueprint, std::move(sim.ascCounts),
-            std::move(sim.descCounts), sim.overflowCount, tmp, less, useE090SmallSort);
+            std::move(sim.descCounts), sim.overflowCount, tmp, less,
+            useE090SmallSort, routedPatienceOverflow);
     simulated::mergeRunsFromTmpToArr(
         tmp, arr, std::move(runStart), less,
         simulated::MergeSchedule::defer_dominant_first_endpoint,
@@ -791,7 +1077,8 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
 
 template <typename T, typename Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
-    sortImpl(arr, less, true, true, true);
+    if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
+    sortImpl(arr, less, true, true, true, true, true, true);
 }
 
 
