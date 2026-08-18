@@ -1,8 +1,8 @@
-#ifndef JESSESORT_SIMULATED_EARLY_FREEZE_SINGLE_OVERFLOW_HPP
-#define JESSESORT_SIMULATED_EARLY_FREEZE_SINGLE_OVERFLOW_HPP
+#ifndef JESSESORT_E229_JESSESORT_SIMULATED_FROZEN_DIRECT_MERGE_PROBE_ROUTED_ADJACENT_POWERSORT_ADAPTIVE_BUFFERED_SINGLE_OVERFLOW_H
+#define JESSESORT_E229_JESSESORT_SIMULATED_FROZEN_DIRECT_MERGE_PROBE_ROUTED_ADJACENT_POWERSORT_ADAPTIVE_BUFFERED_SINGLE_OVERFLOW_H
 
 #include <jessesort/tiny_sort.h>
-#include <jessesort/v5_deferred_bands.h>
+#include <jessesort/jessesort_simulated-frozen_direct-merge-probe-routed_adjacent-adaptive-buffered_deferred-bands32.h>
 
 #include <algorithm>
 #include <cassert>
@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace jessesort::simulated_early_freeze_single_overflow {
+namespace jessesort::simulated_early_freeze_single_overflow_direct_merge {
 
 
 namespace detail {
@@ -86,14 +86,14 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithSingleOverflowRun(
     std::size_t overflowSeen = 0;
     for (std::size_t i = 0; i < n; ++i) {
         const uint32_t tag = blueprint[i];
-        if (tag == simulated::OVERFLOW_TAG) {
+        if (tag == simulated_direct_merge::OVERFLOW_TAG) {
             tmp[normalCount + overflowSeen] = arr[i];
             ++overflowSeen;
             continue;
         }
 
-        const bool desc = simulated::isDescTag(tag);
-        const std::size_t local = static_cast<std::size_t>(simulated::localPileId(tag));
+        const bool desc = simulated_direct_merge::isDescTag(tag);
+        const std::size_t local = static_cast<std::size_t>(simulated_direct_merge::localPileId(tag));
         if (desc) tmp[--descCounts[local]] = arr[i];
         else tmp[ascCounts[local]++] = arr[i];
     }
@@ -103,7 +103,7 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithSingleOverflowRun(
         if (patienceSortOverflow) {
             std::vector<T> overflow(
                 tmp.begin() + static_cast<std::ptrdiff_t>(normalCount), tmp.end());
-            simulated::sortImplCore(overflow, less, true, false, false, false);
+            simulated_direct_merge::sortImplCore(overflow, less, true, false, false, false);
             std::move(overflow.begin(), overflow.end(),
                       tmp.begin() + static_cast<std::ptrdiff_t>(normalCount));
         } else {
@@ -123,14 +123,14 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithSingleOverflowRun(
 template <typename T, typename Less = std::less<T>>
 void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false, bool enableSpecializedRoutes = false, bool patienceSortOverflow = false, bool enableCoherentValuePileCache = true) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
-                  "jessesort::simulated_early_freeze_single_overflow::sort requires copyable values because pile tails are stored by value");
+                  "jessesort::simulated_early_freeze_single_overflow_direct_merge::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
-                  "jessesort::simulated_early_freeze_single_overflow::sort requires movable values for merging");
+                  "jessesort::simulated_early_freeze_single_overflow_direct_merge::sort requires movable values for merging");
     static_assert(std::is_invocable_r_v<bool, Less&, const T&, const T&>,
                   "Comparator must be callable as bool(const T&, const T&)");
 
     if (arr.size() < 2) return;
-    if constexpr (simulated::specializedIntegralEligible<T, Less>) {
+    if constexpr (simulated_direct_merge::specializedIntegralEligible<T, Less>) {
         if (enableSpecializedRoutes) {
             bool prefixMayMix = true;
             if (arr.size() >= 4) {
@@ -138,11 +138,11 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                 const bool desc = less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
                 prefixMayMix = !(asc || desc);
             }
-            if (prefixMayMix && simulated::trySpecializedPrePatienceRoutes(arr, less)) return;
+            if (prefixMayMix && simulated_direct_merge::trySpecializedPrePatienceRoutes(arr, less)) return;
         }
     }
-    auto sim = simulated_early_freeze::simulatePatienceInsertionBlueprintEarlyFreeze(
-        arr, less, simulated_early_freeze::FreezePolicy::power2_single_overflow,
+    auto sim = simulated_early_freeze_direct_merge::simulatePatienceInsertionBlueprintEarlyFreeze(
+        arr, less, simulated_early_freeze_direct_merge::FreezePolicy::power2_single_overflow,
         naturalRunRoute, false, enableCoherentValuePileCache, 50, false, true);
     if (sim.alreadySortedAscending) return;
     if (sim.reverseSortedDescending) {
@@ -153,7 +153,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     bool useRandomBranchlessMerge = false;
     if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) <= 96) {
         useRandomBranchlessMerge =
-            simulated_early_freeze::frozenInsertionLooksRandomLike(
+            simulated_early_freeze_direct_merge::frozenInsertionLooksRandomLike(
                 sim, arr.size());
     }
 
@@ -165,16 +165,16 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         arr, sim.blueprint, std::move(sim.ascCounts), std::move(sim.descCounts),
         sim.overflowCount, tmp, less, routedPatienceOverflow);
     if (useRandomBranchlessMerge) {
-        simulated::mergeRunsFromTmpToArr(
+        simulated_direct_merge::mergeRunsFromTmpToArr(
             tmp, arr, std::move(runStart), less,
-            simulated::MergeSchedule::adjacent_pairs, true, 7,
+            simulated_direct_merge::MergeSchedule::adjacent_pairs, true, 7,
             bidirectionalBranchlessMerge);
     } else if (detail::shouldUsePowerSortMerge(
                    runStart, arr.size(), sim.overflowCount)) {
-        simulated::detail::mergeRunsPowerSortStyle(
+        simulated_direct_merge::detail::mergeRunsPowerSortStyle(
             tmp, arr, std::move(runStart), less);
     } else {
-        simulated::mergeRunsFromTmpToArr(
+        simulated_direct_merge::mergeRunsFromTmpToArr(
             tmp, arr, std::move(runStart), less);
     }
 }
@@ -182,9 +182,10 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
 template <typename T, typename Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
     if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
+    if (arr.size() >= 10000 && jessesort::simulated_direct_merge::tryLongAscendingNaturalRunDirect(arr, less)) return;
     sortImpl(arr, less, true, true, true, true, true);
 }
 
-} // namespace jessesort::simulated_early_freeze_single_overflow
+} // namespace jessesort::simulated_early_freeze_single_overflow_direct_merge
 
 #endif

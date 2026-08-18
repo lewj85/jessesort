@@ -4,183 +4,110 @@
 
 [src/viz/simulated/jessesort_simulated_freezing_video.mp4](https://github.com/user-attachments/assets/a97c5e20-7e8d-4ab8-873f-342bf3a3bc43)
 
+## Description
+
 Jessesort is an experimental family of comparison sorting algorithms built around **dual Patience insertion**. Patience is a card game similar to Solitaire, where the tails of each pile are also kept in sorted order. This additional restriction allows new values to quickly find their correct pile via binary search over just these sorted pile tails.
 
 Jessesort adapts Patience Sort insertion to avoid its very common worst case--natural ascending runs, which generate n 1-element piles--by routing inputs to two simultaneous games based on current run order. One game forms descending piles and asborbs descending runs while the other game forms ascending piles and absorbs ascending runs. Current implementations are adaptive and use the structure discovered during insertion to choose different search, reconstruction, overflow, and merge strategies rather than committing to one fixed pipeline for every input.
 
-For random-order inputs, the number of Patience piles _k_ typically grows on the order of `sqrt(n)`, with insertion and merging costing `O(n log n)`. Inputs with long monotone structure, repeated values, or other exploitable order can produce much smaller effective run sets that push _k_ lower towards `O(n)` linear work. Maintained variations are deterministic and unstable; the simulated implementations use `O(n)` auxiliary storage.
+For random-order inputs, the number of Patience piles _k_ typically grows on the order of `sqrt(n)`, with insertion and merging costing `O(n log n)`. Inputs with long monotone structure, repeated values, or other exploitable order can produce much smaller effective run sets that push _k_ lower towards `O(n)` linear work. Maintained variations are deterministic and unstable.
 
 ```
 Best    Average     Worst       Memory      Stable      Deterministic
-n       n log k     n log n     2n + k      No          Yes
+n       n log k     n log n     n*          No          Yes
 ```
+
+* Regarding memory: most simulated implementations use `O(n)` auxiliary storage; the maintained `noalloc` and `noalloc-low-run-merge` architectures preserve the experimental allocation-free branch, using only fixed bounded local metadata and no heap allocation inside the sort.
 
 ## Speed tests
 
-Jessesort is up to 20x faster than `std::sort` on various structured inputs. Benchmarks below were done with a virtualized Linux container and 5 allocated CPU cores from an AMD EPYC 9V74 80-Core Processor, compiled with GCC 14.2.0 (libstdc++). Clang (libc++) timings are further down in the README.
+Jessesort is up to 46x faster than `std::sort` with GCC/libstdc++, up to 14x faster than `std::sort` with Clang/libc++, and up to 13x faster than `ipnsort` in Rust. See below for speed comparisons.
 
-Values below are median (not mean) ratios of `Jessesort / std::sort` over 500 trials (50 trials for 1m elements). The values in parentheses are microseconds (μs). One deterministic unique seed per trial, paired across all seven variations of the algorithm. Descriptions of the variations are below the timing tables.
+### std::sort with GCC (libstdc++)
 
-A value of 0.5 below means Jessesort takes half as much time (2x faster), while a value of 2.0 means Jessesort takes twice as much time (2x slower). **Values less than 1 mean Jessesort is faster.**
+Cells are **median paired ratio vs `std::sort` (median microseconds)** from 500 trials on n=100k elements using an Intel Xeon Platinum 8573C with GCC 14.2.0 (libstdc++) in C++20 with `-O3 -march=native -DNDEBUG`. The full 20-variation x 14-input x four-size baseline is saved in `benchmarks/baselines/e229/e229_all_variations_combined.md`.
 
-### V1
+**Scores less than 1.0 mean Jessesort is faster.**
 
-| Input | 1k | 10k | 100k | 1m |
-|---|---:|---:|---:|---:|
-| Random | 1.8806 (65.0315) | 0.2931 (133.4245) | 0.2677 (1484.4295) | 0.2576 (16776.6790) |
-| Sorted | 0.0849 (0.3630) | 0.0479 (2.8995) | 0.0393 (28.0870) | 0.0331 (283.0070) |
-| Reverse | 0.1365 (0.3980) | 0.0765 (3.2840) | 0.0688 (34.8725) | 0.0681 (391.9370) |
-| Sorted+Noise(5%) | 1.2271 (17.0200) | 0.8274 (152.8905) | 0.7805 (1638.2980) | 0.8226 (19634.8200) |
-| Sorted+Noise(10%) | 1.4583 (24.6815) | 0.9788 (213.3900) | 0.8995 (2291.0070) | 0.9305 (26777.4105) |
-| Random%25 | 1.8755 (41.4710) | 0.0531 (11.5820) | 0.0479 (106.3765) | 0.0491 (1105.4260) |
-| Alternating | 1.1920 (5.6030) | 0.3891 (63.5645) | 0.3937 (803.7935) | 0.3283 (8349.9770) |
-| Sawtooth | 2.3584 (12.8275) | 0.6095 (130.4285) | 0.7610 (1722.1945) | 0.7748 (18318.8905) |
-| MixedDirectionRuns | 0.7023 (9.5015) | 0.3606 (69.7725) | 0.2894 (725.1525) | 0.3609 (10874.2480) |
-| BlockSorted | 0.6929 (8.9470) | 0.3355 (67.8865) | 0.2519 (678.0440) | 0.3506 (11174.0050) |
-| OrganPipe | 0.3156 (3.8110) | 0.0625 (26.8360) | 0.0777 (474.2105) | 0.0793 (5315.3995) |
-| Rotated | 0.2668 (2.4350) | 0.1196 (15.4310) | 0.2393 (393.6795) | 0.1165 (2737.7565) |
+| Input | physical | simulated | frozen-single | indexed | noalloc-low-run | simulated-direct |
+|---|---:|---:|---:|---:|---:|---:|
+| Random | 0.2712 (1590.3) | 0.2622 (1545.7) | 0.2609 (1529.8) | 0.2642 (1543.2) | 0.2595 (1527.2) | 0.2628 (1548.1) |
+| Sorted | 0.0383 (28.3) | 0.0382 (28.2) | 0.0448 (33.1) | 0.0385 (28.2) | 0.0384 (28.4) | 0.0383 (28.2) |
+| Reverse | 0.0689 (35.1) | 0.0687 (34.8) | 0.0782 (39.7) | 0.0686 (34.8) | 0.0688 (34.9) | 0.0684 (34.8) |
+| Sorted+Noise(5%) | 0.8267 (1814.3) | 0.5419 (1193.1) | 0.7031 (1538.9) | 0.6692 (1474.4) | 0.7149 (1551.7) | 0.5364 (1188.1) |
+| Sorted+Noise(10%) | 0.8492 (2279.5) | 0.5913 (1629.2) | 0.6836 (1868.5) | 0.7036 (1929.8) | 0.5610 (1493.5) | 0.5940 (1627.0) |
+| Random%25 | 0.0466 (111.0) | 0.0456 (108.1) | 0.0453 (107.1) | 0.0455 (107.6) | 0.0462 (108.2) | 0.0455 (107.8) |
+| Alternating | 0.3460 (732.1) | 0.2017 (485.4) | 0.2578 (538.1) | 0.2858 (672.1) | 0.9411 (1978.6) | 0.2091 (485.4) |
+| Sawtooth | 0.6879 (1625.7) | 0.4466 (1054.8) | 0.6428 (1514.9) | 0.4956 (1176.4) | 0.3911 (911.4) | 0.2858 (668.8) |
+| MixedDirectionRuns | 0.2728 (703.0) | 0.1320 (337.0) | 0.2660 (688.3) | 0.2113 (539.8) | 0.5800 (1533.4) | 0.0767 (207.9) |
+| BlockSorted | 0.2542 (710.9) | 0.1097 (303.2) | 0.2449 (678.4) | 0.1772 (490.9) | 0.4826 (1355.4) | 0.0322 (90.2) |
+| OrganPipe | 0.0449 (277.0) | 0.0350 (216.4) | 0.0510 (324.0) | 0.0347 (217.1) | 0.1185 (740.2) | 0.0249 (153.8) |
+| Rotated | 0.1373 (258.5) | 0.0640 (111.9) | 0.1336 (266.5) | 0.0701 (114.3) | 0.2546 (535.4) | **0.0215** (46.3) |
+| MixedPhase3 | 0.9986 (4063.6) | 0.6710 (2748.2) | 0.7998 (3269.8) | 0.7333 (2992.6) | 0.4115 (1655.7) | 0.6753 (2730.0) |
+| MixedPhase12 | 0.4858 (1567.2) | 0.4812 (1534.7) | 0.4835 (1542.7) | 0.4789 (1519.0) | 0.4709 (1504.6) | 0.4802 (1529.6) |
 
-### V2
+### std::sort with Clang (libc++)
 
-| Input | 1k | 10k | 100k | 1m |
-|---|---:|---:|---:|---:|
-| Random | 1.1848 (41.0215) | 0.2774 (127.0365) | 0.2637 (1462.2505) | 0.2557 (16693.3100) |
-| Sorted | 0.0827 (0.3550) | 0.0479 (2.8970) | 0.0393 (28.1585) | 0.0330 (282.9970) |
-| Reverse | 0.1361 (0.3900) | 0.0764 (3.2810) | 0.0687 (34.8125) | 0.0684 (394.1580) |
-| Sorted+Noise(5%) | 0.7601 (10.9210) | 0.5719 (104.2110) | 0.5293 (1110.0185) | 0.5735 (13617.2220) |
-| Sorted+Noise(10%) | 0.9121 (15.9575) | 0.7041 (154.2065) | 0.6402 (1646.0955) | 0.6329 (18084.4925) |
-| Random%25 | 1.0833 (23.7670) | 0.0489 (10.6305) | 0.0489 (108.8730) | 0.0490 (1118.2955) |
-| Alternating | 0.7482 (3.5265) | 0.1864 (30.4785) | 0.2400 (484.8035) | 0.2006 (5107.9065) |
-| Sawtooth | 1.4136 (7.6955) | 0.3852 (82.0895) | 0.4677 (1055.0785) | 0.4727 (11292.4400) |
-| MixedDirectionRuns | 0.3811 (4.9805) | 0.1731 (33.5205) | 0.1357 (328.4205) | 0.2118 (6384.3985) |
-| BlockSorted | 0.3331 (4.2010) | 0.1361 (27.8045) | 0.1025 (273.9455) | 0.1837 (5859.9195) |
-| OrganPipe | 0.2202 (2.4710) | 0.0470 (20.1010) | 0.0649 (400.5525) | 0.0655 (4417.3355) |
-| Rotated | 0.1402 (1.2710) | 0.0695 (9.5905) | 0.1496 (282.0720) | 0.0954 (1978.4555) |
-
-### V3
+Note that the code here was developed primarily with GCC and libstdc++, not clang and libc++. We provide make targets for clang support, but no testing has been done to actually ensure the code is compiling as expected (e.g., branchless behavior). We show one table of clang timings below for reference, using the simulated-direct Jessesort variation and an AMD Ryzen 7 7445HS CPU.
 
 | Input | 1k | 10k | 100k | 1m |
 |---|---:|---:|---:|---:|
-| Random | 1.4517 (52.5805) | 0.2630 (119.8305) | 0.2625 (1455.6340) | 0.2568 (16681.8180) |
-| Sorted | 0.0814 (0.3470) | 0.0480 (2.9010) | 0.0393 (28.1850) | 0.0331 (283.1865) |
-| Reverse | 0.1358 (0.3900) | 0.0764 (3.2830) | 0.0689 (34.8340) | 0.0678 (390.2265) |
-| Sorted+Noise(5%) | 1.0050 (14.3720) | 0.7567 (141.1110) | 0.8286 (1734.8555) | 1.8041 (42863.2595) |
-| Sorted+Noise(10%) | 1.1080 (19.4190) | 0.8426 (185.2360) | 0.8532 (2183.8960) | 1.6400 (46920.2250) |
-| Random%25 | 1.4558 (32.4865) | 0.0478 (10.3810) | 0.0490 (108.9075) | 0.0499 (1114.7460) |
-| Alternating | 1.2812 (6.0405) | 0.4421 (71.8580) | 0.5216 (1063.2940) | 1.4176 (36021.0620) |
-| Sawtooth | 2.2304 (12.1565) | 0.6075 (130.0705) | 0.6819 (1541.5685) | 1.4702 (34741.0095) |
-| MixedDirectionRuns | 0.6863 (9.2530) | 0.3828 (74.3130) | 0.4156 (1045.2650) | 1.1446 (34516.6000) |
-| BlockSorted | 0.6210 (7.8005) | 0.3330 (67.6870) | 0.3639 (976.2665) | 1.0977 (34993.1910) |
-| OrganPipe | 0.4098 (4.7485) | 0.0906 (39.0040) | 0.0764 (460.7855) | 0.0767 (5132.0445) |
-| Rotated | 0.2718 (2.6180) | 0.1431 (20.2245) | 0.1744 (299.6505) | 0.1002 (2445.8935) |
+| Random | 2.5912 (47.6410) | 0.3286 (92.2575) | 0.2917 (1050.1445) | 0.2738 (11868.5975) |
+| Sorted | 0.8820 (0.9750) | 0.6880 (6.6680) | 0.6625 (42.3745) | 0.6493 (423.8110) |
+| Reverse | 0.8305 (1.3070) | 0.7066 (6.7385) | 0.7043 (63.6520) | 0.7348 (647.4190) |
+| Sorted+Noise(5%) | 1.6842 (12.7375) | 0.9132 (96.6380) | 0.9993 (1269.0590) | 1.0213 (14821.2860) |
+| Sorted+Noise(10%) | 2.0823 (18.4105) | 1.0636 (139.4150) | 1.1304 (1758.5940) | 1.0612 (18976.3045) |
+| Random%25 | 3.4992 (31.1120) | 0.1155 (11.1950) | 0.0802 (87.2535) | 0.0815 (871.7235) |
+| Alternating | 1.3219 (7.2705) | 0.7856 (38.1410) | 0.7407 (719.3535) | 0.7182 (8171.6595) |
+| Sawtooth | 2.2065 (14.0835) | 0.5389 (50.6010) | 0.6076 (683.7040) | 0.6765 (8039.7430) |
+| MixedDirectionRuns | 1.0254 (9.7180) | 0.3949 (36.9855) | 0.7791 (726.1255) | 0.8258 (7440.4760) |
+| BlockSorted | 0.9099 (7.1840) | 0.1310 (9.1470) | 0.2816 (214.7035) | 0.4016 (3144.9155) |
+| OrganPipe | 0.3989 (3.6560) | 0.1011 (14.6270) | 0.1173 (282.2065) | 0.1185 (3719.3470) |
+| Rotated | 0.3855 (2.5120) | **0.0679** (3.5870) | 0.1081 (42.3790) | 0.1363 (510.7580) |
+| MixedPhase3 | 2.2245 (24.9490) | 1.2924 (238.5300) | 1.2000 (2648.2210) | 1.2593 (33386.7475) |
+| MixedPhase12 | 2.1706 (22.9195) | 0.6190 (91.2225) | 0.6207 (1059.5535) | 0.6305 (11814.3705) |
 
-### V4
+### ipnsort
 
-| Input | 1k | 10k | 100k | 1m |
-|---|---:|---:|---:|---:|
-| Random | 1.4444 (52.0095) | 0.2571 (116.6025) | 0.2621 (1453.0670) | 0.2575 (16756.9165) |
-| Sorted | 0.0979 (0.4190) | 0.0563 (3.4255) | 0.0458 (32.8650) | 0.0384 (328.4725) |
-| Reverse | 0.1594 (0.4590) | 0.0885 (3.8090) | 0.0778 (39.4830) | 0.0762 (437.6645) |
-| Sorted+Noise(5%) | 0.9367 (13.4300) | 0.7062 (131.2310) | 0.6766 (1442.4230) | 0.6707 (15848.9360) |
-| Sorted+Noise(10%) | 1.0456 (18.4545) | 0.7688 (172.1960) | 0.7466 (1923.6935) | 0.6988 (20276.4950) |
-| Random%25 | 1.4356 (32.1700) | 0.0476 (10.2725) | 0.0487 (108.1300) | 0.0491 (1117.2685) |
-| Alternating | 1.1780 (5.5220) | 0.3210 (52.0985) | 0.3510 (714.0125) | 0.2920 (7508.2830) |
-| Sawtooth | 2.0120 (10.9700) | 0.7859 (168.5020) | 0.6877 (1561.9310) | 0.7026 (16669.4615) |
-| MixedDirectionRuns | 0.6343 (8.2545) | 0.4027 (73.1680) | 0.2700 (671.5785) | 0.3057 (9237.8745) |
-| BlockSorted | 0.5998 (7.1705) | 0.3418 (65.0700) | 0.2315 (619.9915) | 0.2683 (8594.6500) |
-| OrganPipe | 0.3261 (3.8695) | 0.0724 (31.4760) | 0.0737 (445.7030) | 0.0740 (5011.3345) |
-| Rotated | 0.2577 (2.4670) | 0.1366 (22.3625) | 0.1862 (331.6360) | 0.0927 (2035.0390) |
-
-### V5
-
-| Input | 1k | 10k | 100k | 1m |
-|---|---:|---:|---:|---:|
-| Random | 1.4017 (48.0870) | 0.2574 (117.6720) | 0.2630 (1456.4040) | 0.2574 (16701.4740) |
-| Sorted | 0.0960 (0.4120) | 0.0564 (3.4130) | 0.0458 (32.7810) | 0.0386 (329.0720) |
-| Reverse | 0.1621 (0.4660) | 0.0884 (3.7920) | 0.0775 (39.4270) | 0.0760 (436.8715) |
-| Sorted+Noise(5%) | 0.9213 (12.8795) | 0.6952 (127.9025) | 0.6478 (1389.2555) | 0.7097 (16703.8000) |
-| Sorted+Noise(10%) | 1.0358 (17.3660) | 0.7802 (169.7100) | 0.7173 (1850.7635) | 0.7168 (20643.8075) |
-| Random%25 | 1.2405 (27.2160) | 0.0475 (10.2740) | 0.0490 (108.7990) | 0.0494 (1120.2230) |
-| Alternating | 1.1919 (5.5770) | 0.3233 (52.6315) | 0.3447 (698.0855) | 0.3037 (7737.1255) |
-| Sawtooth | 2.4709 (13.4500) | 0.6690 (142.8150) | 0.7001 (1581.2885) | 0.6954 (16459.0480) |
-| MixedDirectionRuns | 0.6382 (8.3140) | 0.4099 (79.8020) | 0.2885 (715.5890) | 0.3417 (10118.2150) |
-| BlockSorted | 0.5876 (7.1950) | 0.3491 (70.3600) | 0.2465 (658.2145) | 0.3072 (9722.4610) |
-| OrganPipe | 0.3616 (4.0215) | 0.0864 (37.0650) | 0.0823 (499.2955) | 0.0860 (5788.9335) |
-| Rotated | 0.3987 (4.6095) | 0.2798 (44.5540) | 0.3296 (543.8475) | 0.1476 (2737.3180) |
-
-### V6
-
-| Input | 1k | 10k | 100k | 1m |
-|---|---:|---:|---:|---:|
-| Random | 1.4682 (53.2120) | 0.2659 (121.0495) | 0.2633 (1457.4370) | 0.2569 (16706.3075) |
-| Sorted | 0.0969 (0.4140) | 0.0564 (3.4240) | 0.0458 (32.8360) | 0.0385 (328.6745) |
-| Reverse | 0.1609 (0.4630) | 0.0889 (3.8240) | 0.0781 (39.4935) | 0.0759 (437.2510) |
-| Sorted+Noise(5%) | 1.0433 (14.8570) | 0.7293 (134.9215) | 0.6644 (1425.4570) | 0.6702 (15885.7820) |
-| Sorted+Noise(10%) | 1.1702 (19.7765) | 0.8143 (177.8700) | 0.7400 (1895.8070) | 0.7037 (20092.5550) |
-| Random%25 | 1.4883 (33.5180) | 0.0484 (10.5420) | 0.0487 (108.3875) | 0.0497 (1112.9290) |
-| Alternating | 1.3060 (6.1445) | 0.3562 (58.2660) | 0.3806 (775.3885) | 0.3240 (8280.0320) |
-| Sawtooth | 1.9770 (10.7350) | 0.5280 (113.1715) | 0.6191 (1396.9070) | 0.6263 (14814.4325) |
-| MixedDirectionRuns | 0.6329 (8.1305) | 0.3737 (71.8270) | 0.2941 (724.6160) | 0.3370 (9993.9890) |
-| BlockSorted | 0.5855 (7.4885) | 0.3208 (66.3945) | 0.2609 (695.2915) | 0.3048 (9572.8505) |
-| OrganPipe | 0.3846 (4.3815) | 0.0894 (39.0930) | 0.0772 (470.6930) | 0.0807 (5441.3355) |
-| Rotated | 0.4663 (5.0440) | 0.2988 (45.5550) | 0.3315 (583.7910) | 0.1486 (2593.4310) |
-
-### V7
-
-| Input | 1k | 10k | 100k | 1m |
-|---|---:|---:|---:|---:|
-| Random | 1.5059 (52.0275) | 0.2780 (127.9690) | 0.2641 (1468.5720) | 0.2564 (16716.0405) |
-| Sorted | 0.0987 (0.4240) | 0.0561 (3.3910) | 0.0457 (32.7775) | 0.0385 (328.5620) |
-| Reverse | 0.1583 (0.4560) | 0.0874 (3.7520) | 0.0776 (39.4290) | 0.0761 (436.8990) |
-| Sorted+Noise(5%) | 0.9120 (12.8040) | 0.5883 (107.5740) | 0.5519 (1183.4400) | 0.5458 (12644.6465) |
-| Sorted+Noise(10%) | 1.0961 (18.3365) | 0.7349 (162.9455) | 0.7013 (1821.3285) | 0.7421 (21587.4020) |
-| Random%25 | 1.4412 (32.2565) | 0.0482 (10.5385) | 0.0487 (108.4440) | 0.0500 (1131.4795) |
-| Alternating | 0.7859 (3.6995) | 0.1915 (31.3120) | 0.2430 (498.3520) | 0.2066 (5230.3335) |
-| Sawtooth | 1.4577 (7.9120) | 0.3938 (84.1825) | 0.4644 (1050.9190) | 0.4840 (11441.4170) |
-| MixedDirectionRuns | 0.5082 (6.5940) | 0.1983 (37.8915) | 0.1510 (369.1385) | 0.2203 (6658.4140) |
-| BlockSorted | 0.4910 (5.8715) | 0.1615 (32.0735) | 0.1140 (303.8740) | 0.1797 (5723.8445) |
-| OrganPipe | 0.2613 (2.9205) | 0.0539 (23.1250) | 0.0647 (393.2210) | 0.0708 (4733.5685) |
-| Rotated | 0.1752 (1.6170) | 0.0875 (12.4940) | 0.1900 (321.0510) | 0.0928 (1903.5840) |
-
-### ipnsort vs Jessesort results
-
-Jessesort is up to 7x faster than ipnsort on structured inputs. Results below are direct timing comparisons with an AMD Ryzen 7 7445HS CPU. Both algorithms ran in their native language: ipnsort was run in Rust, Jessesort was run in C++. See the `src/ipnsort_vs_jessesort/` folder for more details.
+Results below are direct timing comparisons with an AMD Ryzen 7 7445HS CPU. Both algorithms ran in their native language: ipnsort was run in Rust, Jessesort was run in C++. See the `src/ipnsort_vs_jessesort/` folder for more details.
 
 - type: u64
 - n: 100000
 - trials per pattern: 500
 - warmups per pattern: 2
 - shared cold-like preconditioner: false
-- inputs: E189 canonical JesseSort benchmark inputs, order-preserving int->u64 encoding
+- inputs: Jessesort benchmark inputs, order-preserving int->u64 encoding
 
-| Pattern | ipnsort µs | V1 µs | V2 µs | V5 µs | V2/ipnsort | best Jesse/ipnsort |
-|---|---:|---:|---:|---:|---:|---:|
-| Random | 935.874 | 1122.952 | 1118.870 | 1120.156 | 1.196 | 1.196 |
-| Sorted | 21.238 | 21.244 | 31.832 | 28.248 | 1.499 | 1.000 |
-| Reverse | 27.117 | 31.072 | 94.377 | 38.141 | 3.480 | 1.146 |
-| Sorted+Noise(5%) | 990.978 | 1881.452 | 845.748 | 1152.646 | 0.853 | 0.853 |
-| Sorted+Noise(10%) | 1026.375 | 2280.802 | 1172.635 | 1454.644 | 1.143 | 1.143 |
-| Random%25 | 252.484 | 105.755 | 105.345 | 105.541 | 0.417 | 0.417 |
-| Alternating | 900.421 | 1502.089 | 258.032 | 523.664 | 0.287 | 0.287 |
-| Sawtooth | 588.284 | 2198.497 | 1212.097 | 1893.091 | 2.060 | 2.060 |
-| MixedDirectionRuns | 893.446 | 1304.870 | 303.015 | 693.691 | 0.339 | 0.339 |
-| BlockSorted | 817.308 | 1344.300 | 261.424 | 584.482 | 0.320 | 0.320 |
-| OrganPipe | 995.253 | 936.735 | 177.397 | 256.078 | 0.178 | 0.178 |
-| Rotated | 762.149 | 869.727 | 108.520 | 507.721 | 0.142 | 0.142 |
+| Pattern | ipnsort µs | physical µs | simulated µs | simulated-direct µs | indexed µs | noalloc µs | noalloc-low-run µs | simulated/ipnsort | simulated-direct/ipnsort | best Jessesort/ipnsort |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Random | 932.327 | 1107.630 | 1106.707 | 1121.137 | 1104.991 | 1099.430 | 1105.214 | 1.187 | 1.203 | 1.179 |
+| Sorted | 21.227 | 42.284 | 31.861 | 31.901 | 42.374 | 21.277 | 21.348 | 1.501 | 1.503 | 1.002 |
+| Reverse | 27.598 | 30.869 | 73.131 | 73.111 | 94.147 | 30.949 | 31.019 | 2.650 | 2.649 | 1.119 |
+| Sorted+Noise(5%) | 987.791 | 1898.816 | 1122.736 | 771.332 | 1088.610 | 1160.015 | 1161.144 | 1.137 | 0.781 | 0.781 |
+| Sorted+Noise(10%) | 1028.002 | 2346.818 | 1184.158 | 1169.915 | 1474.362 | 1170.976 | 1171.597 | 1.152 | 1.138 | 1.138 |
+| Random%25 | 251.660 | 105.907 | 105.819 | 106.343 | 105.841 | 106.037 | 106.102 | 0.420 | 0.423 | 0.420 |
+| Alternating | 904.247 | 1282.351 | 366.404 | 351.375 | 615.324 | 1231.776 | 1238.690 | 0.405 | 0.389 | 0.389 |
+| Sawtooth | 589.337 | 1963.941 | 688.143 | 494.755 | 1045.841 | 1942.803 | 645.240 | 1.168 | 0.840 | 0.840 |
+| MixedDirectionRuns | 892.322 | 1381.436 | 337.160 | 281.571 | 652.214 | 2171.173 | 1347.977 | 0.378 | 0.316 | 0.316 |
+| BlockSorted | 821.189 | 1396.120 | 269.755 | 110.150 | 624.697 | 2334.664 | 1316.673 | 0.328 | 0.134 | 0.134 |
+| OrganPipe | 1007.441 | 921.839 | 190.435 | 140.377 | 192.601 | 1402.265 | 505.183 | 0.189 | 0.139 | 0.139 |
+| Rotated | 758.514 | 857.853 | 179.358 | 54.530 | 151.373 | 128.444 | 129.285 | 0.236 | 0.072 | **0.072** |
 
 ## Algorithm overview
 
 Jessesort has two broad phases, with several retained adaptive paths layered around them.
 
-### 1. Dual-Patience insertion
+### 1. Dual-Patience insertion/deconstruction
 
-Values are routed between an ascending and a descending Patience game. The maintained implementations use early structure probes, specialized hinted/no-hint search continuations, monotone early exits, and gated natural-run batching. The simulated variations record compact pile/run tags rather than physically constructing every pile; V1 keeps actual piles. High-entropy inputs are currently routed to ipnsort-inspired partitioning rather than pure Patience.
+Values are routed between an ascending and a descending Patience game based on current run direction. The simulated variations record compact pile/run tags rather than physically constructing every pile.
 
-V4-V6 additionally use a 50% nominal freeze decision point. Depending on balanced merge tree extension policy, actual pile creation can continue beyond 50% before the structure is frozen. Later values are handled through each variation's overflow design.
+The maintained implementations use monotone early exits, early structure probes to discover input shape, optimal deconstruction routing, specialized hinted/no-hint search continuations, and gated natural-run batching. Probes are always done using dual Patience to capture underlying structure in both directions. Some variations only probe at the beginning, others re-evaluate after some number of processed elements.
+
+High-entropy inputs are currently routed to ipnsort-inspired partitioning. Similarly, some variations can also switch straight to merging if there is high-monotonicity. Some variations use a 50% nominal freeze decision point, routing values that don't fit on existing piles to an unsorted overflow pile. Depending on balanced merge tree extension policy, actual pile creation can continue beyond 50% before the structure is frozen. Later values are handled through each variation's overflow design.
 
 ### 2. Reconstruction and adaptive merging
 
-The merge phase selects a merge strategy based on the shape of the piles created by the insertion phase. Current code includes:
+The merge phase selects a merge strategy based on the shape of the piles created by the insertion phase. Some variations include:
 
 - ordered and reverse-disjoint boundary fast paths;
 - bidirectional branchless two-run merging for high-entropy cases, exposing independent front/back dependency chains;
@@ -188,23 +115,30 @@ The merge phase selects a merge strategy based on the shape of the piles created
 - general/galloping fallback paths where branchless merging is not preferred;
 - pile-density and run-structure routing;
 - adjacent-pair merge scheduling;
-- variation-specific merge/overflow policies, including V5's deferred-band handling and V6's live-sorted bands.
+- variation-specific merge/overflow policies, including deferred-band handling and live-sorted bands.
 
-The exact routing differs by variation because their insertion and run geometries differ. `experiment_log.txt` is the authoritative record of retained/rejected policies and propagation tests.
+The exact routing differs by variation because their insertion and run geometries differ. `docs/experiment_log.txt` is the authoritative record of retained/rejected policies and propagation tests.
 
 ## Variations
 
-The numbering is structural and intentional: V1-V3 do not freeze pile creation; V4-V6 are the early-freeze/overflow family; V7 is a V2-derived SIMD research path.
+Many variations of Jessesort are maintained in this repo due to ongoing research. Historically, V-names (V1, V2, etc) were used, but now source files use more descriptive identifying tags:
 
-| Variation | Core representation | Freezes pile creation? | Overflow behavior | Flatten / reconstruction distinction |
-|---|---|---|---|---|
-| **V1 — Actual Piles** | Physical Patience piles | **No** | None | Physical piles are flattened into runs |
-| **V2 — Simulated Blueprint** | Pile tails + blueprint tags | **No** | None | Blueprint is reconstructed into contiguous runs in auxiliary storage |
-| **V3 — In-Place Simulated Flattening** | V2-style simulated blueprint | **No** | None | Blueprint destinations are resolved by an in-place permutation/cycle flattening step |
-| **V4 — Single Overflow** | Early-frozen simulated blueprint | **Yes** | One large deferred overflow run | Frozen normal runs + one sorted deferred overflow run |
-| **V5 — Deferred Bands** | Early-frozen simulated blueprint | **Yes** | Deferred 32-element overflow bands | Overflow bands are gathered first, then sorted during reconstruction |
-| **V6 — Live Bands** | Early-frozen simulated blueprint | **Yes** | Shape-routed live overflow | During reconstruction, overflow values are sorted as they are encountered; pile shape at freeze point determines method |
-| **V7 — AVX2 Experimental** | V2-derived simulated blueprint + capped SIMD probe | **No general freeze** | Temporary capped-probe spill only | Normalized V2-style reconstruction with SIMD-oriented probe handling |
+`jessesort_<decomposition>_<router>_<reconstruction-and-merge>[_<other-policy>...]`
+
+Each maintained variation preserves a specific mechanism even when that mechanism is slower on some workloads; the purpose of the family is to keep those architectural tradeoffs measurable rather than allowing every variation to converge silently onto the same fastest path.
+
+- **physical-pile:** is the baseline Jessesort where Patience piles are represented literally rather than simulated.
+- **simulated:** replaces physical piles with value-tail metadata plus a packed per-element blueprint, then reconstructs contiguous runs in auxiliary storage.
+- **in-place flattening:** replaces streamed flattening with permutation-cycle flattening; exposes the memory/locality tradeoff of in-place reconstruction.
+- **single-overflow freezing:** freezes ordinary pile creation early and sends the remainder to one large deferred overflow run to be sorted later.
+- **deferred-band freezing:** keeps the same early-freeze idea but breaks overflow into small deferred 32-element bands that are sorted during reconstruction.
+- **live/adaptive overflow:** keeps early freezing but processes overflow with a shape-routed live policy: fixed 32-element bands for weak structure, ascending natural runs for clearly ascending low-pile structure, or bidirectional natural runs for stronger directional structure.
+- **SIMD/capped-probe:** caps the initial probe to a small pile count so exactly 8 or 16 `int32` tail searches can use AVX2; probe overflow is temporary, distinguishing it from any general early-freeze variation.
+- **linked reconstruction:** keeps Patience reconstruction genuinely linked. E201 routes between compact span links and in-place element links based on blueprint locality, with first-merge fusion; it does not simply fall back to ordinary tag reconstruction when linked layouts are inconvenient.
+- **index-tail genericity:** stores source indices in pile-tail metadata instead of copies of `T`. That indirection enables move-only/non-copyable values and makes this the genericity/Rust-oriented allocating branch; explored copyable versions reuse optimized downstream reconstruction after the index-tail blueprint is complete.
+- **allocation-free bounded baseline:** removes the global blueprint and `T[n]` scratch from the Jessesort path, uses fixed 63/64 index-tail arrays and <=64 run descriptors, accepts only cheap bounded in-place run geometry, and otherwise falls back to an allocation-free partition/heapsort backend. Its defining result is the no-heap resource model.
+- **allocation-free shared-tail + live run reclamation:** keeps the former's no-heap/move-only guarantees, changes the two physical tail arrays into one fixed 127-index pool (still logically 63/64), adds geometry-gated general in-place merging, and extends the fixed 64-run descriptor stack by selectively merging the smallest adjacent completed run pair when descriptor capacity is reached. A first-65 long-run/overlap gate keeps short high-entropy and Sawtooth-like repeated-overlap layouts on fallback.
+- **long-natural-run pre-router:** introduced a shortcut in E225, similar to the monotone prechecks, that offers a potentially faster path for large comparator-defined structured inputs. This route still depends on structure discovered via the monotone precheck and/or during a dual Patience probe. It requires a nondecreasing first 64 values, a coarse sampled inversion, and a mutation-free proof that the input contains at most 128 natural runs. Accepted inputs normalize descending runs and go directly to a buffered merge; rejected/high-run-count inputs enter the unchanged underlying pipeline. E225 uses no numeric range/cardinality assumptions and was separately validated with an adversarial long-prefix/random-suffix input plus a non-default-constructible record and custom comparator.
 
 ## Build and benchmark
 
@@ -212,18 +146,12 @@ Build with GCC/libstdc++:
 
 ```bash
 make
-```
-
-Run the canonical benchmark (12 permanent input families; 500 trials at 1k/10k/100k, 50 at 1m).
-The canonical rows are Random, Sorted, Reverse, Sorted+Noise(5%), Sorted+Noise(10%), Random%25,
-Alternating, Sawtooth, MixedDirectionRuns, BlockSorted, OrganPipe, and Rotated. Sawtooth uses an
-n^(2/3)-scaled regular ramp period; BlockSorted and MixedDirectionRuns use seeded variable structural
-lengths centered on n^(2/3), so both run count and run length grow with input size without the overly
-fragmented sqrt(n) regime:
-
-```bash
 make run
 ```
+
+Routine `make run` benchmarks six representatives: `physical`, `simulated`, `frozen-single`, `indexed`, `noalloc-low-run`, and `simulated-direct`. All maintained variations remain selectable by their short descriptors; `all` runs all 20.
+
+The canonical rows are Random, Sorted, Reverse, Sorted+Noise(5%), Sorted+Noise(10%), Random%25, Alternating, Sawtooth, MixedDirectionRuns, BlockSorted, OrganPipe, Rotated, MixedPhase3 (Sorted+Noise(5%) -> MixedDirectionRuns -> Random), and MixedPhase12 (all 12 baseline families once each in baseline order) as phase-change router-safety inputs; the original 12 generators and identities remain unchanged. Sawtooth uses an n^(2/3)-scaled regular ramp period; BlockSorted and MixedDirectionRuns use seeded variable structural lengths centered on n^(2/3), so both run count and run length grow with input size.
 
 The benchmark writes an isolated, gitignored `results/run_*` directory containing Markdown/CSV summaries, raw paired trial data, metadata, and progress state. Interrupted runs can be resumed using the existing run directory.
 
@@ -246,31 +174,12 @@ make clang
 make run-clang
 ```
 
-Note that the code here was developed primarily with GCC and libstdc++, not clang and libc++. We provide make targets for clang support, but no testing has been done to actually ensure the code is compiling as expected (e.g., branchless behavior). We show one table of clang timings below for reference.
-
-## V2
-
-| Input | 1k | 10k | 100k | 1m |
-|---|---:|---:|---:|---:|
-| Random | 2.2046 (40.4025) | 0.2707 (76.8865) | 0.2893 (1041.2475) | 0.2732 (11856.3930) |
-| Sorted | 0.7718 (0.5900) | 0.6676 (6.4960) | 0.6613 (42.3635) | 0.6585 (433.4475) |
-| Reverse | 0.7655 (0.8110) | 0.6900 (9.7300) | 0.7035 (63.6210) | 0.7360 (648.0050) |
-| Sorted+Noise(5%) | 1.4804 (11.7170) | 0.8404 (89.4920) | 0.9422 (1204.0130) | 0.9379 (13625.0570) |
-| Sorted+Noise(10%) | 1.7899 (15.2260) | 0.9954 (131.2250) | 1.0681 (1646.3965) | 1.0444 (18685.9320) |
-| Random%25 | 3.0556 (27.3890) | 0.0945 (9.1190) | 0.0785 (85.4125) | 0.0811 (866.3065) |
-| Alternating | 1.1769 (6.4820) | 0.8021 (37.9675) | 0.7235 (701.7880) | 0.7139 (8095.0230) |
-| Sawtooth | 1.8056 (8.6195) | 0.8243 (77.1255) | 0.9800 (1118.0415) | 1.1400 (13619.2005) |
-| MixedDirectionRuns | 0.8487 (7.6680) | 0.5249 (40.7205) | 0.4441 (396.4380) | 1.0083 (9356.5005) |
-| BlockSorted | 0.7562 (6.3270) | 0.5331 (36.9160) | 0.4769 (364.7570) | 0.5194 (4080.0710) |
-| OrganPipe | 0.3099 (3.3735) | 0.1207 (17.2605) | 0.0691 (166.4340) | 0.0621 (1942.2495) |
-| Rotated | 0.3045 (2.0820) | 0.1665 (8.7190) | 0.1560 (81.5455) | 0.2224 (1079.9715) |
-
 ## Basic use
 
 The algorithms are template-based and implemented in their headers. For example, V2 can be used as:
 
 ```cpp
-#include <jessesort/v2_simulated.h>
+#include <jessesort/jessesort_simulated_probe-routed_adjacent-adaptive-buffered.h>
 
 #include <vector>
 
@@ -280,11 +189,13 @@ int main() {
 }
 ```
 
-Comparators must provide a strict weak ordering. Move-only values are not currently supported because maintained pile-tail mirrors are copied. Inputs containing NaNs require an explicit total-order comparator if a deterministic total ordering is desired.
+Comparators must provide a strict weak ordering. Value-type requirements depend on the selected layer-tagged variation. The physical, simulated, frozen, AVX2, linked, and their direct-merge descendants retain the legacy allocating implementations and generally require copy construction, copy assignment, move construction, and move assignment because some pile, blueprint, or merge metadata paths store values by copy. The indexed family instead stores pile-tail state by index and supports move-only values on its non-copyable path, requiring move construction and move assignment but not copy construction or copy assignment. The noalloc variations likewise require only movability and are specifically designed to perform no heap allocation inside the sort; the noalloc-low-run variation additionally includes shared fixed tail storage and its selective low-run in-place merge path.
+
+These requirements are properties of the current implementations and variation policies, not known fundamental requirements of the Jessesort algorithm. Floating-point inputs containing NaNs are not supported with the default comparator because ordinary floating-point < does not provide the required strict weak ordering over NaNs; use an explicit NaN-aware comparator, such as a total-order comparator.
 
 ## Development status
 
-Jessesort is still experimental. The compact current roadmap and the detailed retained/rejected experiment history are maintained in [`experiment_log.txt`](experiment_log.txt).
+Jessesort is still experimental. The compact current roadmap and the detailed retained/rejected experiment history are maintained in [`docs/experiment_log.txt`](docs/experiment_log.txt). E225 introduced high impact routing behavior, so experiments are planned around these new variations.
 
 ## Preprint
 

@@ -1,12 +1,12 @@
-#include <jessesort/v4_single_overflow.h>
+#include <jessesort/jessesort_simulated_probe-routed_inplace-flatten-adjacent-adaptive-buffered.h>
 #include <vector>
 
 // This translation unit intentionally contains no algorithm implementation.
 // JesseSort is generic/template-based, so the implementation remains in the header.
 // This function forces an int instantiation during a normal multi-file build.
 namespace jessesort_minimal_compile_check {
-void v4_single_overflow() {
+void v3_inplace_simulated_legacy() {
     std::vector<int> values{3, 1, 2, 1};
-    jessesort::simulated_early_freeze_single_overflow::sort(values);
+    jessesort::simulated_inplace_flatten_legacy::sort(values);
 }
 } // namespace jessesort_minimal_compile_check

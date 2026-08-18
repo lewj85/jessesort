@@ -2,15 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JESSESORT_ROOT="$(cd "$ROOT/../.." && pwd)"
 cd "$ROOT"
 mkdir -p deps results
 
-if [[ ! -d deps/jessesort/.git ]]; then
-  git clone https://github.com/lewj85/jessesort.git deps/jessesort
-else
-  git -C deps/jessesort fetch --all --prune
-  git -C deps/jessesort checkout main
-  git -C deps/jessesort pull --ff-only
+if [[ ! -f "$JESSESORT_ROOT/include/jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h" ]]; then
+  echo "Expected E229 layer-tagged JesseSort headers were not found in: $JESSESORT_ROOT" >&2
+  exit 1
 fi
 
 if [[ ! -d deps/sort-research-rs/.git ]]; then
@@ -21,7 +19,11 @@ else
   git -C deps/sort-research-rs pull --ff-only
 fi
 
-echo "JesseSort commit: $(git -C deps/jessesort rev-parse HEAD)"
+if git -C "$JESSESORT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "JesseSort commit: $(git -C "$JESSESORT_ROOT" rev-parse HEAD)"
+else
+  echo "JesseSort source: local enclosing E229 tree (no git metadata)"
+fi
 echo "sort-research-rs commit: $(git -C deps/sort-research-rs rev-parse HEAD)"
 
 rustup toolchain install nightly --profile minimal

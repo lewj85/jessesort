@@ -1,10 +1,22 @@
-# ipnsort vs current JesseSort HEAD — E189 canonical-input kit
+# ipnsort vs layer-tagged JesseSort — E229 update
 
-This replaces the earlier comparison kit's ipnsort-specific input families with
-the **12 canonical input families from the supplied E189 JesseSort benchmark**.
+This retains the established ipnsort comparison kit's **12 E189 canonical input families** and updates only the JesseSort side to the E229 layer-tagged variation bank.
 
-The compared sort type remains **u64** so results remain comparable to the prior
-ipnsort-vs-JesseSort runs.
+The compared sort type remains **u64** so results remain comparable to the prior ipnsort-vs-JesseSort runs.
+
+
+## JesseSort variations compared
+
+The E229 comparison intentionally uses a compact architecture-spanning set:
+
+1. **`physical`** — preserved pre-E225 physical-pile baseline.
+2. **`simulated`** — preserved pre-E225 simulated-blueprint champion/control.
+3. **`simulated-direct`** — current high-performance allocating descendant with the E225 direct natural-run merge router; this ensures the fastest JesseSort family tested so far is represented.
+4. **`indexed`** — index-tail architecture, included because its non-copyable path supports move-only values.
+5. **`noalloc`** — allocation-free bounded/fallback architecture.
+6. **`noalloc-low-run`** — allocation-free descendant with selective low-run in-place merging and bounded run reclamation.
+
+The comparison itself still sorts `u64`, so the move-only capability of `indexed` is an architectural property rather than something exercised by this particular benchmark. Likewise, `noalloc` means the JesseSort call performs no heap allocation internally; the bridge's per-trial input/output vectors are created outside the timed sort region, as in the existing kit. None of these variations is literally "no-move"—sorting necessarily moves or swaps values.
 
 ## Inputs, in E189 canonical order
 
@@ -68,10 +80,10 @@ so trial seeds match E189 for the same `(n, input, trial)`.
 - Default: 500 measured trials per input.
 - Default size: 10k.
 - 2 warmups per input.
-- One generated source per paired trial; ipnsort, V1, V2, and V5 all receive it.
+- One generated source per paired trial; ipnsort and all six selected JesseSort variations receive it.
 - Input copying is outside the timed sort region.
 - Validation is outside the timed region against Rust stable `sort()`, not ipnsort.
-- Four-algorithm execution order rotates and reverses across trials.
+- Seven-algorithm execution order (ipnsort + six JesseSort variations) rotates and reverses across trials.
 - No shared cold-like preconditioner.
 - Rust: `-C target-cpu=native`.
 - C++: `-O3 -march=native -DNDEBUG`.
@@ -99,8 +111,7 @@ Outputs:
 Summary format:
 
 ```text
-| Pattern | ipnsort µs | V1 µs | V2 µs | V5 µs | V2/ipnsort | best Jesse/ipnsort |
+| Pattern | ipnsort µs | physical µs | simulated µs | simulated-direct µs | indexed µs | noalloc µs | noalloc-low-run µs | simulated/ipnsort | simulated-direct/ipnsort | best Jesse/ipnsort |
 ```
 
-`setup.sh` refreshes both repositories and `run.sh` records their exact commit
-hashes in `results/system.txt`.
+The kit now compiles JesseSort from the **enclosing E229 repository tree**, ensuring the layer-tagged files being tested are exactly the files in this checkpoint. `setup.sh` only refreshes the external `sort-research-rs`/ipnsort dependency. `run.sh` records the local JesseSort commit when git metadata is available, otherwise it records that the enclosing E229 tree was used.

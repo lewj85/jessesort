@@ -1,8 +1,8 @@
-#ifndef JESSESORT_SIMULATED_SIMD_V7_HPP
-#define JESSESORT_SIMULATED_SIMD_V7_HPP
+#ifndef JESSESORT_E229_JESSESORT_SIMULATED_AVX2_PROBE_ROUTED_ADJACENT_ADAPTIVE_BUFFERED_CAPPED_PROBE8X128_H
+#define JESSESORT_E229_JESSESORT_SIMULATED_AVX2_PROBE_ROUTED_ADJACENT_ADAPTIVE_BUFFERED_CAPPED_PROBE8X128_H
 
 #include <jessesort/tiny_sort.h>
-#include <jessesort/v2_simulated.h>
+#include <jessesort/jessesort_simulated_probe-routed_adjacent-adaptive-buffered.h>
 
 #include <vector>
 #include <cstdint>
@@ -20,7 +20,7 @@
 #include <bit>
 
 
-namespace jessesort::simulated_simd_v7 {
+namespace jessesort::simulated_simd_v7_legacy {
 
 
 // V7 is the first SIMD-specific variation. It preserves V2's overall pipeline
@@ -738,7 +738,7 @@ JESSESORT_CONTINUE_NOINLINE void continuePatienceInsertionCoherentCache(
     bool& descendingMode,
     Less less
 ) {
-    static_assert(jessesort::simulated::specializedIntegralEligible<T, Less>);
+    static_assert(jessesort::simulated_legacy::specializedIntegralEligible<T, Less>);
     struct Entry { std::uint64_t key = 0; std::uint32_t pile = 0; bool valid = false; };
     std::array<Entry, 128> ascCache{}, descCache{};
     auto keyOf = [](const T& value) -> std::uint64_t {
@@ -871,7 +871,7 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
     const bool confirmedShortSameDirectionPrefix =
         prefixDirection != PrefixDirection::Unknown &&
         prefixEnd < MinPrefixPileLength &&
-        jessesort::simulated::confirmedShortSameDirectionPrefix(
+        jessesort::simulated_legacy::confirmedShortSameDirectionPrefix(
             arr, prefixEnd, prefixDirection == PrefixDirection::Descending, less,
             MinPrefixPileLength);
     const bool materializePrefix =
@@ -1149,10 +1149,10 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
         const bool windowRoute = enableWindowAvx && n >= 5000 && n <= 20000 &&
             result.ascTails.size() + result.descTails.size() <= 12;
         bool coherentCacheCandidate = false;
-        if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+        if constexpr (jessesort::simulated_legacy::specializedIntegralEligible<T, Less>) {
             coherentCacheCandidate = enableCoherentValuePileCache &&
                 result.earlyRandomLike &&
-                jessesort::simulated::coherentValuePileCacheSampleCandidate(arr, less, n >= 50000);
+                jessesort::simulated_legacy::coherentValuePileCacheSampleCandidate(arr, less, n >= 50000);
         }
         const std::size_t e183ProbePiles = result.ascCounts.size() + result.descCounts.size();
         const bool e183ValleyRescue = n >= 10000 && e183ProbePiles >= 3 && e183ProbePiles <= 12;
@@ -1163,7 +1163,7 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
                 else continuePatienceInsertionValleyRescue<false>(
                     arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less, windowRoute);
             } else if (coherentCacheCandidate) {
-                if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>)
+                if constexpr (jessesort::simulated_legacy::specializedIntegralEligible<T, Less>)
                     continuePatienceInsertionCoherentCache(
                         arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
             } else if (earlyRandomInsertion) continuePatienceInsertionNoHint(
@@ -1200,10 +1200,10 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
         const bool windowRoute = enableWindowAvx && n >= 5000 && n <= 20000 &&
             result.ascTails.size() + result.descTails.size() <= 12;
         bool coherentCacheCandidate = false;
-        if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+        if constexpr (jessesort::simulated_legacy::specializedIntegralEligible<T, Less>) {
             coherentCacheCandidate = enableCoherentValuePileCache &&
                 result.earlyRandomLike &&
-                jessesort::simulated::coherentValuePileCacheSampleCandidate(arr, less, n >= 50000);
+                jessesort::simulated_legacy::coherentValuePileCacheSampleCandidate(arr, less, n >= 50000);
         }
         const std::size_t e183ProbePiles = result.ascCounts.size() + result.descCounts.size();
         const bool e183ValleyRescue = n >= 10000 && e183ProbePiles >= 3 && e183ProbePiles <= 12;
@@ -1214,7 +1214,7 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprint(
                 else continuePatienceInsertionValleyRescue<false>(
                     arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less, windowRoute);
             } else if (coherentCacheCandidate) {
-                if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>)
+                if constexpr (jessesort::simulated_legacy::specializedIntegralEligible<T, Less>)
                     continuePatienceInsertionCoherentCache(
                         arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
             } else if (earlyRandomInsertion) continuePatienceInsertionNoHint(
@@ -2061,9 +2061,9 @@ ReconstructedRuns simulateAndReconstructRunsToTemp(
 template <typename T, typename Less = std::less<T>>
 void sortWithProbePileCap(std::vector<T>& arr, std::size_t probePileCap, std::size_t probeValues, Less less, bool bidirectionalBranchlessMerge, bool normalizedReconstruction = true, bool naturalRunRoute = false, bool enableWindowAvx = false, bool enableSpecializedRoutes = false, bool enableCoherentValuePileCache = true, bool enableRawBulkSpanDecode = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
-                  "jessesort::simulated_simd_v7::sort requires copyable values because pile tails are stored by value");
+                  "jessesort::simulated_simd_v7_legacy::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
-                  "jessesort::simulated_simd_v7::sort requires movable values for merging");
+                  "jessesort::simulated_simd_v7_legacy::sort requires movable values for merging");
     static_assert(std::is_invocable_r_v<bool, Less&, const T&, const T&>,
                   "Comparator must be callable as bool(const T&, const T&)");
 
@@ -2071,7 +2071,7 @@ void sortWithProbePileCap(std::vector<T>& arr, std::size_t probePileCap, std::si
         return;
     }
 
-    if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+    if constexpr (jessesort::simulated_legacy::specializedIntegralEligible<T, Less>) {
         if (enableSpecializedRoutes) {
             bool prefixMayMix = true;
             if (arr.size() >= 4) {
@@ -2079,7 +2079,7 @@ void sortWithProbePileCap(std::vector<T>& arr, std::size_t probePileCap, std::si
                 const bool desc = less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
                 prefixMayMix = !(asc || desc);
             }
-            if (prefixMayMix && jessesort::simulated::trySpecializedPrePatienceRoutes(arr, less)) return;
+            if (prefixMayMix && jessesort::simulated_legacy::trySpecializedPrePatienceRoutes(arr, less)) return;
         }
     }
 
@@ -2203,5 +2203,5 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     sortWithProbePileCap(arr, 8, 128, less, true, true, true, true, true, true, true);
 }
 
-} // namespace jessesort::simulated_simd_v7
+} // namespace jessesort::simulated_simd_v7_legacy
 #endif

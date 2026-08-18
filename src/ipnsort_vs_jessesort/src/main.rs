@@ -21,11 +21,23 @@ const PATTERNS: [(&str, i32); 12] = [
     ("Rotated", 9),
 ];
 
+const JESSE_NAMES: [&str; 6] = [
+    "physical",
+    "simulated",
+    "simulated-direct",
+    "indexed",
+    "noalloc",
+    "noalloc-low-run",
+];
+
 extern "C" {
     fn jesse_generate_u64(out: *mut u64, n: usize, input_type: i32, seed: u32);
-    fn jesse_v1_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
-    fn jesse_v2_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
-    fn jesse_v5_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
+    fn jesse_physical_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
+    fn jesse_simulated_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
+    fn jesse_simulated_direct_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
+    fn jesse_indexed_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
+    fn jesse_noalloc_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
+    fn jesse_noalloc_low_run_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
 }
 
 fn trial_seed(base_seed: u32, n: usize, input_ordinal: i32, trial: usize) -> u32 {
@@ -57,19 +69,22 @@ fn run_jesse(id: usize, source: &[u64]) -> (f64, Vec<u64>) {
     let mut out = vec![0u64; source.len()];
     let us = unsafe {
         match id {
-            1 => jesse_v1_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
-            2 => jesse_v2_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
-            3 => jesse_v5_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
+            1 => jesse_physical_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
+            2 => jesse_simulated_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
+            3 => jesse_simulated_direct_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
+            4 => jesse_indexed_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
+            5 => jesse_noalloc_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
+            6 => jesse_noalloc_low_run_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
             _ => unreachable!(),
         }
     };
     (us, out)
 }
 
-fn execution_order(trial: usize) -> [usize; 4] {
-    let mut order = [0usize, 1, 2, 3]; // ipnsort, V1, V2, V5
-    let block = trial / 4;
-    let rotation = trial % 4;
+fn execution_order(trial: usize) -> [usize; 7] {
+    let mut order = [0usize, 1, 2, 3, 4, 5, 6]; // ipnsort + six JesseSort targets
+    let block = trial / order.len();
+    let rotation = trial % order.len();
     order.rotate_left(rotation);
     if block % 2 == 1 {
         order.reverse();
@@ -91,13 +106,13 @@ fn main() -> std::io::Result<()> {
     writeln!(raw, "pattern,n,trial,seed,algorithm,order_position,time_us")?;
 
     let mut summary = String::new();
-    summary.push_str("# ipnsort vs current JesseSort HEAD\n\n");
+    summary.push_str("# ipnsort vs layer-tagged JesseSort (E229)\n\n");
     summary.push_str(&format!(
         "- type: u64\n- n: {}\n- trials per pattern: {}\n- warmups per pattern: {}\n- shared cold-like preconditioner: false\n- inputs: E189 canonical JesseSort benchmark inputs, order-preserving int->u64 encoding\n\n",
         n, trials, warmups
     ));
-    summary.push_str("| Pattern | ipnsort µs | V1 µs | V2 µs | V5 µs | V2/ipnsort | best Jesse/ipnsort |\n");
-    summary.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
+    summary.push_str("| Pattern | ipnsort µs | physical µs | simulated µs | simulated-direct µs | indexed µs | noalloc µs | noalloc-low-run µs | simulated/ipnsort | simulated-direct/ipnsort | best Jesse/ipnsort |\n");
+    summary.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
 
     for &(pattern_name, pattern_id) in &PATTERNS {
         for w in 0..warmups {
@@ -108,17 +123,15 @@ fn main() -> std::io::Result<()> {
             let mut expected = source.clone();
             expected.sort(); // validation oracle intentionally distinct from ipnsort
 
-            let (_, a) = run_ipnsort(&source);
-            let (_, b) = run_jesse(1, &source);
-            let (_, c) = run_jesse(2, &source);
-            let (_, d) = run_jesse(3, &source);
-            assert_eq!(a, expected, "warmup ipnsort failure: {pattern_name}");
-            assert_eq!(b, expected, "warmup V1 failure: {pattern_name}");
-            assert_eq!(c, expected, "warmup V2 failure: {pattern_name}");
-            assert_eq!(d, expected, "warmup V5 failure: {pattern_name}");
+            let (_, ip) = run_ipnsort(&source);
+            assert_eq!(ip, expected, "warmup ipnsort failure: {pattern_name}");
+            for (j, name) in JESSE_NAMES.iter().enumerate() {
+                let (_, got) = run_jesse(j + 1, &source);
+                assert_eq!(got, expected, "warmup {name} failure: {pattern_name}");
+            }
         }
 
-        let mut times: [Vec<f64>; 4] = std::array::from_fn(|_| Vec::with_capacity(trials));
+        let mut times: [Vec<f64>; 7] = std::array::from_fn(|_| Vec::with_capacity(trials));
 
         for trial in 0..trials {
             let seed = trial_seed(BASE_SEED, n, pattern_id, trial);
@@ -130,21 +143,17 @@ fn main() -> std::io::Result<()> {
 
             let order = execution_order(trial);
             for (pos, &alg) in order.iter().enumerate() {
-                let (us, got) = match alg {
-                    0 => run_ipnsort(&source),
-                    1 => run_jesse(1, &source),
-                    2 => run_jesse(2, &source),
-                    3 => run_jesse(3, &source),
-                    _ => unreachable!(),
+                let (us, got) = if alg == 0 {
+                    run_ipnsort(&source)
+                } else {
+                    run_jesse(alg, &source)
                 };
                 assert_eq!(
                     got, expected,
                     "validation failure: pattern={pattern_name} trial={trial} alg={alg}"
                 );
                 times[alg].push(us);
-                let alg_name = match alg {
-                    0 => "ipnsort", 1 => "V1", 2 => "V2", 3 => "V5", _ => "?"
-                };
+                let alg_name = if alg == 0 { "ipnsort" } else { JESSE_NAMES[alg - 1] };
                 writeln!(
                     raw, "{},{},{},{},{},{},{:.17}",
                     pattern_name, n, trial, seed, alg_name, pos, us
@@ -153,20 +162,24 @@ fn main() -> std::io::Result<()> {
             raw.flush()?;
         }
 
-        let ip = median(times[0].clone());
-        let v1 = median(times[1].clone());
-        let v2 = median(times[2].clone());
-        let v3 = median(times[3].clone());
-        let best = v1.min(v2).min(v3);
+        let medians: [f64; 7] = std::array::from_fn(|i| median(times[i].clone()));
+        let ip = medians[0];
+        let best = medians[1..].iter().copied().fold(f64::INFINITY, f64::min);
 
         summary.push_str(&format!(
-            "| {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} |\n",
-            pattern_name, ip, v1, v2, v3, v2 / ip, best / ip
+            "| {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} |\n",
+            pattern_name,
+            ip,
+            medians[1], medians[2], medians[3], medians[4], medians[5], medians[6],
+            medians[2] / ip, medians[3] / ip, best / ip
         ));
 
         println!(
-            "| {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} |",
-            pattern_name, ip, v1, v2, v3, v2 / ip, best / ip
+            "| {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} |",
+            pattern_name,
+            ip,
+            medians[1], medians[2], medians[3], medians[4], medians[5], medians[6],
+            medians[2] / ip, medians[3] / ip, best / ip
         );
     }
 

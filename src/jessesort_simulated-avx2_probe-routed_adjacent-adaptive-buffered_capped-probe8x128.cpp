@@ -1,12 +1,12 @@
-#include <jessesort/v2_simulated.h>
+#include <jessesort/jessesort_simulated-avx2_probe-routed_adjacent-adaptive-buffered_capped-probe8x128.h>
 #include <vector>
 
 // This translation unit intentionally contains no algorithm implementation.
 // JesseSort is generic/template-based, so the implementation remains in the header.
 // This function forces an int instantiation during a normal multi-file build.
 namespace jessesort_minimal_compile_check {
-void v2_simulated() {
+void v7_avx2_legacy() {
     std::vector<int> values{3, 1, 2, 1};
-    jessesort::simulated::sort(values);
+    jessesort::simulated_simd_v7_legacy::sort(values);
 }
 } // namespace jessesort_minimal_compile_check

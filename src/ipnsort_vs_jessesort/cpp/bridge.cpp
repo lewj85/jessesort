@@ -1,6 +1,9 @@
-#include <jessesort/v1_actual_piles.h>
-#include <jessesort/v2_simulated.h>
-#include <jessesort/v5_deferred_bands.h>
+#include <jessesort/jessesort_physical_probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated_probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_indexed_probe-routed_adjacent-adaptive-buffered_move-only.h>
+#include <jessesort/jessesort_noalloc_bounded-fallback_inplace-adaptive_partition-heapsort-fallback.h>
+#include <jessesort/jessesort_noalloc-low-run-merge_overlap-routed_inplace-adaptive_run-reclaim64.h>
 
 #include <algorithm>
 #include <chrono>
@@ -190,24 +193,45 @@ void jesse_generate_u64(std::uint64_t* out, std::size_t n,
         out[i] = encode_int(signed_values[i]);
 }
 
-double jesse_v1_u64(const std::uint64_t* input, std::size_t n,
-                    std::uint64_t* output) {
+double jesse_physical_u64(const std::uint64_t* input, std::size_t n,
+                          std::uint64_t* output) {
     return timed_sort(input, n, output, [](auto& v) {
-        jessesort::actual_piles::sort(v);
+        jessesort::actual_piles_legacy::sort(v);
     });
 }
 
-double jesse_v2_u64(const std::uint64_t* input, std::size_t n,
-                    std::uint64_t* output) {
+double jesse_simulated_u64(const std::uint64_t* input, std::size_t n,
+                           std::uint64_t* output) {
     return timed_sort(input, n, output, [](auto& v) {
-        jessesort::simulated::sort(v);
+        jessesort::simulated_legacy::sort(v);
     });
 }
 
-double jesse_v5_u64(const std::uint64_t* input, std::size_t n,
-                    std::uint64_t* output) {
+double jesse_simulated_direct_u64(const std::uint64_t* input, std::size_t n,
+                                  std::uint64_t* output) {
     return timed_sort(input, n, output, [](auto& v) {
-        jessesort::simulated_early_freeze::sort(v);
+        jessesort::simulated_direct_merge::sort(v);
+    });
+}
+
+double jesse_indexed_u64(const std::uint64_t* input, std::size_t n,
+                         std::uint64_t* output) {
+    return timed_sort(input, n, output, [](auto& v) {
+        jessesort::index_tail_legacy::sort(v);
+    });
+}
+
+double jesse_noalloc_u64(const std::uint64_t* input, std::size_t n,
+                         std::uint64_t* output) {
+    return timed_sort(input, n, output, [](auto& v) {
+        jessesort::allocation_free_v10::sort(v);
+    });
+}
+
+double jesse_noalloc_low_run_u64(const std::uint64_t* input, std::size_t n,
+                                 std::uint64_t* output) {
+    return timed_sort(input, n, output, [](auto& v) {
+        jessesort::allocation_free_v11::sort(v);
     });
 }
 

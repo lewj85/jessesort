@@ -1,8 +1,8 @@
-#ifndef JESSESORT_SIMULATED_EARLY_FREEZE_LIVE_HPP
-#define JESSESORT_SIMULATED_EARLY_FREEZE_LIVE_HPP
+#ifndef JESSESORT_E229_JESSESORT_SIMULATED_FROZEN_PROBE_ROUTED_ADJACENT_TIMSORT_ADAPTIVE_BUFFERED_LIVE_BANDS32_H
+#define JESSESORT_E229_JESSESORT_SIMULATED_FROZEN_PROBE_ROUTED_ADJACENT_TIMSORT_ADAPTIVE_BUFFERED_LIVE_BANDS32_H
 
 #include <jessesort/tiny_sort.h>
-#include <jessesort/v5_deferred_bands.h>
+#include <jessesort/jessesort_simulated-frozen_probe-routed_adjacent-adaptive-buffered_deferred-bands32.h>
 
 #include <algorithm>
 #include <cassert>
@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace jessesort::simulated_early_freeze_live {
+namespace jessesort::simulated_early_freeze_live_legacy {
 
 // V6 shares V5's early-freeze base structure but keeps each overflow band
 // sorted as values arrive, trading insertion work for less deferred sorting.
@@ -133,7 +133,7 @@ void materializeTimSortTree(
 
     std::vector<T>& src = outputToArr ? tmp : arr;
     std::vector<T>& dst = outputToArr ? arr : tmp;
-    simulated::mergeTwoAdjacentRunsToDest(
+    simulated_legacy::mergeTwoAdjacentRunsToDest(
         src, dst, node.begin, node.mid, node.end, less);
 }
 
@@ -303,7 +303,7 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithLiveOverflowBands(
 
     for (std::size_t i = 0; i < n; ++i) {
         const uint32_t tag = blueprint[i];
-        if (tag == simulated::OVERFLOW_TAG) {
+        if (tag == simulated_legacy::OVERFLOW_TAG) {
             const std::size_t bandStart =
                 normalCount + (overflowSeen / BandSize) * BandSize;
             const std::size_t bandEnd = normalCount + overflowSeen;
@@ -387,9 +387,9 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithLiveOverflowBands(
             continue;
         }
 
-        const bool desc = simulated::isDescTag(tag);
+        const bool desc = simulated_legacy::isDescTag(tag);
         const std::size_t local =
-            static_cast<std::size_t>(simulated::localPileId(tag));
+            static_cast<std::size_t>(simulated_legacy::localPileId(tag));
         if (desc) tmp[--descCounts[local]] = arr[i];
         else tmp[ascCounts[local]++] = arr[i];
     }
@@ -423,14 +423,14 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithLiveOverflowBands(
 template <typename T, typename Less = std::less<T>>
 void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false, bool enableSpecializedRoutes = false, bool enableCoherentValuePileCache = true, bool enableBidirectionalNaturalOverflow = false, bool enableAdaptiveOverflowRouter = false, bool enableValleyRescue = false, bool enableExactBalanceRoute = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
-                  "jessesort::simulated_early_freeze_live::sort requires copyable values because pile tails are stored by value");
+                  "jessesort::simulated_early_freeze_live_legacy::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
-                  "jessesort::simulated_early_freeze_live::sort requires movable values for merging");
+                  "jessesort::simulated_early_freeze_live_legacy::sort requires movable values for merging");
     static_assert(std::is_invocable_r_v<bool, Less&, const T&, const T&>,
                   "Comparator must be callable as bool(const T&, const T&)");
 
     if (arr.size() < 2) return;
-    if constexpr (simulated::specializedIntegralEligible<T, Less>) {
+    if constexpr (simulated_legacy::specializedIntegralEligible<T, Less>) {
         if (enableSpecializedRoutes) {
             bool prefixMayMix = true;
             if (arr.size() >= 4) {
@@ -438,11 +438,11 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                 const bool desc = less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
                 prefixMayMix = !(asc || desc);
             }
-            if (prefixMayMix && simulated::trySpecializedPrePatienceRoutes(arr, less)) return;
+            if (prefixMayMix && simulated_legacy::trySpecializedPrePatienceRoutes(arr, less)) return;
         }
     }
-    auto sim = simulated_early_freeze::simulatePatienceInsertionBlueprintEarlyFreeze(
-        arr, less, simulated_early_freeze::FreezePolicy::power2_broad, naturalRunRoute, true, enableCoherentValuePileCache, 50, enableAdaptiveOverflowRouter, enableValleyRescue);
+    auto sim = simulated_early_freeze_legacy::simulatePatienceInsertionBlueprintEarlyFreeze(
+        arr, less, simulated_early_freeze_legacy::FreezePolicy::power2_broad, naturalRunRoute, true, enableCoherentValuePileCache, 50, enableAdaptiveOverflowRouter, enableValleyRescue);
     if (sim.alreadySortedAscending) return;
     if (sim.reverseSortedDescending) {
         std::reverse(arr.begin(), arr.end());
@@ -451,7 +451,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     bool useRandomBranchlessMerge = false;
     if constexpr (std::is_trivially_copyable_v<T> && sizeof(T) <= 96) {
         useRandomBranchlessMerge =
-            simulated_early_freeze::frozenInsertionLooksRandomLike(
+            simulated_early_freeze_legacy::frozenInsertionLooksRandomLike(
                 sim, arr.size());
     }
 
@@ -505,15 +505,15 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         useBidirectionalNaturalOverflow,
         32);
     if (useRandomBranchlessMerge) {
-        simulated::mergeRunsFromTmpToArr(
+        simulated_legacy::mergeRunsFromTmpToArr(
             tmp, arr, std::move(runStart), less,
-            simulated::MergeSchedule::adjacent_pairs, true, 7,
+            simulated_legacy::MergeSchedule::adjacent_pairs, true, 7,
             bidirectionalBranchlessMerge);
     } else if (detail::shouldUseTimSortMerge(runStart, arr.size())) {
         detail::mergeRunsTimSortStyle(
             tmp, arr, std::move(runStart), less);
     } else {
-        simulated::mergeRunsFromTmpToArr(
+        simulated_legacy::mergeRunsFromTmpToArr(
             tmp, arr, std::move(runStart), less);
     }
 }
@@ -524,5 +524,5 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     sortImpl(arr, less, true, true, true, true, false, true, true, true);
 }
 
-} // namespace jessesort::simulated_early_freeze_live
+} // namespace jessesort::simulated_early_freeze_live_legacy
 #endif

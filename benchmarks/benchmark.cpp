@@ -1,11 +1,24 @@
 #include "benchmark_seed.h"
-#include <jessesort/v1_actual_piles.h>
-#include <jessesort/v2_simulated.h>
-#include <jessesort/v3_inplace_simulated.h>
-#include <jessesort/v4_single_overflow.h>
-#include <jessesort/v5_deferred_bands.h>
-#include <jessesort/v6_live_bands.h>
-#include <jessesort/v7_avx2.h>
+#include <jessesort/jessesort_physical_probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated_probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated_probe-routed_inplace-flatten-adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated-frozen_probe-routed_adjacent-powersort-adaptive-buffered_single-overflow.h>
+#include <jessesort/jessesort_simulated-frozen_probe-routed_adjacent-adaptive-buffered_deferred-bands32.h>
+#include <jessesort/jessesort_simulated-frozen_probe-routed_adjacent-timsort-adaptive-buffered_live-bands32.h>
+#include <jessesort/jessesort_simulated-avx2_probe-routed_adjacent-adaptive-buffered_capped-probe8x128.h>
+#include <jessesort/jessesort_linked_probe-routed_linked-fused-adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_indexed_probe-routed_adjacent-adaptive-buffered_move-only.h>
+#include <jessesort/jessesort_noalloc_bounded-fallback_inplace-adaptive_partition-heapsort-fallback.h>
+#include <jessesort/jessesort_noalloc-low-run-merge_overlap-routed_inplace-adaptive_run-reclaim64.h>
+#include <jessesort/jessesort_physical_direct-merge-probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated_direct-merge-probe-routed_inplace-flatten-adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated-frozen_direct-merge-probe-routed_adjacent-powersort-adaptive-buffered_single-overflow.h>
+#include <jessesort/jessesort_simulated-frozen_direct-merge-probe-routed_adjacent-adaptive-buffered_deferred-bands32.h>
+#include <jessesort/jessesort_simulated-frozen_direct-merge-probe-routed_adjacent-timsort-adaptive-buffered_live-bands32.h>
+#include <jessesort/jessesort_simulated-avx2_direct-merge-probe-routed_adjacent-adaptive-buffered_capped-probe8x128.h>
+#include <jessesort/jessesort_linked_direct-merge-probe-routed_linked-fused-adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_indexed_direct-merge-probe-routed_adjacent-adaptive-buffered_move-only.h>
 
 #include <algorithm>
 #include <array>
@@ -31,7 +44,8 @@
 enum class InputType {
     Random = 0, Sorted = 1, Reverse = 2, NearlySorted = 3, Random25 = 4,
     Alternating = 5, Sawtooth = 6, BlockSorted = 7, OrganPipe = 8, Rotated = 9,
-    SortedNoise10 = 12, MixedDirectionRuns = 13
+    SortedNoise10 = 12, MixedDirectionRuns = 13,
+    MixedPhase3 = 14, MixedPhase12 = 15
 };
 
 static std::string_view name(InputType t) {
@@ -48,19 +62,60 @@ static std::string_view name(InputType t) {
         case InputType::MixedDirectionRuns: return "MixedDirectionRuns";
         case InputType::OrganPipe: return "OrganPipe";
         case InputType::Rotated: return "Rotated";
+        case InputType::MixedPhase3: return "MixedPhase3";
+        case InputType::MixedPhase12: return "MixedPhase12";
     }
     return "?";
 }
 
-static constexpr std::array<std::string_view, 8> kAlgorithmNames{
-    "V1", "V2", "V3", "V4", "V5", "V6", "V7", "std::sort"
+struct AlgorithmSpec {
+    std::string_view short_name;
+    std::string_view header_file;
+    bool default_selected;
 };
 
-static constexpr std::array<InputType, 12> kInputs{
+// E229F descriptor -> maintained variation header map. Short descriptors are the
+// benchmark CLI/API names; layer-tagged filenames remain the authoritative identities.
+static constexpr std::array<AlgorithmSpec, 21> kAlgorithmSpecs{{
+    {"physical", "jessesort_physical_probe-routed_adjacent-adaptive-buffered.h", true},
+    {"simulated", "jessesort_simulated_probe-routed_adjacent-adaptive-buffered.h", true},
+    {"simulated-inplace", "jessesort_simulated_probe-routed_inplace-flatten-adjacent-adaptive-buffered.h", false},
+    {"frozen-single", "jessesort_simulated-frozen_probe-routed_adjacent-powersort-adaptive-buffered_single-overflow.h", true},
+    {"frozen-deferred", "jessesort_simulated-frozen_probe-routed_adjacent-adaptive-buffered_deferred-bands32.h", false},
+    {"frozen-live", "jessesort_simulated-frozen_probe-routed_adjacent-timsort-adaptive-buffered_live-bands32.h", false},
+    {"avx2", "jessesort_simulated-avx2_probe-routed_adjacent-adaptive-buffered_capped-probe8x128.h", false},
+    {"linked", "jessesort_linked_probe-routed_linked-fused-adjacent-adaptive-buffered.h", false},
+    {"indexed", "jessesort_indexed_probe-routed_adjacent-adaptive-buffered_move-only.h", true},
+    {"noalloc", "jessesort_noalloc_bounded-fallback_inplace-adaptive_partition-heapsort-fallback.h", false},
+    {"noalloc-low-run", "jessesort_noalloc-low-run-merge_overlap-routed_inplace-adaptive_run-reclaim64.h", true},
+    {"physical-direct", "jessesort_physical_direct-merge-probe-routed_adjacent-adaptive-buffered.h", false},
+    {"simulated-direct", "jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h", true},
+    {"simulated-inplace-direct", "jessesort_simulated_direct-merge-probe-routed_inplace-flatten-adjacent-adaptive-buffered.h", false},
+    {"frozen-single-direct", "jessesort_simulated-frozen_direct-merge-probe-routed_adjacent-powersort-adaptive-buffered_single-overflow.h", false},
+    {"frozen-deferred-direct", "jessesort_simulated-frozen_direct-merge-probe-routed_adjacent-adaptive-buffered_deferred-bands32.h", false},
+    {"frozen-live-direct", "jessesort_simulated-frozen_direct-merge-probe-routed_adjacent-timsort-adaptive-buffered_live-bands32.h", false},
+    {"avx2-direct", "jessesort_simulated-avx2_direct-merge-probe-routed_adjacent-adaptive-buffered_capped-probe8x128.h", false},
+    {"linked-direct", "jessesort_linked_direct-merge-probe-routed_linked-fused-adjacent-adaptive-buffered.h", false},
+    {"indexed-direct", "jessesort_indexed_direct-merge-probe-routed_adjacent-adaptive-buffered_move-only.h", false},
+    {"std::sort", "<algorithm>", true},
+}};
+static constexpr std::size_t kAlgorithmCount = kAlgorithmSpecs.size();
+static constexpr std::size_t kStdSortId = kAlgorithmCount - 1;
+
+
+static constexpr std::array<InputType, 12> kBaselineInputs{
     InputType::Random, InputType::Sorted, InputType::Reverse,
     InputType::NearlySorted, InputType::SortedNoise10, InputType::Random25,
     InputType::Alternating, InputType::Sawtooth, InputType::MixedDirectionRuns,
     InputType::BlockSorted, InputType::OrganPipe, InputType::Rotated
+};
+
+static constexpr std::array<InputType, 14> kInputs{
+    InputType::Random, InputType::Sorted, InputType::Reverse,
+    InputType::NearlySorted, InputType::SortedNoise10, InputType::Random25,
+    InputType::Alternating, InputType::Sawtooth, InputType::MixedDirectionRuns,
+    InputType::BlockSorted, InputType::OrganPipe, InputType::Rotated,
+    InputType::MixedPhase3, InputType::MixedPhase12
 };
 
 static constexpr std::array<std::size_t, 4> kDefaultSizes{
@@ -210,6 +265,41 @@ static void generate(std::vector<int>& v, InputType t, std::mt19937& rng) {
             std::rotate(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(d(rng)), v.end());
             break;
         }
+        case InputType::MixedPhase3: {
+            // Router-safety input: three contiguous phases with deliberately
+            // different structural regimes. Sorted+Noise(5%) is first so a
+            // prefix-only router is tempted by near-sorted structure; mixed
+            // natural directions then exercise both dual-Patience games; the
+            // final Random phase tests whether late entropy is re-detected.
+            static constexpr std::array<InputType, 3> phases{
+                InputType::NearlySorted, InputType::MixedDirectionRuns, InputType::Random
+            };
+            std::size_t begin = 0;
+            for (std::size_t phase = 0; phase < phases.size(); ++phase) {
+                const std::size_t end = n * (phase + 1) / phases.size();
+                std::vector<int> part(end - begin);
+                generate(part, phases[phase], rng);
+                std::copy(part.begin(), part.end(),
+                          v.begin() + static_cast<std::ptrdiff_t>(begin));
+                begin = end;
+            }
+            break;
+        }
+        case InputType::MixedPhase12: {
+            // Router-safety input: one contiguous phase from every original
+            // baseline generator, in the canonical baseline order. Phase
+            // lengths differ by at most one element and sum exactly to n.
+            std::size_t begin = 0;
+            for (std::size_t phase = 0; phase < kBaselineInputs.size(); ++phase) {
+                const std::size_t end = n * (phase + 1) / kBaselineInputs.size();
+                std::vector<int> part(end - begin);
+                generate(part, kBaselineInputs[phase], rng);
+                std::copy(part.begin(), part.end(),
+                          v.begin() + static_cast<std::ptrdiff_t>(begin));
+                begin = end;
+            }
+            break;
+        }
     }
 }
 
@@ -223,14 +313,27 @@ static double timed(F&& f) {
 
 static void run_algorithm(int id, std::vector<int>& values) {
     switch (id) {
-        case 0: jessesort::actual_piles::sort(values); break;
-        case 1: jessesort::simulated::sort(values); break;
-        case 2: jessesort::simulated_inplace_flatten::sort(values); break;
-        case 3: jessesort::simulated_early_freeze_single_overflow::sort(values); break;
-        case 4: jessesort::simulated_early_freeze::sort(values); break;
-        case 5: jessesort::simulated_early_freeze_live::sort(values); break;
-        case 6: jessesort::simulated_simd_v7::sort(values); break;
-        case 7: std::sort(values.begin(), values.end()); break;
+        case 0: jessesort::actual_piles_legacy::sort(values); break;
+        case 1: jessesort::simulated_legacy::sort(values); break;
+        case 2: jessesort::simulated_inplace_flatten_legacy::sort(values); break;
+        case 3: jessesort::simulated_early_freeze_single_overflow_legacy::sort(values); break;
+        case 4: jessesort::simulated_early_freeze_legacy::sort(values); break;
+        case 5: jessesort::simulated_early_freeze_live_legacy::sort(values); break;
+        case 6: jessesort::simulated_simd_v7_legacy::sort(values); break;
+        case 7: jessesort::linked_v8_legacy::sort(values); break;
+        case 8: jessesort::index_tail_legacy::sort(values); break;
+        case 9: jessesort::allocation_free_v10::sort(values); break;
+        case 10: jessesort::allocation_free_v11::sort(values); break;
+        case 11: jessesort::actual_piles_direct_merge::sort(values); break;
+        case 12: jessesort::simulated_direct_merge::sort(values); break;
+        case 13: jessesort::simulated_inplace_flatten_direct_merge::sort(values); break;
+        case 14: jessesort::simulated_early_freeze_single_overflow_direct_merge::sort(values); break;
+        case 15: jessesort::simulated_early_freeze_direct_merge::sort(values); break;
+        case 16: jessesort::simulated_early_freeze_live_direct_merge::sort(values); break;
+        case 17: jessesort::simulated_simd_v7_direct_merge::sort(values); break;
+        case 18: jessesort::linked_v8_direct_merge::sort(values); break;
+        case 19: jessesort::index_tail_direct_merge::sort(values); break;
+        case 20: std::sort(values.begin(), values.end()); break;
     }
 }
 
@@ -271,14 +374,15 @@ static Stats stats(const std::vector<double>& values) {
 struct TrialRecord {
     unsigned seed = 0;
     int trial = 0;
-    std::array<double, 8> time{};
-    std::array<int, 8> order_position{};
+    std::array<double, kAlgorithmCount> time{};
+    std::array<int, kAlgorithmCount> order_position{};
 };
 
-static std::array<int, 8> execution_order(int trial) {
-    std::array<int, 8> order{0,1,2,3,4,5,6,7};
-    const int block = trial / 8;
-    const int rotation = trial % 8;
+static std::array<int, kAlgorithmCount> execution_order(int trial) {
+    std::array<int, kAlgorithmCount> order{};
+    std::iota(order.begin(), order.end(), 0);
+    const int block = trial / static_cast<int>(kAlgorithmCount);
+    const int rotation = trial % static_cast<int>(kAlgorithmCount);
     std::rotate(order.begin(), order.begin() + rotation, order.end());
     if (block % 2 == 1) std::reverse(order.begin(), order.end());
     return order;
@@ -362,6 +466,9 @@ static void write_metadata(const std::filesystem::path& path,
     }
     out << "method=paired same-input trials; fresh deterministic input seed per trial; rotating/reversing execution order; validation outside timer\n";
     out << "warning=absolute timings and saved std::sort medians are not portable across VM/host sessions\n";
+    for (const auto& spec : kAlgorithmSpecs)
+        out << "variation_map=" << spec.short_name << '|' << spec.header_file
+            << "|default=" << (spec.default_selected ? 1 : 0) << '\n';
 }
 
 struct BenchmarkCell {
@@ -371,9 +478,44 @@ struct BenchmarkCell {
 };
 
 static int algorithm_id(std::string_view n) {
-    for (std::size_t i = 0; i < kAlgorithmNames.size(); ++i)
-        if (kAlgorithmNames[i] == n) return static_cast<int>(i);
+    for (std::size_t i = 0; i < kAlgorithmSpecs.size(); ++i)
+        if (kAlgorithmSpecs[i].short_name == n) return static_cast<int>(i);
     return -1;
+}
+
+static bool parse_selected_variations(
+    std::string_view arg,
+    std::array<bool, kAlgorithmCount>& selected,
+    std::string& error) {
+    selected.fill(false);
+    if (arg.empty() || arg == "default") {
+        for (std::size_t id = 0; id < kAlgorithmCount; ++id)
+            selected[id] = kAlgorithmSpecs[id].default_selected;
+        selected[kStdSortId] = true;
+        return true;
+    }
+    if (arg == "all") {
+        selected.fill(true);
+        return true;
+    }
+
+    std::size_t begin = 0;
+    while (begin <= arg.size()) {
+        const std::size_t comma = arg.find(',', begin);
+        const std::size_t end = comma == std::string_view::npos ? arg.size() : comma;
+        const std::string_view token = arg.substr(begin, end - begin);
+        const int id = algorithm_id(token);
+        if (token.empty() || id < 0 || static_cast<std::size_t>(id) == kStdSortId) {
+            error = std::string(token);
+            return false;
+        }
+        selected[static_cast<std::size_t>(id)] = true;
+        if (comma == std::string_view::npos) break;
+        begin = comma + 1;
+    }
+
+    selected[kStdSortId] = true;
+    return true;
 }
 
 static int input_id(std::string_view n) {
@@ -384,10 +526,12 @@ static int input_id(std::string_view n) {
 
 struct LoadedTrial {
     TrialRecord rec{};
-    std::array<bool, 8> seen{};
+    std::array<bool, kAlgorithmCount> seen{};
 
-    bool complete() const {
-        return std::all_of(seen.begin(), seen.end(), [](bool v) { return v; });
+    bool complete(const std::array<bool, kAlgorithmCount>& selected) const {
+        for (std::size_t id = 0; id < kAlgorithmCount; ++id)
+            if (selected[id] && !seen[id]) return false;
+        return true;
     }
 };
 
@@ -432,24 +576,27 @@ static LoadedRecords load_raw_records(const std::filesystem::path& raw_path) {
 static void summarize_records(const std::vector<TrialRecord>& records,
                               InputType input, std::size_t n,
                               std::ostream& summary,
-                              std::array<BenchmarkCell, 8>& cells) {
-    std::array<std::vector<double>, 8> all_times;
-    std::array<std::vector<double>, 8> all_ratios;
+                              std::array<BenchmarkCell, kAlgorithmCount>& cells,
+                              const std::array<bool, kAlgorithmCount>& selected) {
+    std::array<std::vector<double>, kAlgorithmCount> all_times;
+    std::array<std::vector<double>, kAlgorithmCount> all_ratios;
     for (auto& v : all_times) v.reserve(records.size());
     for (auto& v : all_ratios) v.reserve(records.size());
     for (const TrialRecord& rec : records) {
-        const double std_time = rec.time[7];
-        for (int id = 0; id < 8; ++id) {
-            all_times[static_cast<std::size_t>(id)].push_back(rec.time[static_cast<std::size_t>(id)]);
-            all_ratios[static_cast<std::size_t>(id)].push_back(rec.time[static_cast<std::size_t>(id)] / std_time);
+        const double std_time = rec.time[kStdSortId];
+        for (std::size_t id = 0; id < kAlgorithmCount; ++id) {
+            if (!selected[id]) continue;
+            all_times[id].push_back(rec.time[id]);
+            all_ratios[id].push_back(rec.time[id] / std_time);
         }
     }
-    const Stats std_stats = stats(all_times[7]);
-    for (int id = 0; id < 8; ++id) {
-        const Stats ts = stats(all_times[static_cast<std::size_t>(id)]);
+    const Stats std_stats = stats(all_times[kStdSortId]);
+    for (std::size_t id = 0; id < kAlgorithmCount; ++id) {
+        if (!selected[id]) continue;
+        const Stats ts = stats(all_times[id]);
         const Stats rs = stats(all_ratios[static_cast<std::size_t>(id)]);
         summary << name(input) << ',' << n << ",ALL," << records.size() << ','
-                << kAlgorithmNames[static_cast<std::size_t>(id)] << ','
+                << kAlgorithmSpecs[static_cast<std::size_t>(id)].short_name << ','
                 << ts.median << ',' << ts.p25 << ',' << ts.p75 << ',' << ts.iqr << ',' << ts.mad << ','
                 << std_stats.median << ',' << ts.median / std_stats.median << ','
                 << rs.median << ',' << rs.p25 << ',' << rs.p75 << '\n';
@@ -462,7 +609,8 @@ static void write_markdown_report(
     int base_trials,
     bool sweeping_all_sizes,
     const std::vector<std::size_t>& sizes,
-    const std::vector<std::vector<std::array<BenchmarkCell, 8>>>& cells) {
+    const std::vector<std::vector<std::array<BenchmarkCell, kAlgorithmCount>>>& cells,
+    const std::array<bool, kAlgorithmCount>& selected) {
 
     std::ofstream out(path, std::ios::trunc);
     out << std::fixed << std::setprecision(4);
@@ -481,8 +629,9 @@ static void write_markdown_report(
     out << "\n\nCells show **median paired ratio vs std::sort (median time in us)**. "
            "Values below 1.0 are faster than std::sort. Pending cells have not completed yet.\n\n";
 
-    for (std::size_t id = 0; id < kAlgorithmNames.size(); ++id) {
-        out << "## " << kAlgorithmNames[id] << "\n\n";
+    for (std::size_t id = 0; id < kAlgorithmSpecs.size(); ++id) {
+        if (!selected[id]) continue;
+        out << "## " << kAlgorithmSpecs[id].short_name << "\n\n";
         out << "| Input |";
         for (std::size_t n : sizes) out << ' ' << size_label(n) << " |";
         out << "\n|---|";
@@ -525,6 +674,15 @@ int main(int argc, char** argv) {
     const int warmups = argc > 3 ? std::max(0, std::atoi(argv[3])) : 2;
     const unsigned base_seed = jessesort::bench::kCanonicalBaseSeed;
 
+    std::array<bool, kAlgorithmCount> selected{};
+    const std::string_view selected_variations_arg = argc > 5 ? std::string_view(argv[5]) : std::string_view("default");
+    std::string invalid_variation;
+    if (!parse_selected_variations(selected_variations_arg, selected, invalid_variation)) {
+        std::cerr << "unknown JesseSort variation: " << invalid_variation
+                  << " (expected comma-separated E229 short descriptors, default, or all)\n";
+        return 4;
+    }
+
     const bool resuming = argc > 4 && std::string_view(argv[4]).size() > 0;
     const std::filesystem::path run_dir = resuming ? std::filesystem::path(argv[4]) : make_run_directory();
     if (resuming && !std::filesystem::exists(run_dir)) {
@@ -556,8 +714,8 @@ int main(int argc, char** argv) {
 
     if (!resuming) write_metadata(metadata_path, base_trials, sizes, sweeping_all_sizes, warmups);
 
-    std::vector<std::vector<std::array<BenchmarkCell, 8>>> cells(
-        sizes.size(), std::vector<std::array<BenchmarkCell, 8>>(kInputs.size()));
+    std::vector<std::vector<std::array<BenchmarkCell, kAlgorithmCount>>> cells(
+        sizes.size(), std::vector<std::array<BenchmarkCell, kAlgorithmCount>>(kInputs.size()));
 
     // Reconstruct finalized cells from raw complete trials. This also rewrites the
     // summary CSV without duplicate rows after any number of resumes.
@@ -571,15 +729,15 @@ int main(int argc, char** argv) {
             if (it != loaded.end()) {
                 for (int t = 0; t < expected_trials; ++t) {
                     auto jt = it->second.find(t);
-                    if (jt != it->second.end() && jt->second.complete()) existing.push_back(jt->second.rec);
+                    if (jt != it->second.end() && jt->second.complete(selected)) existing.push_back(jt->second.rec);
                 }
             }
             if (static_cast<int>(existing.size()) == expected_trials)
-                summarize_records(existing, kInputs[ii], n, summary, cells[si][ii]);
+                summarize_records(existing, kInputs[ii], n, summary, cells[si][ii], selected);
         }
     }
     summary.flush();
-    write_markdown_report(markdown_path, base_trials, sweeping_all_sizes, sizes, cells);
+    write_markdown_report(markdown_path, base_trials, sweeping_all_sizes, sizes, cells, selected);
     write_progress(progress_path, sizes.front(), "startup", 0, trials_for_size(base_trials, sizes.front(), sweeping_all_sizes), "starting");
 
     std::cout << std::fixed << std::setprecision(4);
@@ -595,6 +753,8 @@ int main(int argc, char** argv) {
         if (i) std::cout << ',';
         std::cout << size_label(sizes[i]);
     }
+    if (selected_variations_arg != "default" && !selected_variations_arg.empty())
+        std::cout << " selected_variations=" << selected_variations_arg;
     std::cout << "\nresults_dir=" << run_dir.string();
     if (resuming) std::cout << " (resuming)";
     std::cout << "\n\n";
@@ -612,7 +772,7 @@ int main(int argc, char** argv) {
             if (loaded_it != loaded.end()) {
                 for (int trial = 0; trial < trials_this_size; ++trial) {
                     auto jt = loaded_it->second.find(trial);
-                    if (jt != loaded_it->second.end() && jt->second.complete()) ++resumed_trials;
+                    if (jt != loaded_it->second.end() && jt->second.complete(selected)) ++resumed_trials;
                 }
             }
 
@@ -623,12 +783,13 @@ int main(int argc, char** argv) {
                     std::mt19937 rng(trial_rng_seed(0xA5A5A5A5u, n, input, w));
                     std::vector<int> source(n);
                     generate(source, input, rng);
-                    for (int id = 0; id < 8; ++id) {
+                    for (std::size_t id = 0; id < kAlgorithmCount; ++id) {
+                        if (!selected[id]) continue;
                         auto values = source;
                         run_algorithm(id, values);
                         if (!std::is_sorted(values.begin(), values.end())) {
                             std::cerr << "warmup validation failure: n=" << n << ' ' << name(input)
-                                      << " algorithm=" << kAlgorithmNames[id] << '\n';
+                                      << " algorithm=" << kAlgorithmSpecs[id].short_name << '\n';
                             return 1;
                         }
                     }
@@ -638,7 +799,7 @@ int main(int argc, char** argv) {
             for (int trial = 0; trial < trials_this_size; ++trial) {
                 if (loaded_it != loaded.end()) {
                     auto jt = loaded_it->second.find(trial);
-                    if (jt != loaded_it->second.end() && jt->second.complete()) {
+                    if (jt != loaded_it->second.end() && jt->second.complete(selected)) {
                         records.push_back(jt->second.rec);
                         continue;
                     }
@@ -656,26 +817,29 @@ int main(int argc, char** argv) {
                 rec.trial = trial;
                 const auto order = execution_order(trial);
 
-                for (int pos = 0; pos < 8; ++pos) {
-                    const int id = order[static_cast<std::size_t>(pos)];
+                int selected_position = 0;
+                for (std::size_t pos = 0; pos < kAlgorithmCount; ++pos) {
+                    const int id = order[pos];
+                    if (!selected[static_cast<std::size_t>(id)]) continue;
                     auto values = source;
                     const double elapsed = timed([&]{ run_algorithm(id, values); });
                     if (values != expected) {
                         std::cerr << "validation failure: n=" << n << ' ' << name(input)
                                   << " seed=" << input_seed << " trial=" << trial
-                                  << " algorithm=" << kAlgorithmNames[static_cast<std::size_t>(id)] << '\n';
+                                  << " algorithm=" << kAlgorithmSpecs[static_cast<std::size_t>(id)].short_name << '\n';
                         return 1;
                     }
                     rec.time[static_cast<std::size_t>(id)] = elapsed;
-                    rec.order_position[static_cast<std::size_t>(id)] = pos;
+                    rec.order_position[static_cast<std::size_t>(id)] = selected_position++;
                 }
                 records.push_back(rec);
 
-                const double std_time = rec.time[7];
-                for (int id = 0; id < 8; ++id) {
-                    const double ratio = rec.time[static_cast<std::size_t>(id)] / std_time;
+                const double std_time = rec.time[kStdSortId];
+                for (std::size_t id = 0; id < kAlgorithmCount; ++id) {
+                    if (!selected[id]) continue;
+                    const double ratio = rec.time[id] / std_time;
                     raw << name(input) << ',' << n << ',' << rec.seed << ',' << rec.trial << ','
-                        << kAlgorithmNames[static_cast<std::size_t>(id)] << ','
+                        << kAlgorithmSpecs[static_cast<std::size_t>(id)].short_name << ','
                         << rec.order_position[static_cast<std::size_t>(id)] << ','
                         << rec.time[static_cast<std::size_t>(id)] << ',' << std_time << ',' << ratio << '\n';
                 }
@@ -690,11 +854,11 @@ int main(int argc, char** argv) {
                 return 3;
             }
 
-            summarize_records(records, input, n, summary, cells[size_index][input_index]);
+            summarize_records(records, input, n, summary, cells[size_index][input_index], selected);
 
             summary.flush();
             raw.flush();
-            write_markdown_report(markdown_path, base_trials, sweeping_all_sizes, sizes, cells);
+            write_markdown_report(markdown_path, base_trials, sweeping_all_sizes, sizes, cells, selected);
             write_progress(progress_path, n, name(input), trials_this_size, trials_this_size, "input_size_complete");
 
             std::cout << "Completed n=" << size_label(n) << " input=" << name(input) << '\n';
@@ -706,7 +870,7 @@ int main(int argc, char** argv) {
                    trials_for_size(base_trials, sizes.back(), sweeping_all_sizes), "complete");
     summary.flush();
     raw.flush();
-    write_markdown_report(markdown_path, base_trials, sweeping_all_sizes, sizes, cells);
+    write_markdown_report(markdown_path, base_trials, sweeping_all_sizes, sizes, cells, selected);
     std::cout << "Wrote " << markdown_path.string() << ", "
               << summary_path.string() << ", " << raw_path.string() << ", "
               << metadata_path.string() << ", " << progress_path.string() << '\n';

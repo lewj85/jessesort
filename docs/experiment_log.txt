@@ -1,0 +1,2088 @@
+JESSESORT EXPERIMENT LOG
+Last updated: 2026-08-17
+Status: canonical compact source of truth for current repository state, active roadmap,
+experiment decisions, propagation status, and decision-relevant historical evidence.
+
+LOG COMPACTION POLICY
+- This log intentionally summarizes old experiments rather than preserving every procedural detail.
+- Preserve what affects future decisions: mechanism tested, variation scope, retain/reject status,
+  meaningful speedups/regressions, crossover thresholds, and why a result mattered.
+- Remove stale next-step prose, documentation-edit narration, obsolete artifact paths, repeated
+  benchmark tables, shell/build minutiae, and old absolute timings after later algorithm changes
+  make them non-comparable.
+- Old percentage/ratio results are historical causal evidence, not current performance claims.
+- Section 1 defines CURRENT code/policy. Section 2 is the ONLY active roadmap. Section 3 is the
+  complete experiment index. Section 4 contains compact historical summaries.
+- Do not recreate long-form experiment diaries. Add concise evidence and update current sections
+  in place.
+
+===============================================================================
+1. CURRENT REPOSITORY STATE
+===============================================================================
+
+1.1 BENCHMARK AND AUDIT STANDARD
+- E077 introduced the whole-sort benchmark methodology; E100 centralizes its seed policy.
+- E226 finalized it with additional inputs; current version comes from there.
+- Canonical `make run` / `make run500` / `make bench500` profile:
+    * C++20, -O3, -march=native, -DNDEBUG
+    * n = {1k, 10k, 100k, 1m}
+    * 2 untimed warmups per workload
+    * 500 measured paired trials at 1k/10k/100k
+    * 50 measured paired trials at 1m for the all-size sweep
+    * one deterministic unique input seed per randomized trial
+- CPU REPORTING IS MANDATORY FOR EVERY TIMED TEST: copy the exact CPU model reported by `/proc/cpuinfo` / benchmark
+  metadata into the experiment-log entry alongside the timing evidence. Do this for localized harnesses as well as
+  full canonical sweeps. Hosted sessions may migrate between CPU models, so an experiment without its CPU recorded
+  is not a safe longitudinal timing reference.
+- Cross-CPU timing reference from E204: historical E189 V2 Random 100k on Intel Xeon Platinum 8573C = 1462.2505 us;
+  untouched E189 rerun on AMD EPYC 9V74 = 1551.3435 us, about 6.1% slower for V2 on that workload. This does NOT imply
+  every algorithm is slower on AMD (`std::sort` moved in the opposite direction); it demonstrates why CPU identity
+  must accompany timing claims.
+- E205 benchmark-context audit (AMD EPYC 9V74) found the existing rotating benchmark order itself is stable when
+  compared in the same session: V2/std Random drift between the E189-style 8-algorithm rotation and current 10-algorithm
+  rotation was +0.42% at 10k and -0.21% at 100k over 500 trials. A same-algorithm 10k micro-warmup did not improve this
+  and made V2 about 6.3-6.5% slower at 10k, so NO additional preconditioner is retained.
+- MANDATORY POST-CHANGE ACCEPTANCE RULE: after every algorithmic/performance code change, run the
+  full canonical benchmark above across ALL ELEVEN variations (V1-V11), even when the code change
+  directly targets only one variation. Use the benchmark's normal persisted-results resume handling
+  after shell/tool timeouts; resume the SAME run directory until the sweep is complete.
+- Every performance-change evaluation must display/preserve all eleven generated ratio tables. Narrow
+  A/B or phase-local harnesses are diagnostic only and do not replace this full-suite acceptance run.
+- PERMANENT FULL-SUITE REGRESSION AUDIT: acceptance is not complete until every canonical timing cell
+  (all 12 workloads x V1-V11 at every tested size) is compared against the immediately previous accepted
+  authoritative baseline using old median us, new median us, and new/old ratio. ANY apparent regression
+  greater than 1.0% at ANY size or input must be investigated before retention is finalized. Do not waive
+  this because a workload is noisy, very fast, or supposedly unaffected by the change: repeat the flagged
+  cell under matched canonical conditions (normally 500 trials; preserve the canonical 1m policy for the
+  full sweep, and use a targeted confirmation cohort when needed) and determine whether the regression is
+  reproducible. A retained optimization must not silently give back prior >=1% wins elsewhere. Random must
+  always receive explicit regression review even when it is below the threshold.
+- When a complete canonical resumed sweep conflicts with a smaller ad-hoc/end-to-end timing sample,
+  treat the canonical sweep as authoritative for repository-level retention decisions. Use the narrow
+  harness only to explain mechanism, not to overrule the canonical result by itself.
+- Targeted numeric-size invocations use the requested trial count directly; they do not
+  automatically apply the 1m 10:1 reduction.
+- Every algorithm and std::sort receive the exact same source vector within a trial.
+  Execution order rotates by trial and reverses every ten-trial block for the current V1-V11 + std::sort suite. Correctness
+  validation is outside timed regions.
+- Canonical seed policy for normal benchmarks and one-off A/B tests:
+    * base seed: `jessesort::bench::kCanonicalBaseSeed` (0x8A5CD789)
+    * mixer: `jessesort::bench::trial_seed()` in `benchmarks/benchmark_seed.h`
+    * do not invent a new seed population for an ordinary one-off test; explicitly label
+      intentional held-out/confirmation cohorts instead.
+- Preserve raw paired timings. Report robust statistics such as median, p25/p75, IQR,
+  MAD, ratio of medians, and median paired ratio as appropriate; do not silently trim
+  outliers.
+- For header-only/template-heavy close A/B tests, prefer a same-binary or phase-isolated
+  causal harness. E099 showed structured workloads can exhibit large first/second-sort
+  allocator/process-state effects; fork-isolated paired children are appropriate when
+  ordinary same-process alternation remains biased.
+- Baseline workload families (frozen in E180C): Random, Sorted, Reverse, Sorted+Noise(5%),
+  Sorted+Noise(10%), Random%25, Alternating, Sawtooth, MixedDirectionRuns, BlockSorted, OrganPipe,
+  and Rotated. E228 adds two permanent router-safety phase-change families without modifying any of
+  those 12 generators: MixedPhase3 = Sorted+Noise(5%) -> MixedDirectionRuns -> Random in three
+  contiguous near-equal phases; MixedPhase12 = the 12 frozen baseline families once each in baseline
+  order in 12 contiguous near-equal phases. Current acceptance therefore covers 12 frozen baseline
+  families + 2 router-safety families. Synthetic diagnostics outside these 14 may explain mechanisms
+  but may not tune production policy unless first promoted to the permanent benchmark suite.
+- PUBLIC HISTORICAL PERFORMANCE BASELINE: README keeps the faster E189 V1-V7 canonical tables,
+  now explicitly labeled Intel Xeon Platinum 8573C. E203 remains the current V1-V9 same-session AMD EPYC 9V74
+  snapshot. E204 verified V1-V7 source was unchanged; compare optimization experiments only against an immediately
+  rerun same-session baseline and always record CPU.
+
+### E203 current compact canonical baseline — 10k × 500 — AMD EPYC 9V74
+
+Cells are `median paired ratio vs std::sort (median us)`. Full four-size tables are in `benchmarks/baselines/e203_full_canonical_benchmark.md` and README.
+
+| Input | V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Random | 0.3427 (134.9) | 0.3196 (127.0) | 0.2931 (115.0) | 0.2800 (108.8) | 0.2792 (108.7) | 0.2874 (112.2) | 0.3154 (124.7) | 0.3579 (139.2) | 0.3305 (130.7) |
+| Sorted | 0.0533 (2.8) | 0.0530 (2.8) | 0.0528 (2.8) | 0.0704 (3.7) | 0.0700 (3.7) | 0.0709 (3.8) | 0.0711 (3.8) | 0.0530 (2.8) | 0.0533 (2.8) |
+| Reverse | 0.0885 (3.5) | 0.0873 (3.4) | 0.0871 (3.4) | 0.1110 (4.4) | 0.1105 (4.3) | 0.1120 (4.4) | 0.1114 (4.4) | 0.0875 (3.4) | 0.0876 (3.4) |
+| Sorted+Noise(5%) | 0.8579 (128.7) | 0.5946 (88.0) | 0.8837 (135.5) | 0.8543 (131.3) | 0.8497 (127.4) | 0.9114 (136.7) | 0.6637 (98.4) | 0.7486 (111.1) | 0.7658 (115.1) |
+| Sorted+Noise(10%) | 0.9657 (176.9) | 0.7188 (129.9) | 0.9041 (166.0) | 0.9043 (165.5) | 0.9219 (167.3) | 0.9914 (181.1) | 0.7997 (145.4) | 0.8261 (147.7) | 0.9023 (164.2) |
+| Random%25 | 0.0739 (13.8) | 0.0717 (13.4) | 0.0710 (13.2) | 0.0708 (13.2) | 0.0710 (13.2) | 0.0714 (13.2) | 0.0715 (13.3) | 0.0767 (14.4) | 0.0728 (13.6) |
+| Alternating | 0.7455 (69.3) | 0.3545 (33.4) | 0.7236 (67.1) | 0.6436 (59.5) | 0.6472 (59.8) | 0.7367 (68.2) | 0.3343 (31.2) | 0.4437 (41.2) | 0.6165 (57.7) |
+| Sawtooth | 0.7346 (126.8) | 0.4508 (77.3) | 0.7106 (122.5) | 0.9313 (159.4) | 0.7738 (133.0) | 0.6678 (115.6) | 0.4705 (80.8) | 0.4706 (80.4) | 0.5976 (102.3) |
+| MixedDirectionRuns | 0.5540 (73.7) | 0.2279 (30.5) | 0.5147 (68.4) | 0.5428 (71.5) | 0.5355 (71.5) | 0.5546 (73.5) | 0.2560 (34.2) | 0.3012 (40.3) | 0.4074 (54.3) |
+| BlockSorted | 0.5441 (69.9) | 0.2024 (25.6) | 0.5260 (67.4) | 0.5193 (64.9) | 0.5104 (64.7) | 0.5253 (68.2) | 0.2360 (29.6) | 0.2747 (35.2) | 0.3802 (49.0) |
+| OrganPipe | 0.1220 (25.6) | 0.0919 (19.3) | 0.1688 (35.6) | 0.1105 (23.4) | 0.1155 (24.2) | 0.1522 (32.2) | 0.1008 (21.2) | 0.0946 (20.1) | 0.0916 (19.2) |
+| Rotated | 0.1875 (15.7) | 0.1134 (9.1) | 0.2094 (17.3) | 0.1578 (12.7) | 0.3664 (40.5) | 0.4859 (48.7) | 0.1325 (10.8) | 0.1635 (13.3) | 0.1143 (9.0) |
+
+### E203 current compact canonical baseline — 100k × 500 — AMD EPYC 9V74
+
+Cells are `median paired ratio vs std::sort (median us)`. Full four-size tables are in `benchmarks/baselines/e203_full_canonical_benchmark.md` and README.
+
+| Input | V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Random | 0.3229 (1556.9) | 0.3232 (1560.8) | 0.3216 (1550.5) | 0.3215 (1551.8) | 0.3217 (1548.0) | 0.3227 (1552.9) | 0.3237 (1562.2) | 0.3271 (1573.4) | 0.3260 (1569.3) |
+| Sorted | 0.0419 (27.3) | 0.0420 (27.3) | 0.0420 (27.3) | 0.0551 (36.2) | 0.0551 (36.2) | 0.0551 (36.3) | 0.0552 (36.3) | 0.0419 (27.3) | 0.0420 (27.3) |
+| Reverse | 0.0711 (33.5) | 0.0709 (33.4) | 0.0709 (33.4) | 0.0897 (42.4) | 0.0896 (42.4) | 0.0896 (42.4) | 0.0898 (42.5) | 0.0710 (33.5) | 0.0709 (33.4) |
+| Sorted+Noise(5%) | 0.9088 (1586.6) | 0.6122 (1066.0) | 1.0273 (1787.1) | 0.8460 (1466.5) | 0.8326 (1441.1) | 0.8736 (1518.6) | 0.6341 (1098.8) | 0.7397 (1285.4) | 0.7584 (1312.9) |
+| Sorted+Noise(10%) | 0.9761 (2069.9) | 0.7445 (1575.0) | 1.0244 (2167.9) | 0.8965 (1895.5) | 0.8733 (1837.9) | 0.9002 (1908.2) | 0.7744 (1634.9) | 0.7917 (1655.2) | 0.8773 (1854.1) |
+| Random%25 | 0.0655 (129.9) | 0.0653 (129.0) | 0.0650 (128.7) | 0.0650 (128.6) | 0.0650 (128.6) | 0.0651 (128.6) | 0.0653 (128.9) | 0.0656 (129.9) | 0.0654 (129.4) |
+| Alternating | 0.5070 (849.1) | 0.2614 (444.3) | 0.6248 (1043.4) | 0.4177 (703.6) | 0.4331 (720.4) | 0.4810 (800.4) | 0.2533 (422.3) | 0.3158 (526.5) | 0.4198 (701.6) |
+| Sawtooth | 0.8123 (1604.0) | 0.4707 (929.5) | 0.7643 (1510.4) | 0.7265 (1437.0) | 0.7428 (1467.5) | 0.6773 (1337.3) | 0.4882 (964.7) | 0.4811 (949.6) | 0.6093 (1201.6) |
+| MixedDirectionRuns | 0.4715 (767.5) | 0.1847 (301.7) | 0.6005 (990.5) | 0.4039 (658.8) | 0.4075 (664.9) | 0.4538 (735.9) | 0.1883 (305.7) | 0.2355 (383.9) | 0.3374 (543.5) |
+| BlockSorted | 0.4511 (722.3) | 0.1599 (253.3) | 0.6143 (999.1) | 0.3904 (625.7) | 0.3974 (637.1) | 0.4424 (709.1) | 0.1684 (267.0) | 0.2148 (342.7) | 0.3106 (498.5) |
+| OrganPipe | 0.1221 (429.6) | 0.0888 (313.2) | 0.1141 (400.6) | 0.0965 (342.8) | 0.1053 (370.6) | 0.1271 (446.2) | 0.0938 (328.2) | 0.0864 (302.6) | 0.0910 (322.3) |
+| Rotated | 0.2052 (225.7) | 0.1076 (190.8) | 0.1542 (173.0) | 0.1146 (125.6) | 0.2438 (316.2) | 0.3334 (480.0) | 0.0964 (106.3) | 0.1196 (131.3) | 0.1139 (120.0) |
+
+- Structured-generator scaling (E180C): use one consistent target scale ~= n^(2/3) everywhere
+  E180B introduced sqrt(n). Sawtooth uses that target as its regular period; BlockSorted uses seeded
+  variable ascending block lengths around it before block-order shuffling; MixedDirectionRuns uses seeded
+  variable monotone run lengths around it with randomized direction/range/step. This keeps both run count
+  and run length growing with n without the overly short-run sqrt(n) regime discovered in E180B.
+- `Rotated` intentionally keeps a randomized split. E100 audited 500 canonical 100k
+  trials: mean split/discontinuity position 49.322%, median 49.954%, decile counts close
+  to uniform, and exactly 250/500 positions before versus at/after the nominal 50%
+  freeze decision point. Keep the randomized generator; control it through canonical
+  seeds rather than deterministic stratification.
+- Benchmark runs are resumable with `./benchmark <trials> <size|all> <warmups>
+  <existing_run_dir> [selected_variations]` and reconstruct summaries only from complete paired trials. E229 allows
+  `selected_variations` to be `default`, `all`, or a comma-separated list of short descriptors such as
+  `simulated,simulated-direct,noalloc-low-run`; `std::sort` remains automatically included for paired ratios.
+  Omitting the selector uses the six representative defaults; `all` explicitly runs the full maintained bank.
+- DURABLE CHUNK POLICY (E209): long experiments must be split into small resumable checkpoints rather
+  than relying on one execution environment to finish a multi-hour sweep. Preferred sequence is compile/smoke,
+  localized 10k, localized 100k, retain/reject, then full acceptance one size (or small pattern group) at a time.
+  Flush every completed trial immediately; after each chunk, regenerate/save its summary and snapshot any retained
+  source/documentation state before beginning the next chunk. Environment/tool timeout must cost at most the current
+  incomplete trial/cell, never the whole experiment.
+- Validate workload generators rather than trusting labels. Test non-integer types and
+  custom comparators separately when genericity/correctness/performance conclusions
+  depend on value representation.
+- Do not assume an optimization transfers between variations; propagation gets its own
+  causal evidence unless the change is purely mechanical/documentary.
+
+E229. LAYER-TAGGED VARIATION MIGRATION [COMPLETE]
+- 229A COMPLETE: migration plan documented in `docs/E229_variation_tag_migration.md`.
+- 229B COMPLETE: pre-E225 V1-V11 identities frozen/documented from the audited E224 checkpoint; E225/E227 direct-merge behavior is explicitly a divergent descendant, not a silent replacement.
+- 229C COMPLETE: layer-tag grammar and authoritative names for all 20 maintained variations finalized in `docs/E229_variation_tag_migration.md`.
+- 229D COMPLETE: 20 variation header/source filenames created under the finalized layer tags; 11 legacy headers are byte-identical to audited E224 sources and 9 direct-merge headers are byte-identical to E228 sources. Benchmark wiring intentionally remains pre-E229 until 229F.
+- 229E COMPLETE: six default benchmark representatives selected (physical, simulated, basic frozen/single-overflow, indexed genericity, V11-style noalloc low-run merge, and simulated direct-merge champion); all other maintained variations remain selectable. No code changed in 229E.
+- 229F COMPLETE: benchmark refactored to the layer-tagged 20-variation bank with a short-descriptor->header map; default/default-selector runs six representatives, `all` runs all 20, and comma-separated descriptors remain supported. Legacy/direct namespace/include plumbing was made mechanically unique so both branches can coexist; default and all-20 correctness smokes pass.
+- 229G COMPLETE: one-time all-variation canonical migration baseline completed with no correctness failures: 20 Jessesort variations + std::sort, 14 inputs, 500 trials at 1k/10k/100k and 50 at 1m. CPU: Intel Xeon Platinum 8573C; GCC 14.2.0. Full tables: `benchmarks/baselines/e229/e229_all_variations_combined.md`.
+- 229H COMPLETE: top-level maintained-variation documentation and benchmark CLI guidance migrated to layer tags; historical experiment entries intentionally retain V-number terminology. README receives the compact six-default 100k E229 baseline.
+- 229A-229E were staged documentation/provenance decisions; 229F was the mechanical identity/benchmark refactor; 229G validated all maintained implementations; 229H finalized documentation.
+
+E230. IPNSORT COMPARISON KIT — E229 LAYER-TAG MIGRATION [COMPLETE]
+- Updated the existing `src/ipnsort_vs_jessesort` kit in place; it was not reconstructed or replaced.
+- Preserved the established E189 12-input generator topology, seed schedule, u64 order-preserving encoding, warmups, paired same-source trials, validation oracle, and timing boundaries.
+- Jessesort comparison set is now: `physical`, `simulated`, `simulated-direct`, `indexed`, `noalloc`, and `noalloc-low-run`. This includes the preserved physical/simulated Patience controls, the current fastest allocating direct-merge family, the move-only-capable index-tail architecture, and both allocation-free architectures.
+- The seven-algorithm execution order (ipnsort + six Jessesort targets) retains the existing rotate-and-reverse balancing principle. Summary/raw labels now use E229 short descriptors rather than legacy V-numbers.
+- The C++ bridge includes the authoritative E229 layer-tagged headers/namespaces and compile-checks successfully with GCC C++20 -O3 -march=native -DNDEBUG against this repository tree.
+- The kit now compiles Jessesort from the enclosing repository instead of cloning a second Jessesort checkout, preventing accidental comparison against stale V-number headers; `sort-research-rs/ipnsort` remains the external dependency managed by `setup.sh`.
+- Rust/cargo are not installed in the current execution environment, so the complete cross-language benchmark was not run here. The existing Rust driver was statically audited for six-symbol dispatch, seven-position execution order, validation, and table-label consistency.
+- Pre-migration kit files are preserved under `src/ipnsort_vs_jessesort/reference/e229_pre_tag_update/`.
+
+1.2 CURRENT MAINTAINED VARIATIONS — E229 LAYER TAGS
+
+AUTHORITATIVE NAMING
+- Grammar: `jessesort_<decomposition>_<router>_<reconstruction-and-merge>[_<other-policy>...]`.
+- Underscores separate major layers; dashes combine tags inside a layer.
+- Full definitions/provenance: `docs/E229_variation_tag_migration.md`.
+- Historical E001-E228 records keep V-number names; do not rewrite them retroactively.
+
+DEFAULT BENCHMARK DESCRIPTORS (six Jessesort + std::sort)
+- `physical` -> `jessesort_physical_probe-routed_adjacent-adaptive-buffered` (pre-E225 V1 control)
+- `simulated` -> `jessesort_simulated_probe-routed_adjacent-adaptive-buffered` (pre-E225 V2 control)
+- `frozen-single` -> `jessesort_simulated-frozen_probe-routed_adjacent-powersort-adaptive-buffered_single-overflow` (pre-E225 V4 control)
+- `indexed` -> `jessesort_indexed_probe-routed_adjacent-adaptive-buffered_move-only` (pre-E225 V9 control)
+- `noalloc-low-run` -> `jessesort_noalloc-low-run-merge_overlap-routed_inplace-adaptive_run-reclaim64` (pre-E225/E218 V11 allocation-free control)
+- `simulated-direct` -> `jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered` (E225 direct-merge champion)
+
+ALL OTHER MAINTAINED DESCRIPTORS
+- `simulated-inplace`, `frozen-deferred`, `frozen-live`, `avx2`, `linked`, `noalloc`
+- `physical-direct`, `simulated-inplace-direct`, `frozen-single-direct`, `frozen-deferred-direct`, `frozen-live-direct`, `avx2-direct`, `linked-direct`, `indexed-direct`
+
+E229 BASELINE
+- All 20 maintained Jessesort variations + std::sort passed the 14-input canonical/router-safety sweep at 500 trials for 1k/10k/100k and 50 trials for 1m.
+- CPU: Intel Xeon Platinum 8573C; compiler GCC 14.2.0.
+- Full tables: `benchmarks/baselines/e229/e229_all_variations_combined.md`.
+- Compact six-default 100k table is in README and `benchmarks/baselines/e229/e229_default6_100k_table.md`.
+
+1.2A PRE-E225 LEGACY V1-V11 REFERENCE (HISTORICAL)
+
+CANONICAL IDENTITY QUICK REFERENCE
+- V1-V3 are NON-FREEZING designs. V4-V6 are the EARLY-FREEZE/OVERFLOW designs.
+  V7 is a V2-derived SIMD/capped-probe research path and is not part of the freeze family.
+  V8 and V9 are maintained research families for linked-blueprint locality and index-tail genericity.
+  V10 and V11 are the allocation-free branch: V10 is the narrow bounded/fallback baseline;
+  V11 adds a shared physical tail pool and selective low-run general in-place merging.
+
+  V1  Actual physical piles                  no freeze      no overflow
+  V2  Simulated blueprint                    no freeze      no overflow
+  V3  V2-style simulation + in-place flatten no freeze      no overflow
+  V4  Early freeze + single deferred run     freeze family  one large overflow run
+  V5  Early freeze + deferred bands          freeze family  32-element deferred bands
+  V6  Early freeze + adaptive live overflow  freeze family  fixed32 / natural asc / bidir natural
+  V7  V2-derived AVX2 capped-probe path      no general freeze; temporary probe spill only
+  V8  Linked-blueprint locality family       no freeze      linked element/span reconstruction
+  V9  Index-tail genericity family           no freeze      move-only-capable generic Patience path
+  V10 Allocation-free bounded family         fixed caps      no-heap Jesse front end + in-place fallback
+  V11 Allocation-free shared-tail merge       fixed caps      shared 127-tail pool + gated live run-stack reclamation
+
+- E050 is the canonical numbering reset. Detailed historical records have been translated
+  to these implementation identities where practical; old artifact FILENAMES may still
+  contain pre-E050 labels and must be interpreted by namespace/implementation identity.
+
+CANONICAL DIFFERENCE BREAKDOWN — V1 THROUGH V11
+- V1: literal vector-backed physical Patience piles. No freezing. This is the physical-pile representation baseline.
+- V2: simulated Patience using value-tail metadata + packed 32-bit blueprint tags, followed by streaming auxiliary reconstruction. No freezing. This is the primary speed-oriented simulated baseline.
+- V3: controlled V2 reconstruction/memory variation. It intentionally shares V2 insertion/topology but resolves the blueprint by in-place permutation-cycle flattening. No freezing; do not route away the in-place flatten merely because E157 shows it is often slower.
+- V4: early-freeze family with one large deferred overflow run. Ordinary pile creation freezes around the retained 50% decision policy, then overflow is gathered contiguously and sorted as one run.
+- V5: early-freeze family with deferred 32-element overflow bands. Bands remain unsorted during insertion and are sorted during reconstruction; exact full bands use the retained specialized 32-element network.
+- V6: early-freeze family with live/adaptive overflow handling. Weak structure uses live 32-element bands; clearly ascending low-pile structure uses ascending natural runs; other strong directional cases may use bidirectional natural runs.
+- V7: V2-derived SIMD research path. It caps the initial probe to a small pile count (default eight piles/game over the first 128 values), uses temporary probe spill, and specializes exact-eight int32 tail lookup with AVX2. It is not a general freezing variation.
+- V8: linked-blueprint locality family. Whenever Patience reconstruction is reached, reconstruction remains linked: E201 selects compact span links for low-fragmentation blueprints or in-place element links otherwise, with first-merge fusion. Specialized direct backends/monotone exits may bypass Patience normally, but V8 does not use ordinary V2 tag reconstruction merely to hide linked costs.
+- V9: index-tail/genericity family. Pile-tail metadata stores source indices and compares through the untouched source instead of storing copies of T. This enables the move-only/non-copyable path. Copyable V9 may reuse V2's optimized reconstruction/merge after blueprint creation; the defining index-tail mechanism must remain intact.
+- V10: allocation-free bounded baseline. Fixed 63-asc + 64-desc source-index tails, <=64 fixed run descriptors, no O(n) blueprint/T scratch, and no heap allocation inside sort. Only cheap bounded run geometries are handled by Jesse reconstruction; unsupported shapes fall back to allocation-free partition/heapsort. E210 reduces peak explicit fixed metadata to 2,560 B plus scalar locals/call stack on the current 64-bit build.
+- V11: allocation-free shared-tail + selective in-place merging. Uses one physical 127-index tail pool but **retains the current logical 63/64 split**; E213's adaptive split is not retained. E216 added geometry-gated general in-place merging for suitable <=64-run layouts. E217 extends that path past 64 natural runs by live bounded run-stack reclamation: when the fixed 64 descriptors fill, the smallest adjacent completed pair is normalized/merged in place to reclaim one descriptor. A first-65 preflight requires average run length >=1024 and rejects repeated-overlap/Sawtooth-like geometry, preserving fallback for short/high-entropy or movement-heavy cases.
+
+IDENTITY GUARDRAIL
+- Reminder that these all changed from V# names to names with descriptive tags starting with E229.
+- These numbers name architectural experiments, not merely whichever policy is fastest today. Preserve each variation's defining mechanism when benchmarking it: V3 keeps in-place flattening, V8 stays linked after Patience reconstruction, V9 keeps index tails, V10 remains the narrow bounded/fallback no-heap control, and V11 remains the shared-tail + selective low-run-merge extension. A faster mechanism that removes one of those identities should be tested as propagation or a new variation rather than silently replacing it.
+
+V1. ACTUAL PHYSICAL PILES
+- Header: `include/jessesort/v1_actual_piles.h`
+- Namespace: `jessesort::actual_piles`
+- Representation: vector-backed physical patience piles with separate tail mirrors.
+- Early routing: equality preserves the current game. A >=32-element monotone prefix is
+  materialized directly. Otherwise the true first-64 probe routes Random-like inputs to
+  direct bit-walk tail search, high-locality inputs to exact previous-pile hint + binary
+  fallback, and ambiguous inputs to ordinary binary search (E046/E047/E056).
+- E099 natural-run route: after an initial monotone prefix covering >=12.5% of n, later
+  strict runs of length >=8 whose endpoints resolve to one physical pile are appended in
+  bulk. This is retained and especially effective for OrganPipe/Rotated.
+- E109 convergence baseline: V1 now uses the same non-freezing Random merge predicate as V2/V3:
+  the first-64 `earlyRandomLike` signal + common 3.5/4.25/5.0 pile-density thresholds + the
+  <=96-byte trivially-copyable type gate. The older V1-only minority-game balance predicate is
+  no longer part of the common starting policy.
+- Merge kernel: E083 raw pointers + E085 bidirectional low/high-end branchless merge are retained.
+- E111 removed selective PowerSort from the common V1/V2/V3 policy after cross-variation revalidation.
+- E115 consolidates V1/V2/V3 onto one shared ends-based adjacent-pair post-flatten merge driver with
+  adaptive ordered-boundary probing and the retained E045/E085 routing/kernel choices.
+
+V2. SIMULATED BLUEPRINT
+- Header: `include/jessesort/v2_simulated.h`
+- Namespace: `jessesort::simulated`
+- Representation: sentinel-free value tails plus packed 32-bit blueprint tags.
+- Early insertion routing: >=32 monotone-prefix recognition; first-64 structure signal;
+  one-time no-hint continuation for sustained Random-like structure; split exact-hint
+  path for >=75% hint locality; ordinary search otherwise (E043/E065).
+- E098 natural-run route: if the initial strict monotone prefix covers >=12.5% of n,
+  later strict runs of length >=8 are endpoint-tested and blueprint-tagged in bulk when
+  both endpoints map to the same pile. Exact blueprint/count/tail equality was required
+  in A/B validation.
+- Reconstruction: descending-game runs first, ascending-game runs second. E081 normalizes
+  packed local tags to global run IDs before scatter. E086 keeps an explicit `step[]`
+  table below 500k and derives direction from normalized run ID at >=500k, where the
+  metadata-stream reduction wins.
+- E109 convergence baseline replaces V2's old pre-E085 E053 density coefficients with the shared
+  non-freezing 3.5/4.25/5.0 thresholds. V2 keeps its `earlyRandomLike` prerequisite, E045 gallop
+  selector, and adaptive ordered-boundary probing. E101 previously removed the obsolete E063 per-pair
+  imbalance fallback. E111 removed selective PowerSort; E115 moves V2 onto the same shared ends-based
+  adjacent-pair post-flatten merge driver used by V1/V3.
+- High-entropy merge: E082 raw pointers + E085 bidirectional branchless merging retained.
+  E092 widened the merge-only trivially-copyable type cutoff through 96 bytes; 128 bytes
+  crossed to neutral/slower. Do not infer the same cutoff for insertion copies.
+- E225 adds a V2-champion-only bounded natural-run direct route before Patience insertion for n>=10k.
+  It uses only comparator-defined structure: first 64 values nondecreasing, at least one inversion in
+  a 9-point coarse sample, and a mutation-free preflight of <=128 natural runs. Accepted inputs normalize
+  descending runs and merge the natural runs directly with V2's existing O(n) auxiliary merge storage;
+  >128-run inputs fall back to the unchanged Patience path before mutation. This is a generic structural
+  route, not a value-domain specialization. E227 later propagates this same public-wrapper route to the other
+  allocating variations V1 and V3-V9; V10/V11 intentionally remain separate because E225 uses O(n) scratch.
+
+V3. SIMULATED BLUEPRINT + IN-PLACE PERMUTATION FLATTENING (NO FREEZE)
+- Header: `include/jessesort/v3_inplace_simulated.h`
+- Namespace: `jessesort::simulated_inplace_flatten`
+- This is a NON-FREEZING controlled variation of V2. E156 audited/reconciled the pair:
+  V3 now shares V2's pre-Patience router, simulated insertion engine, random-merge selector,
+  and post-flatten merge driver. Its intentional distinguishing mechanism is in-place
+  permutation flattening instead of V2's streaming reconstruction. No large-N flatten cutoff
+  is retained; poor V3 flatten scaling is allowed to remain visible as experimental evidence.
+- This is a NON-FREEZING variation. Insertion shares V2 semantics, including E065 routing
+  and retained E099 natural-run batching. Flattening converts blueprint tags to destinations
+  and permutes the array in place with cycle swaps.
+- E109 convergence baseline aligns V3 with V1/V2 on descending-game-first materialization and
+  common 3.5/4.25/5.0 density thresholds. V3 still differs architecturally by performing the
+  blueprint flattening as an in-place cycle permutation. E111 removes selective PowerSort; E115
+  moves V3 onto the same shared ends-based adjacent-pair post-flatten merge driver as V1/V2 while
+  retaining adaptive ordered-boundary probing, E045 gallop policy, E085 kernel, and <=96-byte type gate.
+- E104 revisited E045 under the current E085/E093/E102 cost model with high trial counts.
+  V3 now retains the same final-layout 5/7 gallop-trigger selector used by V2: trigger 5
+  only for non-branchless, non-PowerSort layouts with 12-128 runs and largest run <=1.25x
+  the mean; trigger 7 remains the default.
+- Retained as an experimental reconstruction/memory comparison, not the default V2 path.
+
+
+V1/V2/V3 NON-FREEZING CONSOLIDATION — RESOLVED THROUGH E115
+- V1, V2, and V3 represent the same intended non-freezing patience-pile decomposition; their primary
+  architectural differences are physical versus simulated insertion storage and flattening mechanics.
+- E109-E114 systematically re-tested historical policy drift across all three variations rather than
+  preserving variation-specific assumptions. The retained common policy uses descending-first
+  materialization, `earlyRandomLike`, common 3.5/4.25/5.0 density thresholds, adaptive ordered-boundary
+  probing, and the retained E045/E085 merge routing/kernels.
+- E111 removed selective PowerSort from V1/V2/V3.
+- E115 consolidated all three onto the same shared ends-based adjacent-pair post-flatten merge driver.
+  After flattening, do not assume V1/V2/V3 need separate merge-driver logic unless a genuinely new
+  architecture-specific mechanism provides canonical full-suite evidence.
+- The E109-E115 reconciliation series is CLOSED. Do not reopen insertion-shape parity, old PowerSort
+  availability, historical boundary-probing/classifier/density exceptions, merge-driver parity, or tag
+  numbering merely because older historical records mention them. A new attempt requires a materially
+  new mechanism plus the mandatory full V1-V9 canonical acceptance benchmark.
+
+V4. EARLY FREEZE + ONE LARGE DEFERRED OVERFLOW RUN
+- Header: `include/jessesort/v4_single_overflow.h`
+- Namespace: `jessesort::simulated_early_freeze_single_overflow`
+- E049 one-time first-64 hinted/no-hint routing remains outside the long insertion loop.
+- Freeze policy: 50% is the decision point. V4 may extend ordinary pile creation to a
+  strict next power-of-two cap only under its conservative selected policy; therefore
+  50% is not always the exact physical freeze boundary.
+- E099 natural-run batching is retained in a freeze-aware form that preserves the freeze
+  transition and keeps the power-of-two extension interval scalar.
+- Overflow: one contiguous deferred region sorted once with std::sort.
+- Merge routing retains the post-insertion Random signal, E085 bidirectional branchless
+  kernel, and E093 <=96-byte trivially-copyable merge cutoff. Selected PowerSort-style
+  scheduling remains limited to its retained run-structure conditions.
+
+V5. EARLY FREEZE + DEFERRED-SORT 32-ELEMENT OVERFLOW BANDS
+- Header: `include/jessesort/v5_deferred_bands.h`
+- Namespace: `jessesort::simulated_early_freeze`
+- E049 one-time first-64 hinted/no-hint routing; 50% nominal freeze decision point with
+  the retained broad selected power-of-two extension policy.
+- E099 natural-run batching is retained with the STRONGER V5/V6 gate: after the >=12.5%
+  initial monotone prefix, the first continuation run must itself be >=8 before the route
+  is enabled. This preserves OrganPipe gains while avoiding the broad-gate Rotated loss.
+- Overflow: deferred 32-element bands. E090 uses a fixed specialized network for exact
+  full 32-element bands; partial/conservative cases retain std::sort. The network was
+  ~28.4% faster locally over 4,096,000 int-band sorts, with diluted whole-sort impact.
+- Merge routing retains E085 bidirectional branchless merging and E093 <=96-byte
+  trivially-copyable cutoff. V5 keeps its variation-specific dominant-endpoint merge
+  deferral; global PowerSort and simple adaptive band shaping were rejected.
+
+V6. EARLY FREEZE + LIVE-SORTED 32-ELEMENT OVERFLOW BANDS
+- Header: `include/jessesort/v6_live_bands.h`
+- Namespace: `jessesort::simulated_early_freeze_live`
+- Shares V5's early-freeze base structure and nominal 50%/selected power-of-two extension.
+- Uses the same stricter E099 first-continuation-run >=8 natural-run gate as V5.
+- E179 adds the retained STRICT post-insertion overflow router. Weak/fragmented structure keeps
+  live-sorted 32-element bands; clearly ascending low-pile structure uses E175 ascending natural
+  runs; clearly descending low-pile structure and high-pile long monotone structure use E176
+  bidirectional natural runs with 32 as a minimum weak-structure granularity, not a cap.
+- The router combines overflow fraction, final frozen pile density, and the first 32 overflow value
+  transitions collected inline. Sampling is suppressed when freeze-time pile geometry already makes
+  both natural tiers impossible (piles>64 and density>0.006).
+- Merge routing retains E085 bidirectional branchless merging and E093 <=96-byte cutoff.
+  Random-like inputs use branchless adjacent merging; non-random inputs preserve the retained
+  TimSort-style/adjacent selector.
+
+V7. AVX2 EXPERIMENTAL SIMULATED VARIATION (V2-DERIVED; NO GENERAL FREEZE)
+- Header: `include/jessesort/v7_avx2.h`
+- Namespace: `jessesort::simulated_simd_v7`
+- V2-derived pipeline with a SIMD-oriented capped-probe front end. Default E076 behavior
+  caps each game at eight piles during the first 128 values; excess would-be piles spill
+  to a temporary probe-overflow run that is sorted and married into an existing pile.
+- Exact-eight int32 pile-tail lookup uses one AVX2 compare. E105 adds a narrow repeated
+  hint-centered one-register AVX2 continuation for 5k-20k, low-pile layouts (<=12 ordinary
+  post-probe piles); broader/global and large-n windowing were rejected. Longer one-shot
+  probes and sequential multi-register AVX2 scans remain closed.
+- E099 natural-run batching is retained without changing capped-probe behavior on Random.
+- E095 fixed the old public-path discrepancy: normalized reconstruction is now the default
+  capped-probe reconstruction. E096 then removed its separate `step[]` stream entirely;
+  reconstruction improved modestly while whole-sort effect was near neutral.
+- E189 restores E162's retained raw non-overflow bulk-span reconstruction to the public V7 call after
+  a later call-site omission left the flag at its default false. The original 75% adjacency gate is
+  tightened to 95% for the E180C 12-row suite so Sorted+Noise(10%) remains neutral while long-run
+  structured rows keep the large raw-span reconstruction win.
+- E089 retained bidirectional branchless merging and E093 retained the <=96-byte
+  trivially-copyable merge cutoff.
+- V7+ numbering remains reserved for SIMD-oriented experiments.
+
+1.2A CANONICAL VARIATION NUMBERING (E050)
+- V1 Actual Piles
+- V2 Simulated Blueprint
+- V3 In-Place Simulated Flattening
+- V4 Single Overflow
+- V5 Deferred Bands
+- V6 Live Bands
+- V7 AVX2 Experimental
+Use "variation" rather than "variant" in current documentation.
+
+E109 COMMON NON-FREEZING BASELINE — CURRENT POLICY
+- E109 intentionally stopped treating historical V1/V2/V3 policy differences as prerequisites
+  for further research. Instead it cherry-picked the strongest/recently retained shared policies
+  into one common starting point, while preserving the core representation difference of each
+  variation.
+- Common V1/V2/V3 policies after E109:
+    * first-64 `earlyRandomLike` prerequisite for Random branchless merge routing;
+    * size-aware density thresholds 3.5 / 4.25 / 5.0 (<=20k / mid / >=500k);
+    * descending-game runs materialized before ascending-game runs;
+    * E045 final-layout 5/7 gallop selector;
+    * E085 bidirectional branchless merge and E093 <=96-byte type gate;
+    * adaptive ordered-boundary probing;
+    * selective PowerSort-style scheduling when `shouldUsePowerSortMerge()` qualifies.
+- V1 remains physical-pile insertion with its own merge driver; V2 remains normalized auxiliary
+  reconstruction; V3 remains in-place cycle flattening. E109 copies policies, not entire pipelines.
+- Simulated tag encoding remains ascending=0 / descending=1 for now. E109 aligns materialized
+  order only; renumbering tags would affect the wider simulated family and is not needed for the
+  common V1/V2/V3 baseline.
+- E109 is deliberately a CONVERGENCE baseline rather than a claim that every transferred policy
+  is locally optimal in every variation. Before/after regressions are recorded below and are now
+  explicit follow-up targets.
+
+1.3 CURRENT SHARED ENGINEERING DECISIONS
+- Numeric sentinels are removed from maintained implementations.
+- V1-V8 (under pre-E229 naming) require copyable + movable values in their current implementations because some
+  metadata paths store values by copy. V9 uses index tails and a non-copyable reconstruction path, so V9 supports
+  move-only, non-default-constructible values while still requiring move construction/assignment. V10 and V11 also
+  support movable non-copyable values and, by identity, perform no heap allocation inside the sort.
+- Comparators must provide a strict weak ordering. Default floating-point `<` is not supported for NaN-containing
+  inputs; use an explicit NaN-aware strict-weak-order comparator, such as a total-order/NaN-last comparator.
+- Equality preserves the current game in maintained pile-routing logic.
+- Branchless high-entropy two-run merging is bidirectional across V1-V7 (E085-E089).
+- The merge-only fast-path size gate is <=96 bytes for trivially copyable values across
+  V1-V7 (E092/E093); this is not a universal element-size policy.
+- Natural-run batching is retained across V1-V7 (E098/E099), with stricter activation in
+  V5/V6 as described above.
+- V4-V6 use 50% as the nominal freeze decision point, with retained power-of-two
+  extension policies able to move the actual freeze boundary later.
+- Conventional even-sample median retained.
+- Random%100 samples uniformly from [0,99]. Sorted+Noise uses 5% independent random
+  replacements. Misleading jitter workload removed. BlockSorted handles a partial final
+  block safely.
+
+1.4 CURRENT BENCHMARK ARTIFACT POLICY
+- `benchmarks/benchmark.cpp` is the canonical whole-sort benchmark.
+- Each invocation writes an isolated, gitignored `results/run_*` directory containing
+  `benchmark_results.md`, `benchmark_results.csv`, `benchmark_trials.csv`,
+  `benchmark_metadata.txt`, and `benchmark_progress.txt`.
+- Interrupted runs may be resumed explicitly using the existing run directory; completed
+  paired trials are reconstructed from raw CSV and are not rerun.
+- Performance decisions use same-run std::sort measurements and paired raw observations.
+  Historical CSV collections were removed from the compact repo; decision-relevant
+  conclusions remain in this log.
+
+===============================================================================
+2. ACTIVE TODO LIST — CURRENT ONLY
+===============================================================================
+
+MANDATORY PROPAGATION RULE
+- A full benchmark is NOT a propagation audit. Before closing a retained performance experiment,
+  identify every variation that owns/consumes the affected mechanism and record one of:
+  PROPAGATED+TESTED, TESTED+REJECTED, NOT APPLICABLE (architectural reason), or
+  INTENTIONALLY DIFFERENT (reason).
+- Controlled variations intended to differ in only one phase should share surrounding helpers where
+  practical. Deliberate divergence is allowed; unexplained divergence is not.
+
+TEMPORARY TOP PRIORITY OVERRIDE SECTION STARTS HERE
+
+V2 HIGH-IMPACT OPTIMIZATION — ACTIVE
+   - V11 work is intentionally paused. Current focus is speeding the production V2 baseline with architectural
+     changes that can move whole phases or major input domains; do not spend overnight runs on threshold/micro-kernel
+     tweaks unless they are required to integrate a larger win.
+   - E224 is INVALID as a Jessesort optimization direction. Its counting backend exploited a synthetic benchmark
+     property: canonical Sorted+Noise5/10 starts from iota(0..n-1) and replaces noisy positions with values also drawn
+     from [0,n-1], so the entire key universe remains dense and O(n). Preserve E224 only as an audit artifact.
+   - METHODOLOGY GUARDRAIL: benchmark optimizations must preserve generic comparison-sort semantics unless a
+     type/domain-specialized backend is explicitly requested. Never exploit canonical-generator key ranges, seed
+     structure, known cardinality, or other synthetic construction details as routing information.
+   - E225 RETAINED: V2 now bypasses the Patience/blueprint/reconstruction pipeline when generic comparator-defined
+     structure proves the input is a large (n>=10k), ascending-prefix, <=128-natural-run case. The preflight is
+     mutation-free and rejects high-run-count suffixes before changing the array. Paired causal ratios at 100k were
+     ~0.721 Sawtooth, ~0.506 MixedDirectionRuns, ~0.340 BlockSorted, ~0.674 OrganPipe, and ~0.483 Rotated; 1m
+     ratios were ~0.739/~0.938/~0.412/~0.663/~0.513 respectively. Generic custom-comparator and adversarial-prefix
+     safety checks pass, and the final V1-V11 canonical acceptance completed with no correctness failures.
+   - E227 RETAINED: propagate E225's exact bounded natural-run pre-router to allocating V1 and V3-V9. V10/V11
+     remain untouched because the O(n) buffered natural-run merge violates their allocation-free identity. The
+     100k primary A/B shows very large wins across the propagated variations on BlockSorted, MixedDirectionRuns,
+     Sawtooth, OrganPipe, and Rotated; full V1-V11 acceptance passed with no correctness failures.
+   - E228 ROUTER-SAFETY INPUTS + REPEATED-PROBE ROADMAP: the benchmark now appends two permanent phase-change
+     inputs while keeping all 12 E180C baseline generators byte-for-byte unchanged. MixedPhase3 is deliberately
+     adversarial to prefix-only inference: Sorted+Noise(5%) first, then MixedDirectionRuns, then Random.
+     MixedPhase12 concatenates one phase from every baseline family in baseline order. At 100k x500, current V2
+     is ~0.778 paired ratio vs std::sort on MixedPhase3 and ~0.612 on MixedPhase12. E225's full <=128-run
+     preflight rejects both 500/500 at 100k, so E225 itself is not fooled by the initial Sorted+Noise phase.
+     NEXT major router experiment: repeated bounded dual-Patience probes over the input so no routing assumption
+     survives more than Y elements without revalidation. Sweep probe widths {64,128,256} and maximum unchecked
+     spans roughly {2k,4k,8k,16k}; track asc/desc pile counts, direction dominance, alternation/bounce, equality,
+     and confidence across probes. Prefer dual Patience as the conservative/default state when probes disagree.
+     The two E228 mixed-phase inputs are primary router-safety tests for this work; do not optimize specifically
+     for their known phase boundaries or order.
+   - Other high-impact V2 work remains: profile remaining non-routed champion domains (especially Random and
+     Sorted+Noise5/10) by phase before choosing another architecture. Revisit insertion/search ILP only with a
+     materially new mechanism beyond rejected E140/E141; otherwise target a whole reconstruction/merge pass or
+     partition-backend crossover. Do not spend the hourly loop on threshold tuning of E225.
+
+TEMPORARY TOP PRIORITY OVERRIDE SECTION ENDS HERE
+
+OPEN ITEMS, IN PRIORITY ORDER
+
+1. V8 LINKED-BLUEPRINT FAMILY — LINKED-ONLY HYBRID BASELINE RETAINED (E201)
+   - V8 remains intentionally distinct from V2: whenever production flow reaches Patience reconstruction,
+     V8 now stays on a linked representation. Specialized direct backends and monotone early exits still
+     bypass blueprint work normally, but there is no ordinary V2/tag-reconstruction fallback inside V8.
+   - E193 established the forced-linked reference and showed the original post-built per-element links were
+     tolerable on Noise10/Alternating/Sawtooth but very expensive on MixedDirectionRuns, BlockSorted,
+     OrganPipe, and Rotated. E194/E195 proved routing could hide those costs, but linked coverage became too
+     low for the intended identity of V8.
+   - E196-E199 locality work isolated the main causes. Native-link direction tweaks and simple contiguous-copy
+     traversal did not materially fix the forced-linked path. Fusing linked reconstruction with merge level 1
+     helped Sawtooth/OrganPipe but could not by itself remove the extra metadata cost. E198's key win was
+     converting the existing 32-bit tag blueprint in place into next-links instead of allocating a second
+     next[n] array; E199 combined that with first-merge fusion.
+   - E200 introduced compact span links: consecutive source elements with the same pile tag become one linked
+     span node, and adjacent span-linked runs are fused through the first merge. This nearly eliminated the
+     low-run penalties (100k: Sawtooth ~1.02x V2, Mixed ~1.31x, Block ~1.39x, OrganPipe ~1.03x, Rotated
+     ~1.43x) but fragmented Alternating degenerated badly because it creates nearly one span per element.
+   - E201 retained a linked-only locality router using the first 64 blueprint tags: <=4 tag spans selects
+     compact span links + first-merge fusion; otherwise use E199 in-place element links + first-merge fusion.
+     This is representation routing within V8, not fallback to V2. Localized paired 10k/100k x500 ratios:
+     Noise5 1.13/1.15, Noise10 1.02/1.07, Alternating 1.24/1.19, Sawtooth 1.04/1.01, Mixed 1.26/1.31,
+     Block 1.34/1.39, OrganPipe 1.00/1.00, Rotated 1.45/1.43. Linked use remains 100% whenever those
+     structured cases reach Patience reconstruction.
+   - Full canonical V1-V8 + std::sort acceptance completed with resume at 500 trials for 1k/10k/100k and
+     50 trials at 1m, no correctness failures. The full-suite ratios broadly confirm the localized result;
+     100k V8/V2 is ~1.08 Noise10, ~1.16 Alternating, ~0.93 Sawtooth, ~1.31 Mixed, ~1.24 Block, ~0.96
+     OrganPipe, ~1.20 Rotated.
+   - NEXT: keep E201 as the V8 baseline. Further V8 work should target Mixed/Block and the remaining 10k
+     Rotated overhead without reducing linked coverage; promising directions are span-node construction cost,
+     span-level ordered/reverse-disjoint fusion, and avoiding per-node heap growth on fragmented layouts. Do
+     not reintroduce broad V2/tag fallback merely to improve ratios.
+
+2. FREEZE / CROSS-PHASE ENGINEERING (V4-V6) — DEPRIORITIZED
+   - E174-E184 exhausted the obvious overflow-kernel/router work. Reopen only for a materially new
+     mechanism, not another threshold sweep of already-tested policies.
+
+3. NON-POD / EXPENSIVE-COMPARATOR / COPYABILITY STUDY — E208 TYPE ROUTER MAP COMPLETE
+   - E206-E208 compare V2 value-tail insertion against V9 index-tail insertion on AMD EPYC 9V74
+     (GCC 14.2.0-19), using canonical 10k/100k x500 workloads, two untimed warmups once per workload,
+     persistent raw trials, correctness validation, and balanced alternating V2-first/V9-first execution order.
+   - E208 REDUCTION CORRECTION: the large-record sweep exposed strong first/second-sort cache/context effects.
+     Pooled per-trial V9/V2 medians can therefore be misleading even with balanced alternating order. Retained
+     E206-E208 cell ratios are now order-neutral: compute the median V9/V2 separately for the 250 V2-first
+     trials and 250 V9-first trials, then combine those two medians by geometric mean. Raw data are unchanged;
+     E206/E207 summary artifacts were regenerated with this estimator.
+   - Corrected E206 aggregate V9/V2 medians across seven patterns at 10k / 100k: Rec8 1.423/1.359,
+     Rec32 1.185/1.200, Rec128 1.089/1.065, OwningString80 0.942/0.975, expensive-comparator Rec8
+     1.033/1.045. V9-only MoveOnly72 still completed all seven shapes at both sizes with no ownership or
+     correctness failures; V2 is not applicable to that non-copyable type.
+   - Corrected E207 aggregates: Rec16 1.197/1.318, Rec24 1.139/1.168, Rec48 1.106/1.165,
+     Rec64 1.099/1.103, Rec96 1.069/1.063; 48-byte OwningString8 0.967/0.969 and OwningString64
+     0.948/0.965. The trait result survives the correction while the apparent 96-byte crossover disappears.
+   - E208 extends trivial sizes to 80/112/160/256 bytes and adds OwningVector4 as an independent non-string
+     copyable owner. Order-neutral aggregate V9/V2 at 10k / 100k: Rec80 1.068/1.042, Rec112 1.055/1.028,
+     Rec160 1.036/1.040, Rec256 0.957/1.024, OwningVector4 0.972/0.976. No stable sizeof(T)-only crossover
+     exists even through 256 bytes. Rec256 favors V9 at 10k but slightly favors V2 at 100k and remains highly
+     shape-dependent.
+   - E208 representative order-neutral 100k ratios: Rec112 Random 0.907 vs Alternating 1.086; Rec160 Random
+     0.776 vs Alternating 1.305 / Mixed 1.103 / Block 1.108; Rec256 Random 0.967, Noise10 1.024,
+     Random%25 1.030, Alternating 1.074, Mixed 1.028, Block 1.022, OrganPipe 0.981. Large trivial values
+     therefore cannot be routed reliably from object size alone.
+   - OwningVector4 independently confirms the nontrivial-owner signal: 0.972/0.976 aggregate, with all seven
+     10k patterns favoring V9 and six of seven 100k patterns favoring V9 (Random is ~1.012). Together with both
+     std::string owners, this supports a conservative trait-first convenience policy rather than a byte threshold.
+   - CURRENT TYPE-ONLY ROUTING RECOMMENDATION: non-copyable -> V9; copyable non-trivially-copyable owner-like
+     types -> V9; trivially-copyable -> V2. Treat the nontrivial branch as an empirically supported heuristic,
+     not a universal theorem for every user-defined type. Do not add a sizeof(T) crossover from E206-E208.
+   - V9 IDENTITY GUARDRAIL: V9 is the index-tail/genericity variation. Its Patience metadata stores source
+     indices and dereferences them for tail comparisons; V2 stores T values directly in tail metadata. Copyable
+     V9 intentionally reuses the optimized V2 reconstruction/merge after blueprint construction, while the index
+     representation enables V9's separate move-only reconstruction path. Do not optimize V9 by replacing its
+     index tails with value tails merely because that is faster for trivial types, and do not delete V9 because
+     V2 wins the cheap-copy domain. E208 changes no sorting implementation.
+   - NEXT: no further byte-size sweep is justified. If a public automatic/default dispatcher is desired, implement
+     the trait-only rule as a separate convenience entry point while keeping explicit V2 and V9 APIs available;
+     validate dispatcher selection/correctness, then benchmark only to ensure dispatch itself adds no measurable cost.
+   - Current C++ V2-style simulated insertion stores pile-tail mirrors by value and the generic pipeline
+     also contains other explicit value copies, so the public API currently requires copy-constructible
+     and copy-assignable T in addition to move construction/assignment. This means move-only C++ values
+     remain unsupported in V1-V8. E203 establishes V9 as the move-only-capable generic path. Do not describe
+	 that as an inherent Jessesort requirement: a Rust port does not automatically imply `T: Clone`,
+     because Rust can relocate arbitrary T with ownership-aware raw-memory techniques without logically cloning it.
+	 The actual algorithmic question is whether Jessesort can avoid owning duplicate live T values in its metadata.
+   - Historical context: E002 first rejected index tails as a universal replacement; E190 repeated that result
+     against the modern architecture; E202-E203 then established the representation as maintained V9 because its
+     generic/move-only capability is independently useful even when V2 remains faster for cheap-copy values.
+     E206-E208 now map the type domain rather than reopening the universal-replacement question.
+
+4. V3 LOW-MEMORY / LAYOUT RESEARCH — OPEN, LARGE
+   - E172's fixed 4,096-element reusable merge buffer + rotation fallback reduced scratch but was much
+     slower. E173 showed insertion-time flattening is infeasible under the current layout.
+   - Preserve as architectural research only: a future attempt needs a fundamentally different run
+     layout/reserved-storage mechanism rather than another bounded-buffer tweak.
+
+5. CODE CONSOLIDATION / MODULARIZATION — DEFERRED
+   - Useful for maintainability, but avoid broad refactors while percent-level performance work remains
+     active because template/code-layout changes can move timings.
+
+6. MAINTENANCE / RELEASE / PUBLICATION — OPEN / ONGOING
+   - Documentation, portability, genericity evidence, packaging, and external communication.
+
+7. V10 ALLOCATION-FREE / RUST `core::sort_unstable` RESEARCH — ACTIVE; E209 BASELINE BANKED
+   - E209 establishes V10 as the tenth maintained experimental variation. Current identity: no heap allocation
+     inside sort; 63 ascending + 64 descending fixed contiguous index-tail slots; <=64 fixed natural-run
+     descriptors; only ordered/reverse-disjoint run combination is performed in the Jesse path; all unsupported
+     geometries fall back to the existing allocation-free partition backend (or heap sort for generic types).
+   - E209 bounded-pile feasibility strongly supports a ~128-slot starting point for the structured domain. At
+     100k x500, Random%25 maxed at 48 piles; Alternating/OrganPipe/Rotated at 2; Sawtooth at 48; Mixed and
+     Block at 23. Random and Noise families can exceed the cap substantially and are intended fallback domains.
+     The proposed 63 asc + 64 desc + 1 spill/overflow design remains a NEXT experiment; E209 baseline currently
+     has 127 tail slots and no spill pile.
+   - E209 correctness/resource validation: a global-new allocation trap observed zero allocations inside V10 on
+     all 12 canonical shapes at 1k/10k; a genuinely move-only unique_ptr-owning type also sorted correctly with
+     zero allocations. The input vector's storage is caller-owned/pre-existing and is not counted as sort scratch.
+   - E210 FIXED-WORKSPACE COMPRESSION — RETAINED: remove unused begin/end fields from the merge-preflight
+     summaries, compact each preflight merge level back into the same 64-entry summary array, and likewise compact
+     the actual cheap-run merge descriptors back into the caller-owned 64-entry run array instead of keeping a
+     second `next[64]`. On this 64-bit build, fixed metadata is now: 63+64 tail indices = 1,016 B; RunDesc[64]
+     = 1,536 B; RunSummary[64] = 1,024 B; peak simultaneously-live explicit fixed metadata = 2,560 B plus
+     scalar locals/call stack, down from roughly 5.6 KiB in E209. Zero-allocation canonical and move-only traps
+     still pass. A 1,200-case path/output equivalence check against preserved E209 V10 matched every metric.
+     Paired canonical 10k/100k x500 is timing-neutral on all substantive affected paths; retain the compression.
+   - E209 localized 10k/100k x500 shows the first baseline is a resource-model variation, not yet a performance
+     replacement. Random and Random%25 are ~1.00x V2 because they reach direct/early fallback quickly. Structured
+     geometries that require a full bounded scan and then partition fallback are intentionally poor: 100k V10/V2
+     ~3.73 Alternating, 2.79 Sawtooth, 8.37 Mixed, 11.62 Block, 11.01 OrganPipe. Rotated's dedicated cheap-run path
+     is sensitive to execution context (localized 1.54x V2 at 100k; full-suite medians also show it remains far
+     faster than std::sort), so do not tune from Rotated alone.
+   - Full V1-V10 + std::sort canonical acceptance completed with persisted resume: 500 trials at 1k/10k/100k and
+     50 at 1m, no correctness failures. V1-V9 headers are byte-identical to the E208 repository, so E209 makes no
+     propagation change to those variations; they are NOT APPLICABLE for code propagation. Adding V10 changes
+     benchmark rotation/context, so E209's full sweep becomes the current ten-variation same-session snapshot,
+     while historical E203/E189 timing baselines remain labeled and are not treated as causal regressions.
+   - Goal: test whether a genuinely non-allocating Jessesort path can preserve the algorithm's structured-input
+     advantages while satisfying the no-heap-allocation requirement relevant to Rust `core::slice::sort_unstable`.
+     Keep V9 unchanged as the allocating index-tail/genericity variation; V10's defining identity is
+     allocation-free bounded Jessesort, not "V9 with its distinctive mechanisms optimized away."
+   - Clarify the resource target: no heap allocation (`Vec`, `Box`, dynamic scratch). Fixed-size locals / bounded
+     stack arrays are allowed and remain O(1) with respect to n. Avoid variable stack use that merely moves an
+     O(n) allocation from heap to stack.
+   - FIXED CONTIGUOUS TAIL DIRECTORY: test bounded asc/desc tail-index arrays instead of unbounded vectors.
+     Candidate capacities: 32 / 64 / 128 / 256 total active piles. Preserve contiguous base arrays so binary
+     searches do not add another layer of pointer chasing through physical piles.
+   - EARLY-FREEZE / OVERFLOW INTEGRATION: explicitly reuse the existing V4-V6 early-freezing machinery and
+     prior freeze tests. A particularly promising 128-slot design is approximately 63 ascending piles +
+     64 descending piles + 1 overflow/spill pile. Test nearby splits and whether the overflow structure can
+     absorb pressure without degrading the hot tail-search path. Do not assume the old 50% freeze threshold is
+     optimal under a hard capacity; route/freeze based on remaining slots and observed game balance.
+   - BOUNDED-TAIL FEASIBILITY STUDY FIRST: instrument current V9/V2-style insertion on canonical inputs to record
+     maximum simultaneous asc/desc/total pile counts, first overflow position for each candidate capacity, and
+     whether overflow occurs before or after useful structure has already been identified. Determine whether
+     64/128 slots cover most inputs where Jessesort beats the partition backend before implementing V10.
+   - CLEAN FALLBACK: while the input is still untouched, if bounded pile metadata overflows or shape signals say
+     Jessesort is unsuitable, abandon the Jesse path and use the existing non-allocating partition/ipnsort-style
+     backend. This is intended behavior, not a failure of V10. Benchmark overflow/fallback frequency and cost.
+   - CHUNK-LOCAL SHAPE ROUTING / ADAPTIVE GAME CAPACITY — E212 ANALYSIS COMPLETE; E213 ISOLATED V10 IMPLEMENTATION REJECTED:
+     E212 kept rigid 63/64 as the control, then simulated per-chunk 64-element probe-proportional splits with minority
+     reserves 4/8/16/24 at 10k/100k (50 structural trials) plus 1m (10 trials). Reserve 16 was the first setting that
+     safely let 1m Sawtooth use one chunk while keeping 1m Block/Mixed in one chunk, but broad proportional routing
+     made Random and Noise5 worse because a short probe can mispredict later game pressure. E212 therefore selected a
+     narrow implementation candidate: skew to ~111/16 only when the 64-element pile probe is one-sided AND the first
+     128 elements confirm monotonic direction; otherwise keep rigid 63/64.
+     E213 implemented that candidate with ONE shared fixed 127-index tail pool (asc grows from the front, desc from the
+     back), so adaptive capacity did not increase V10's 1,016-byte tail footprint. Zero-allocation and move-only traps
+     still passed, and paired 10k/100k x500 timing was broadly neutral. However targeted 1m Sawtooth x50 regressed
+     1.356x (~22.25 ms -> ~30.21 ms): the old 63/64 V10 exits at asc=63/desc=1 via pile-cap fallback, while adaptive
+     111/16 reaches asc=101/desc=1 and then hits the separate 65th-natural-run condition, merely delaying fallback after
+     much more scanning. REJECT adaptive capacity as an isolated V10 change and restore E212/E210 V10 byte-for-byte.
+     Revisit the shared-127-pool + adaptive split only together with actual chunk sealing/reconstruction, live pile
+     recycling, or a raised/reworked bounded run representation that can consume the extra capacity productively.
+     Do not treat broad proportional routing as solved: retain minimum-reserve sweeps, longer/alternative shape signals,
+     optional mid-chunk rebalance/freeze-and-recycle, and per-chunk re-probing because real inputs can change shape region
+     by region. This chunk-local shape analysis/routing remains a CROSS-VARIATION V1-V9 idea for heterogeneous deployment.
+   - ADAPTIVE CHUNK-LENGTH / PILE-PRESSURE ROUTING: do not assume a universal element-count block size.
+     Let a chunk grow while its bounded pile directory remains healthy, and consider sealing only when actual pressure,
+     pile-creation rate, one-game exhaustion, natural-run/block closure, freeze opportunities, or predicted reconstruction
+     cost makes continued assignment unattractive. Compare pressure thresholds such as 75/85/90/95/100% of usable
+     capacity against fixed-size blocks. Record chunk count/size distribution, pile utilization, overflow frequency, and
+     predicted/live merge depth. E211-A suggests structured inputs may profitably remain a single huge chunk while Random
+     and Noise naturally fragment, so fixed 1K/2K/4K-style blocks should be treated as reconstruction tools/fallbacks,
+     not assumed primary chunk boundaries.
+   - PROBE-BASED CAPACITY-EXHAUSTION PREDICTOR: use each chunk's early-probe pile count/growth as a signal for how
+     many additional elements the current tail budget is likely to support. Empirically compare simple linear growth,
+     sqrt(n)-style pile-growth extrapolation, and direct learned/lookup thresholds from canonical/mixed-shape traces.
+     Use the predictor only if it improves chunk sealing/routing without adding enough probe overhead to erase the gain.
+   - SHARED 127-SLOT / DYNAMIC GAME-BUDGET VARIANT: in addition to rigid 63/64 and one-time probe-proportional splits,
+     test whether the same fixed contiguous 127-slot physical directory can be treated as a dynamically apportioned logical
+     budget between asc and desc games. Candidate policies include reserved minority slots, gradual boundary rebalance,
+     spill-first handling, and freeze/consolidate/recycle before sealing the chunk. Preserve contiguous hot tail arrays and
+     reject designs that require expensive pointer chasing or frequent bulk relocation of tail metadata.
+   - BLOCKWISE JESSESORT: test fixed-size blocks (candidate 256 / 512 / 1024 / 2048) whose blueprint, tail arrays,
+     run metadata, and other workspace fit in fixed stack storage. Sort/reconstruct each block without heap
+     allocation, then combine blocks with an allocation-free strategy. Preserve a global early probe/natural-run
+     detector so long structure is not blindly chopped at block boundaries.
+   - SIMD + SMALL-PILE / SMALL-BLOCK CROSSOVER: combine the existing V7 SIMD experiments with bounded pile
+     counts and fixed blocks. Revisit low pile counts specifically because allocation-free V10 naturally imposes
+     a cap; test whether 8/16/32-way SIMD probe/search variants become more attractive when the whole working
+     set is small and contiguous.
+   - V3 IN-PLACE FLATTENING AS A REUSABLE LOW-MEMORY PRECEDENT: V3 already resolves blueprint destinations
+     with an in-place permutation/cycle flatten and therefore demonstrates that Jessesort reconstruction need not
+     inherently require a second full T array for the flatten step. E157 showed the current V3 implementation is
+     consistently slower than V2 reconstruction, so do not copy it blindly; reuse its cycle/permutation machinery,
+     invariants, and correctness tests as a starting point for V10's memory-constrained reconstruction experiments.
+     Keep V3's identity intact even if V10 adapts its machinery.
+   - BLUEPRINT ELIMINATION / BOUNDING: current global O(n) blueprint is incompatible with V10. Test, separately:
+       * no-blueprint paths for monotone, very-low-pile, and natural-run cases;
+       * fixed-size per-block blueprint tags held on stack;
+       * compact bounded run descriptors where shape permits direct reconstruction;
+       * permutation-cycle application, informed by V3, so reconstructed order can be realized in-place without an
+         O(n) T buffer.
+     Do not store unbounded metadata merely as indices/pointers; O(k) is still allocation-dependent if k grows
+     with n.
+   - INSERTION-PHASE IN-PLACE MERGING / EARLY CONSOLIDATION: revisit the earlier idea of overlapping merge work
+     with insertion instead of waiting for a global post-insertion merge phase. The promising reopening condition is
+     V10's changed layout: early freezing, hard pile caps, fixed blocks, reserved/gapped regions, or another invariant
+     may certify that a pile/run or block is closed early enough to merge it immediately in place. E173 only proved
+     that absolute V3 flatten destinations are unavailable online under V3's current compact global layout; it does
+     NOT rule out insertion-time merging when V10 introduces certified closure or bounded regions. Test moved-element
+     count, cache behavior, and whether early consolidation frees/reuses bounded workspace.
+   - LIVE PILE BALANCING / PARTIAL MERGE-PASS RECYCLE — FUTURE CHUNKED-BUDGET BRANCH: when a bounded
+     chunk approaches its pile cap, do not assume the only choices are (a) seal/finish the whole chunk or (b) spill
+     the remainder. Test performing one controlled merge/consolidation pass over a subset of active piles (baseline:
+     roughly half) to free tail-directory slots, then continue assigning new elements into the same chunk. This could
+     let one chunk span far more input without a giant overflow band. Treat the naive left-to-right half-merge only as
+     a control: repeatedly halving the same side can create a severe pile-size gradient, with increasingly huge old
+     piles on the left and uniformly small fresh piles on the right, potentially making the final merge tree worse.
+     Explore better live balancing policies based on pile size/age, adjacent-size similarity, Huffman-like smallest-pair
+     selection, PowerSort-style depth/invariant rules, directional/game pressure, freeze status, and choosing merges
+     that maximize slots freed per moved element. Measure slot-reuse lifetime, pile-size variance/skew after each pass,
+     total moved elements, eventual merge depth, cache behavior, and wall time against the simpler seal-current-chunk
+     policy. This is conceptually related to live adjacent-run merging but is distinct: the primary objective here is
+     ACTIVE PILE-CAPACITY RECYCLING during continued Patience insertion, not merely reducing the final run stack.
+     If useful, test the same policy with probe-proportional asc/desc budgets and per-chunk shape rerouting.
+   - SHAPE-ROUTED LIVE ADJACENT-RUN MERGING — CROSS-VARIATION IDEA: after the early probe identifies a
+     structured / low-pile-count input, test merging adjacent completed runs immediately as they are discovered
+     instead of deferring all run combination until the normal post-insertion merge phase. This is broader than the
+     V10-only frozen-region idea above: evaluate it as a reusable policy for V1-V9 wherever the representation exposes
+     trustworthy adjacent run boundaries. Candidate triggers include low total pile count, strong directional dominance,
+     long natural runs, early-frozen piles, and block-local closure. The live policy should maintain a small merge
+     invariant/stack (for example merge newly adjacent runs when size/order geometry is favorable) rather than blindly
+     merging every pair, because premature merges may destroy useful structure or add movement. Measure whether live
+     merging reduces peak live pile/run metadata, final merge depth, moved elements, and cache misses as well as wall
+     time. Keep a no-live-merge control on identical probe classifications. On random/high-entropy shapes, route away
+     from this path entirely. It is acceptable if this becomes a Patience/online-run-merge hybrid rather than a pure
+     Patience implementation; preserve the experiment's identity as shape-routed live consolidation. For V10, test
+     whether live adjacent-run merging also frees bounded slots/workspace early enough to materially relax the fixed
+     pile-cap problem.
+   - PILE-LOCAL PARTITION HYBRID: explore using Patience assignment to classify elements into bounded piles/regions
+     while a partition-based backend sorts or refines each pile locally, potentially as elements arrive or immediately
+     when a pile/block freezes. Candidate forms include partitioning a completed/frozen pile in place, maintaining
+     small partitioned subregions inside each bounded pile, or routing overflow through a pile-local partition backend
+     instead of one monolithic deferred run. The goal is to combine Jessesort's structural classification with the
+     allocation-free/high-entropy strengths of the existing partition backend and reduce the later global merge burden.
+     Do not assume this is viable with today's simulated noncontiguous piles: first test layouts where pile/block storage
+     is physically bounded or reserved so local partition work does not introduce extra scatter/pointer chasing.
+   - REMOVE GLOBAL `T[n]` SCRATCH: test in-place permutation/cycle reconstruction and bounded local scratch.
+     Avoid generic schemes that reinterpret live arbitrary-T storage as metadata unless ownership, destructor,
+     alignment, and panic/unwind safety can be proved. Primitive-only storage-reuse experiments may be tested as
+     separate specializations, not as the generic V10 foundation.
+   - IN-PLACE / BOUNDED MERGING: this is likely the hardest phase. Test cheap structured cases first rather than
+     committing immediately to a fully general in-place merge. Candidate mechanisms: rotation-based merges,
+     internal-buffer/block merge ideas, bounded scratch windows, ordered/reverse-disjoint shortcuts, and direct
+     concatenation when run boundaries allow it. Track moved elements as well as time.
+   - MOVEMENT-BUDGET ROUTER: estimate merge/reconstruction movement from pile/run geometry before mutating the
+     input. If the predicted in-place work exceeds a threshold, fall back to the partition backend. This may let
+     V10 keep Jessesort only where its structure makes non-allocating reconstruction cheap.
+   - VERY-LOW-PILE STRUCTURED PATH: prototype allocation-free handling first for sorted/reverse, one/few natural
+     runs, very-low-pile layouts, BlockSorted-like layouts, and other cases with obvious cheap reconstruction.
+     Expand the accepted Jesse domain only when each added geometry remains competitive.
+   - CALLER-PROVIDED SCRATCH API — SECONDARY RUST OPTION: independently consider a Rust crate API such as
+     `jessesort_with_scratch(&mut [T], &mut [usize])`. This can be useful for embedded/preallocated contexts and
+     avoids internal allocation, but it does NOT solve drop-in replacement of the existing zero-argument-scratch
+     `slice.sort_unstable()` API. Keep this separate from V10's core requirement.
+   - RUST SAFETY REQUIREMENT: any Rust realization must support arbitrary non-Clone T without duplicate live
+     ownership and must preserve a fully initialized slice if the comparator panics. Blueprint discovery by index
+     is straightforward; in-place permutation/reconstruction is where `MaybeUninit`, `ptr::read`/`ptr::write`,
+     guard logic, or an equivalent proven-safe design may be required.
+   - EXPERIMENT ORDER: (1) DONE E209 bounded-tail feasibility instrumentation; (2) DONE E209 first allocation-free
+     easy-structure prototype with immediate fallback elsewhere; (2b) DONE E210 fixed-workspace compression to a
+     measured 2,560 B explicit peak on the current 64-bit build; (2c) DONE E211 rigid 63/64 chunk-capacity analysis;
+     (2d) DONE E212 adaptive-capacity simulation; (2e) DONE E213 isolated V10 implementation test — REJECTED because
+     1m Sawtooth delayed pile fallback only to hit the 64-run cap 35.6% slower; (2f) DONE E214 naive chunk sealing +
+     recursive rotation-merge combination — REJECTED: 100k Noise10 7.412x, Noise5 4.126x, Alternating 2.611x, and
+     even targeted 1m Sawtooth 1.173x vs V10. Carry the shared-127-pool/adaptive split forward only with a better
+     combine/reuse mechanism such as live pile recycling or V3-derived block/permutation reconstruction; (3) then
+     implement the best bounded chunk policy together with blockwise blueprint/permutation experiments, explicitly
+	 benchmarking V3-derived in-place cycle flattening; (4) insertion-phase early-consolidation/in-place-merge tests
+     on genuinely closed frozen piles/blocks; (5) shape-routed live adjacent-run merging, first on the same low-pile /
+     closed-run cases and then as a cross-variation V1-V9 policy; (6) pile-local partition-hybrid tests on bounded
+     layouts; (7) broader bounded/in-place merge expansion; (8) SIMD-small-pile/block combinations; (9) only then consider
+     a full Rust V10 prototype. Use canonical localized 10k/100k x500 timing and preserve the normal
+     propagation/documentation discipline for any retained C++ implementation change.
+
+8. V11 ALLOCATION-FREE SHARED-TAIL / LIVE RUN-STATE RECLAMATION — E218 BANKED
+   - V11 remains the active performance-oriented allocation-free branch. E216 supplies geometry-gated general in-place
+     merging for suitable <=64-run layouts; E217 adds bounded live run-state reclamation beyond 64 runs; E218 adds the
+     early repeated-ramp/Sawtooth router so that known overlap geometry reaches the existing allocation-free partition
+     fallback before paying the full classification/discovery cost.
+   - E217 reclamation control: fixed RunDesc[64]. At overflow, merge the adjacent completed pair with minimum
+     len[i]+len[i+1], compact one descriptor, append the newly discovered run, and continue. Reclamation is enabled only
+     after the first-65 preflight shows average run length >=1024 and rejects all-adjacent-overlap geometry.
+   - E218 retained result: canonical Sawtooth drops to ~0.421x E217 at 10k, ~0.359x at 100k and ~0.491x at 1m while
+     E217's 1m MixedDirectionRuns gain remains (~19.15 ms full-suite median). Zero-allocation and move-only checks pass.
+   - CLOSED RECLAMATION-SCHEDULER SIDE STUDY (E219-E221):
+     A. BATCH DEPTH / OCCUPANCY — compare current free-1 control against reclaiming 8, 16, and 32 descriptors per
+        capacity event (equivalently 64->56, 64->48, 64->32), and consider occupancy-target framing after the fixed sweep.
+     B. SMALLEST-ADJACENT BATCH — FREE-8 TESTED/REJECTED AS E219: repeatedly selecting minimum a+b until eight
+        slots are free was ~1.0024x E218 on 1m MixedDirectionRuns and increased median reclamation merges from about
+        12 to 16 while reducing capacity events to 2. Keep free-16/free-32 only as explicit depth controls, not because
+        batching itself has shown a win.
+     C. LOCAL THREE-RUN a-vs-c — TESTED/REJECTED AS E220 in the aggressive 21-triple form requested: partition the
+        first 63 live descriptors into all 21 disjoint triples, choose A+B iff len(A)<len(C) else B+C, and reduce
+        63->42 while preserving descriptor 63 (43 live descriptors before appending the pending run). On canonical
+        1m MixedDirectionRuns this performs 21 merges in one event versus E218's ~12 one-slot reclaims, yet is nearly
+        neutral (~0.9971x order-neutral); 10k/100k never activate reclamation and show only small layout drift. Keep
+        this as the cheap local-tree baseline for comparison with PowerSort/disjoint schedulers, not as production code.
+     D. POWERSORT-GUIDED RECLAMATION — use run boundary powers / alphabetic merge-tree balancing to choose legal
+        adjacent merges. Compare both free-8 and the best occupancy target found above.
+     E. HUFFMAN-INSPIRED ADJACENT — repeatedly select the cheapest legal adjacent pair as a merge-tree policy rather
+        than merely a one-slot emergency action; distinguish this from unrestricted Huffman because run order/adjacency
+        must be preserved.
+     F. CHEAP CONTROLS — balanced disjoint pair pass ((0,1),(2,3),...), ranked smallest disjoint adjacent pairs, and
+        oldest-pair batching. These establish how much scheduler sophistication is actually worth.
+     G. ADAPTIVE RECLAIM DEPTH — after fixed-depth evidence, test whether run-size distribution / expected incoming run
+        count should choose how far occupancy is reduced, rather than always using one fixed target.
+     H. MEASURE WHY — record reclamation events, raw run count, descriptors freed/event, element-span merged, repeated
+        movement of already-merged elements, final merge depth, and wall time. Do not assume fewer capacity events wins;
+        descriptor scans are cheap compared with premature movement of T.
+   - E221 POWERSORT21 TESTED/REJECTED: deepest-boundary PowerSort selection at the same 21-merge / 63->42 depth is
+     ~1.0106x E218 on 1m MixedDirectionRuns. Together E219-E221 show that descriptor scheduling is not a material bottleneck;
+     deeper/disjoint/adaptive reclamation variants are now DORMANT rather than active.
+   - NEXT: V3-derived bounded permutation/block reconstruction, then E215 size-aware live pile recycling. Adaptive shared-tail
+     budgeting follows only when reclaimed capacity can be consumed productively.
+
+===============================================================================
+4. COMPACT EXPERIMENT SUMMARIES
+===============================================================================
+
+Historical percentages/ratios are retained only when they explain why a mechanism mattered.
+They describe the causal experiment at that time, not current performance after later changes.
+
+E003  Static early-freeze policy  — PARTIAL: 50% baseline retained; production extension superseded
+E004  V1 actual-piles audit  — RETAINED
+E005  V2 simulated-blueprint audit  — RETAINED
+E006  V5 deferred-band early-freeze audit  — NO CHANGE
+E007  V5/shared early-freeze code cleanup  — RETAINED
+E008  Generic/API audit  — RETAINED
+E009  V6 live-overflow variation  — RETAINED
+E010  V6 live band-size audit  — SUPERSEDED: size 32 restored later
+E011  V4 single large overflow variation  — RETAINED
+E012  V5 dominant-endpoint merge policy  — RETAINED only for V5
+E013  V6 smallest-adjacent greedy merge  — REJECTED
+E014  V1 two-of-three merge  — REJECTED
+E015  V2 two-of-three merge  — REJECTED
+E016  V3 in-place cycle flattening  — RETAINED
+E017  Routing/game collation  — REJECTED
+E018  Equality-to-ascending one-comparison routing  — REJECTED
+E019  V2 pile-tail search policy  — RETAINED
+E020  V6 TimSort-style merge scheduler  — RETAINED selectively
+E021  V2 PowerSort-style merge scheduler  — RETAINED selectively
+E022  V4 PowerSort-style merge scheduler  — RETAINED selectively
+E023  V3 PowerSort-style merge scheduler  — RETAINED selectively
+E024  V1 PowerSort  — REJECTED
+E025  V5 PowerSort  — REJECTED
+E026  V6 PowerSort  — REJECTED
+E027  Power-of-two freeze targeting  — RETAINED
+E028  Random-input lineage audit  — RETAINED; restored live band size 32
+E029  V2 descending-game-first reconstruction  — RETAINED
+E030  Other-variation reconstruction-order audit  — MIXED
+E031  V1 adjacent-merge fast paths  — RETAINED
+E032  V1 exponential galloping  — RETAINED
+E033  V1 ordered-boundary elision  — RETAINED
+E034  V1 asymmetric smaller-side merge  — REJECTED
+E035  V2 exponential galloping  — RETAINED
+E036  V2 Random router + branchless merge  — RETAINED
+E037  Cross-variation 64-element probe  — ARCHITECTURE EVIDENCE / selectively propagated
+E038  V3 Random router  — RETAINED
+E039  V5 blueprint-derived Random merge router  — RETAINED
+E040  V4/V6 blueprint-derived Random merge router  — RETAINED
+E041  V1 final-density/game-balance Random merge router  — RETAINED
+E043  V2 two-stage early insertion routing  — RETAINED
+E044  Branchless merge unroll  — RETAINED at width 4
+E045  Final-layout 5/7 gallop-trigger routing  — RETAINED
+E046  V1 early insertion routing + V2 merge ports  — RETAINED
+E047  V1 structured-side exact-hint routing  — RETAINED
+E048  V2 insertion-route propagation  — MIXED: V3 retained; direct V5/V6 port rejected
+E049  Early-freeze out-of-loop hint/no-hint routing  — RETAINED
+E050  Canonical V1-V6 numbering reset  — DOCUMENTATION/LABEL FIX
+E051  V5 adaptive overflow planning  — DOCUMENTATION; followed by E059-E062
+E052  Duplicate saturation / merge-threshold audit  — RETAINED signal; threshold later size-aware
+E053  Size-aware final pile-density routing  — RETAINED
+E054  Remove early Random no-hint route  — SUPERSEDED/FALSIFIED by E065
+E055  Broad natural-run batching  — REJECTED broadly; mechanism revived narrowly in E098
+E056  V1 hint-miss scalar refinements  — REJECTED
+E057  V7 exact-eight AVX2 pile search  — RETAINED as experimental variation
+E058  Probe-gated AVX2 small-pile continuation  — REJECTED
+E059  V5 fixed band-size response surface  — CHARACTERIZED; size 32 unchanged
+E060  V5 simple adaptive/nonuniform shaping  — REJECTED; tree-aware idea remains open
+E061  V2 per-pair merge routing  — PROMISING; finalized in E063
+E062  V5 power-of-two run shaping / scheduler audit  — REJECTED
+E063  V2 1.5x transition-band pair routing  — SUPERSEDED/RETIRED by E101
+E064  Active-roadmap cleanup / modularization audit  — DOCUMENTATION ONLY
+E065  Restore early Random no-hint insertion  — RETAINED for V2/V3/V7
+E066  Benchmark methodology hardening  — SUPERSEDED in cadence/seed design by E077/E100
+E070  Isolated checkpointed benchmark artifacts  — RETAINED infrastructure
+E071  Public-repository documentation cleanup  — RETAINED
+E072  include/src layout + Markdown benchmark output  — RETAINED
+E073  Four-size/100-trial benchmark sweep  — SUPERSEDED by E077 trial policy
+E074  V7 capped 64-value SIMD probe  — NEUTRAL; experimental path only
+E075  V7 128/256 capped-probe sweep  — LONGER ONE-SHOT PROBES CLOSED
+E076  Default V7 8x128 capped probe  — RETAINED as SIMD demonstration, not speed claim
+E077  Unique deterministic input per trial  — RETAINED current benchmark methodology
+E078  Resumable benchmark execution  — RETAINED
+E079  V2 global cursor/step reconstruction  — RETAINED
+E080  Blueprint normalization initial small-sample test  — SUPERSEDED by E081
+E081  V2 normalized blueprint reconstruction retest  — RETAINED
+E082  V2 raw-pointer branchless merge kernel  — RETAINED
+E083  E081/E082 cross-variation propagation  — PARTIAL; later reconciled/fixed by E084/E095
+E084  Current source/log reconciliation  — DOCUMENTATION AUDIT; found V7 wiring discrepancy
+E085  V2 bidirectional branchless merge  — RETAINED; propagation completed E087-E089
+E086  V2 large-n reconstruction step[] elimination  — RETAINED at >=500k
+E087  V3 bidirectional merge propagation  — RETAINED
+E088  V4/V5 bidirectional merge propagation  — RETAINED
+E089  V6/V1/V7 bidirectional merge propagation  — RETAINED; family propagation complete
+E090  V5 fixed 32-element smallsort network  — RETAINED for full bands
+E091  V2 4-ary instruction-parallel pile search  — REJECTED
+E092  V2 type-aware branchless merge cutoff <=96B  — RETAINED
+E093  E092 cutoff propagation to V1/V3/V4/V5/V6/V7  — RETAINED across family
+E094  Hot/cold dedicated V2 merge continuation  — REJECTED / neutral
+E095  V7 normalized reconstruction public-path wiring  — RETAINED; discrepancy resolved
+E096  V7 reconstruction step[] elimination  — RETAINED; no size threshold needed
+E097  V5 frozen-tail Eytzinger search  — REJECTED
+E098  Narrow gated V2 natural-run batching  — RETAINED
+E099  E098 natural-run propagation to V1/V3/V4/V5/V6/V7  — RETAINED; stricter V5/V6 gate
+E100  Rotated split distribution + canonical A/B seeds  — RETAIN generator; seed policy centralized
+E101  Revalidate E063 after E085  — RETIRED E063; no propagation
+E102  V3 final-density routing recalibration  — RETAINED V3-specific 4/4.25/5 rule after high-trial recheck
+E103  Testing-process/revisit taxonomy  — RETAINED; rejection classes + high-trial revisit roadmap
+E104  V3 E045 gallop-trigger high-trial revalidation  — RETAINED in V3; propagation audited
+E105  V7 repeated one-register AVX2 continuation  — RETAINED narrowly at 5k-20k low-pile layouts
+E106  V5 data-aware first overflow-boundary shaping  — REJECTED; no production change
+E107  V1 merge-density recalibration  — RETAINED V1-specific 3.5/4.25/5 rule
+E108  V1/V2/V3 non-freezing parity audit + roadmap  — DOCUMENTATION/PLANNING; identified historical drift
+E109  Common V1/V2/V3 convergence baseline  — RETAINED common policy baseline; regressions logged for retuning
+E110  V1/V2/V3 MATERIALIZED GAME/RUN ORDER REVALIDATION  — REJECTED AS COMMON CHANGE; E109 DESCENDING-FIRST BASELINE RETAINED
+E111  V1/V2/V3 SELECTIVE POWERSORT REVALIDATION  — RETAINED REMOVAL; ADJACENT-PAIR SCHEDULING IS THE COMMON V1/V2/V3 BASELINE
+E112  V1/V2/V3 ORDERED-BOUNDARY PROBING REVALIDATION  — REJECT ALWAYS-ON; RETAIN ADAPTIVE PROBING AS COMMON V1/V2/V3 BASELINE
+E113  V1/V2/V3 RANDOM-ROUTE CLASSIFIER / GAME-BALANCE REVALIDATION  — REJECT FINAL-BALANCE REPLACEMENT AND COMBINED GUARD; RETAIN EARLYRANDOMLIKE
+E114  V1/V2/V3 common non-freezing density threshold revalidation     RETAINED CURRENT COMMON POLICY  — RETAINED CURRENT COMMON POLICY
+E115  V1/V2/V3 POST-FLATTEN MERGE-DRIVER CONSOLIDATION  — RETAIN V1 ENDS-BASED DRIVER AS THE SINGLE COMMON V1/V2/V3 DRIVER
+E116  IPNSORT SCORECARD PHASE PROFILING  — RETAIN PROFILER / DIAGNOSTIC
+E117  ADJACENT-EQUALITY INSERTION REUSE (V2/V3)  — RETAIN
+E118  ROUTED ADJACENT-EQUALITY REUSE (V1)  — RETAIN
+E119  MODERATE-CARDINALITY VALUE→PILE CACHE (V2/V3)  — RETAIN
+E120  MODERATE-CARDINALITY VALUE→PILE CACHE (V1)  — RETAIN
+E121  BULK SAME-TAG RECONSTRUCTION (V2)  — RETAIN
+E122  EXPLICIT EQUAL-SPAN MERGE CONSUMPTION  — REJECT
+E123  FIXED LOW-CARDINALITY DIRECT BACKEND (V2)  — RETAIN
+E124  ONE-WAY NATURAL-PREFIX SCAN (SIMULATED PATH)  — RETAIN
+E125  DOMINANT-VALUE EXTRACT / RESIDUAL SORT / SPLICE (V2)  — SUPERSEDED BY E129
+E126  MULTI-HEAVY ZIPF EXTRACTION  — REJECT
+E127  BROAD ZIPF VALUE→PILE CACHE  — REJECT
+E128  ROUTED HIGH-ENTROPY EQUALITY-AWARE PARTITION BACKEND (V2)  — RETAIN
+E129  DOMINANT-VALUE ROUTE TO E128 BACKEND (V2)  — RETAIN; SUPERSEDES E125 BACKEND
+E130  TAIL-RECURSION CONVERSION IN E128  — REJECT
+E131  RECOVER E128 ZIPF ROUTER THRESHOLD  — RETAIN; RECOVERY CORRECTION
+E132  RECOVER INTEGER TWO-HALF / BIDIRECTIONAL SMALLSORT IN E128  — RETAIN; RECOVERY CORRECTION
+E133  PROPAGATE SPECIALIZED PRE-PATIENCE BACKENDS TO V3  — RETAIN
+E134  PROPAGATE SPECIALIZED PRE-PATIENCE BACKENDS TO V1  — RETAIN
+E135  PROPAGATE SPECIALIZED PRE-PATIENCE ROUTING TO V4-V7  — RETAIN
+E136  PERMANENT HYBRID VS FORCED-PATIENCE RESEARCH HARNESS  — RETAIN (research instrumentation only)
+E137  FORCED-PATIENCE V2 PHASE + GEOMETRY BASELINE  — RETAIN (research baseline)
+E138  ONLINE RECONSTRUCTION + FIRST-MERGE FUSION  — REJECT
+E139  HIGH-CARDINALITY RANDOM SINGLE-GAME PATIENCE STUDY  — POSITIVE RESEARCH RESULT; NOT PRODUCTION DEFAULT
+E140  TWO-GAME INTERLEAVED ILP INSERTION  — REJECT
+E141  FREEZE GEOMETRY + RECURSIVE PATIENCE OVERFLOW STUDY  — DEFER / NOT RETAINED GLOBALLY
+E142  COHERENT VALUE->PILE CACHE FOR PATIENCE INSERTION  — RETAIN (V2/V3 core mechanism)
+E143  PROPAGATE E142 COHERENT CACHE TO V1 AND V4-V7  — RETAIN with variation-specific gates
+E144  NUMERICAL INTERPOLATION-GUIDED PILE SEARCH  — REJECT
+E145  V1 MONOTONE / EARLY-PROBE HANDOFF CORRECTIONS  — RETAIN
+E146  PROPAGATE E145 HANDOFF/SCANNER SEMANTICS TO V2-V7  — RETAIN
+E147  RESTORE NON-DEFAULT / CUSTOM-COMPARATOR GENERICITY AFTER E143  — RETAIN (correctness/API repair; numeric fast path unchanged)
+E148  POST-PREFIX LOCALITY / STRUCTURE-PROBE HANDOFF AUDIT  — PARTIAL RETAIN (V2/V7); V1 candidate REJECTED
+E149  SAWTOOTH OVERLAPPING-RUN MERGE SPECIALIZATION  — REJECT
+E150  FOUR-VALUE SNAPSHOT PILE-SEARCH BATCHING WITH CONFLICT REPAIR  — REJECT
+E151  BLOCKED PILE-TAIL SEARCH + AVX2 LOCAL SCAN  — REJECT
+E152  FIRST-LEVEL TINY-RUN WEIGHTED PROFILE  — PROFILE / DEPRIORITIZE ITEM 8
+E153  V4 STRUCTURE-AWARE RECURSIVE PATIENCE OVERFLOW  — RETAIN (V4)
+E154  V5/V6 STRUCTURE-AWARE RECURSIVE OVERFLOW PROPAGATION  — RETAIN V5 / REJECT V6
+E155  WHOLE-ARRAY TINY PRIMITIVE SMALLSORT  — RETAINED for N <= 32 on trivially-copyable values with the default std::less<T> comparator.
+E156  V2/V3 PROPAGATION AUDIT + CONTROLLED-VARIATION RECONCILIATION  — RETAIN AUDIT/REFACTOR; REJECT V3 FLATTEN CUTOFF
+E157  V2/V3 ISOLATED RECONSTRUCTION-vs-FLATTEN SWEEP  — MEASUREMENT ONLY; NO PRODUCTION CHANGE
+E158  BIASED DUAL-GAME ASSIGNMENT / PILE-GEOMETRY THROTTLING  — REJECTED; GEOMETRY SIGNAL RETAINED
+E159  OUTER-QUARTER FIT-QUALITY DUAL-GAME OVERRIDE  — REJECTED IN EXPLORATORY LOCALIZED SCREEN
+E160  V2 ON-THE-FLY BLUEPRINT TAG DECODE DURING RECONSTRUCTION  — INCONCLUSIVE HARNESS/INTEGRATION RESULT; SUPERSEDED BY E161
+E161  LAYOUT-CONTROLLED V2 BULK TAG DECODE REVALIDATION  — RETAINED IN V2 BULK-SPAN RECONSTRUCTION
+E162  E161 PROPAGATION AUDIT + V7 RAW BULK-SPAN RECONSTRUCTION  — RETAINED IN V7; V1/V3/V4-V6 RESOLVED
+E163  V4 DIRECT-TO-RECURSIVE-OVERFLOW GATHER  — REJECTED; V4 OVERFLOW PHASE PROFILE RETAINED
+E164  HIGH-ENTROPY ADAPTIVE PIVOT SELECTION  — RETAINED FOR >=8192 HIGH-ENTROPY PARTITIONS; DOMINANT-VALUE ROUTE EXEMPT
+E165  CYCLIC PARTITION KERNEL PARITY  — PARTIAL RETAIN: 8-BYTE ELIGIBLE INTEGRALS; REJECTED FOR INT
+E166  PRIMITIVE 18-32 SMALLSORT PARITY  — RETAINED FOR SPECIALIZED INTEGRAL PARTITION LEAVES
+E167  PARTITION CONTROL FLOW: RECURSE-LEFT / ITERATE-RIGHT  — RETAINED FOR NORMAL HIGH-ENTROPY ROUTE; DOMINANT-VALUE ROUTE EXEMPT
+E168  ANCESTOR/EQUALITY PARITY AUDIT  — REJECTED; EXISTING JESSE SHORTCUT RETAINED
+E169  OPPOSITE-GAME NEW-PILE RESCUE  — REJECTED; NO GEOMETRY EFFECT
+E170  V4/V5/V6 FREEZE-PERCENTAGE SWEEP  — MEASUREMENT ONLY; ALL PRODUCTION FREEZE POINTS REMAIN 50%
+E171  SAMPLED DUAL-GAME BLOCK ROUTER  — REJECTED; INSERTION COST UP, GEOMETRY UNCHANGED
+E172  LOW-MEMORY V3 BOUNDED MERGE BUFFER  — REJECTED; MEMORY WIN TOO EXPENSIVE
+E173  INSERTION-TIME IN-PLACE FLATTEN AVAILABILITY  — CLOSED; DESTINATIONS ARE NOT ONLINE-FINAL
+E174  FREEZE-FAMILY PHASE REPROFILE  — DIAGNOSTIC; INSERTION/RECONSTRUCTION NOW DOMINATE
+E175  V6 ADAPTIVE NATURAL LIVE OVERFLOW RUNS  — RETAINED; FIXED-WIDTH ADAPTIVE RULE SUPERSEDED
+E176  V6 BIDIRECTIONAL NATURAL OVERFLOW RUNS  — KERNEL VALIDATED FOR ROUTER STUDY; NOT DEFAULT
+E177  V6 OVERFLOW SHAPE SIGNAL AUDIT  — COMPLETE; MULTI-SIGNAL ROUTER INPUTS SELECTED
+E178  V6 OVERFLOW KERNEL SHOOTOUT  — COMPLETE; NATURAL-vs-LIVE TIERS VALIDATED; REPAIR/DEFERRED NOT RETAINED
+E179A V6 MULTI-TIER ROUTER CANDIDATE FREEZE — COMPLETE; 2 FINALIST GATES SELECTED FOR E179B
+E179B V6 STRICT ROUTER DECISION A/B — COMPLETE; STRICT SELECTED, BALANCED REJECTED
+E179C V6 ROUTER SAMPLING-TAX AUDIT — COMPLETE; ~1% INSERTION TAX CHARACTERIZED
+E179D V6 PRODUCTION INTEGRATION — SUPERSEDED BY E179E GEOMETRY-FIRST REFINEMENT
+E179E V6 GEOMETRY-FIRST ADAPTIVE ROUTER — RETAINED
+E180  CANONICAL BENCHMARK GOVERNANCE — RETAINED; GENERATOR DETAILS SUPERSEDED BY E180C
+E180B 12-ROW BENCHMARK REDESIGN — SUPERSEDED BY E180C
+E180C n^(2/3) STRUCTURED-GENERATOR SCALE + FROZEN BASELINE — RETAINED
+E181  SHORT-PREFIX SAME-DIRECTION HANDOFF — RETAINED
+E182  CANONICAL DIRECTION/TOPOLOGY AUDIT — COMPLETE / MEASUREMENT ONLY
+E183  GATED VALLEY-TO-ASCENDING RESCUE — RETAINED
+E184  DIRECTION-AWARE ROUTER ORACLE — COMPLETE; GENERAL >64 DOMINANCE CHANGE REJECTED
+E184B EXACT-BALANCE LOW-PILE BIDIRECTIONAL ROUTE — RETAINED IN V6
+E185  PEAK OWNERSHIP REVIEW — KEEP PEAKS ASCENDING; NO PRODUCTION CHANGE
+E186  LINKED BLUEPRINT / POTENTIAL V8 — PLANNED; NOT RETAINED IN V2
+E187  PARTITION-BACKEND COMPLETENESS AUDIT — COMPLETE; PRIMITIVE IPNSORT FOLLOW-UP CLOSED
+E188  DUAL-GAME ASSIGNMENT CLOSURE AUDIT — COMPLETE; AREA DORMANT
+E189  V2/V7 RECONSTRUCTION TRAFFIC AUDIT — V7 RAW BULK-SPAN PATH RESTORED/RETUNED; RETAINED
+E190  MODERN INDEX-TAIL RETEST — UNIVERSAL REPLACEMENT REJECTED; V9/HYBRID GENERICITY PATH REMAINS OPEN
+E191  V8 LINKED-BLUEPRINT BASELINE — ESTABLISHED AS EXPERIMENTAL VARIATION; NOT A V2 REPLACEMENT
+E192  V8 linked-blueprint stabilization — RETAINED BASELINE
+E193  V8 routing coverage / forced-linked baseline — RETAINED REFERENCE
+E194  V8 catastrophic-shape fallback router — PROMISING CANDIDATE
+E195  V8 noise-density fallback router — PROMISING CANDIDATE
+E196  V8 linked first-merge fusion — PARTIAL
+E197  V8 linked boundary fast paths — PARTIAL
+E198  V8 in-place link conversion — RETAINED INTO LATER V8
+E199  V8 in-place links + first-merge fusion — RETAINED INTO LATER V8
+E200  V8 compact span links — RETAINED INTO LATER V8
+E201  V8 linked-only locality router — RETAINED BASELINE
+E202  V9 u64 index-tail baseline — RETAINED AS V9 CANDIDATE
+E203  V9 move-only generic completion + maintained integration — RETAINED
+
+E196-E205 — HISTORICAL V8/V9 + BENCHMARK-CONTEXT STUDIES
+- Detailed historical narrative compacted; authoritative status/key evidence is preserved in Section 4 below.
+- E196-E203 developed the linked/index-tail branches; E204-E205 established host/session and benchmark-context governance rather than sort-code regressions.
+
+E206-E210 — HISTORICAL TYPE-ROUTING + ALLOCATION-FREE BASELINE STUDIES
+- Detailed historical narrative compacted; authoritative status/key evidence is preserved in Section 4 below.
+- E206-E208 completed the value-tail/index-tail type map; E209 established V10 zero-allocation; E210 compressed its fixed workspace without changing behavior.
+
+E210  V10 fixed-workspace compression — RETAINED
+E211  rigid 63/64 chunk-capacity analysis — COMPLETE / NO CODE CHANGE
+E212  adaptive per-chunk game-capacity analysis — COMPLETE / CANDIDATE IDENTIFIED
+E213  V10 monotone-confirmed adaptive capacity — REJECTED IN ISOLATION
+E214  naive chunk sealing + rotation merge — REJECTED
+E215  live pile-recycling structural screen — ANALYSIS COMPLETE / FUTURE BRANCH
+E216  V11 shared 127-tail pool + selective low-run in-place merge — RETAINED / V11 BANKED
+E225  V2 bounded long-natural-run direct route — RETAINED / V2
+
+E001 — Benchmark harness corrections
+- Status: RETAINED
+- Key evidence: Random%100 fixed to uniform [0,99]; signed modulo had produced 199 values.
+
+E002 — Sentinel removal / index-tail prototype
+- Status: MIXED: sentinel removal retained; index tails rejected
+- Key evidence: Value tails remained faster. The index-tail attempt caused roughly a 60% random-input regression in the relevant prototype.
+
+E003 — Static early-freeze policy
+- Status: PARTIAL: 50% baseline retained; production extension superseded
+- Key evidence: 50% improved routine-size random performance relative to 36.8% and became the static baseline used for subsequent early-freeze audits.
+
+E004 — V1 actual-piles audit
+- Status: RETAINED
+- Key evidence: Sorted: about 86% faster.
+
+E005 — V2 simulated-blueprint audit
+- Status: RETAINED
+- Key evidence: Random: 2.1% faster at 1k, 3.8% at 10k, 1.0% at 100k; 100k treated as neutral.
+
+E006 — V5 deferred-band early-freeze audit
+- Status: NO CHANGE
+- Historical housekeeping/planning record; procedural detail intentionally removed.
+
+E007 — V5/shared early-freeze code cleanup
+- Status: RETAINED
+- Key evidence: Correctness equivalent to pre-cleanup audited code; non-monotone timing mostly within 2-3%, reverse materially faster.
+
+E008 — Generic/API audit
+- Status: RETAINED
+- Key evidence: 1k: about 7.5% faster.
+
+E009 — V6 live-overflow variation
+- Status: RETAINED
+- Key evidence: Random: about 1.0% slower.
+
+E010 — V6 live band-size audit
+- Status: SUPERSEDED: size 32 restored later
+- Key evidence: Size 8: repeated 20-24% organ-pipe improvement versus size 32.
+
+E011 — V4 single large overflow variation
+- Status: RETAINED
+- Key evidence: Initial 100k ratios versus std::sort:
+
+E012 — V5 dominant-endpoint merge policy
+- Status: RETAINED only for V5
+- Key evidence: Repeatedly regressed 100k alternating by about 5-8%.
+
+E013 — V6 smallest-adjacent greedy merge
+- Status: REJECTED
+- Key evidence: Random: +9.3%.
+
+E014 — V1 two-of-three merge
+- Status: REJECTED
+- Key evidence: Random: +1.3%.
+
+E015 — V2 two-of-three merge
+- Status: REJECTED
+- Key evidence: No repeatable material gain; block-sorted regressed 4.34-5.31% every run.
+
+E016 — V3 in-place cycle flattening
+- Status: RETAINED
+- Key evidence: Random was ~13.8% slower while OrganPipe improved ~5.5-8.9%; V3 was retained as an architectural in-place-flatten experiment, not a universal speed win.
+
+E017 — Routing/game collation
+- Status: REJECTED
+- Key evidence: Still slower at 1M, including random +6.2% and alternating +8.4% to +13.1%.
+
+E018 — Equality-to-ascending one-comparison routing
+- Status: REJECTED
+- Key evidence: Random: -0.16%.
+
+E019 — V2 pile-tail search policy
+- Status: RETAINED
+- Key evidence: std::lower_bound miss path: 46-76% slower on random/random%100 at 100k.
+
+E020 — V6 TimSort-style merge scheduler
+- Status: RETAINED selectively
+- Key evidence: Random: +3.14%.
+
+E021 — V2 PowerSort-style merge scheduler
+- Status: RETAINED selectively
+- Key evidence: At 100k, pure PowerSort was about 4.09% slower on Random but 7.04% faster on Sorted+Noise(5%), 4.58% faster on Sawtooth, and 4.57% faster on BlockSorted.
+
+E022 — V4 PowerSort-style merge scheduler
+- Status: RETAINED selectively
+- Key evidence: At 100k, Random was +1.72%, Sorted+Noise(5%) -10.31%, Random%100 -1.57%, BlockSorted +2.36%, and the remaining routine workloads were within about +/-2%.
+
+E023 — V3 PowerSort-style merge scheduler
+- Status: RETAINED selectively
+- Key evidence: Random -0.06%, Sorted+Noise(5%) -5.69%, Random%100 +0.02%.
+
+E024 — V1 PowerSort
+- Status: REJECTED
+- Key evidence: Random regressed +4.56% to +5.01% across all three runs.
+
+E025 — V5 PowerSort
+- Status: REJECTED
+- Key evidence: Random regressed +3.22% to +3.33% in every run.
+
+E026 — V6 PowerSort
+- Status: REJECTED
+- Key evidence: Noise(5%) regressed +5.30% to +6.78% in every run.
+
+E027 — Power-of-two freeze targeting
+- Status: RETAINED
+- Key evidence: At 10k, the retained policies preserved the structured gains; V5/V6 Random%100 did not regress materially in that run.
+
+E028 — Random-input lineage audit
+- Status: RETAINED; restored live band size 32
+- Key evidence: Final random lineage medians (current / original; negative is faster): 10k 100k 1M V1 actual -0.319% -0.038% +0.467% V2 simulated -7.890% -10.167% -12.117% V6 live32 -0.969% -5.682% -4.968%
+
+E029 — V2 descending-game-first reconstruction
+- Status: RETAINED
+- Key evidence: Outside Rotated, all regressions are below the routine 2-3% significance band; Alternating and BlockSorted retain clear gains.
+
+E030 — Other-variation reconstruction-order audit
+- Status: MIXED
+- Key evidence: Retain descending-game-first in V1. It gives large, highly repeatable gains on Sorted+Noise and BlockSorted with no large regression; the only negative near the normal noise threshold is Alternating (~2.3%).
+
+E031 — V1 adjacent-merge fast paths
+- Status: RETAINED
+- Key evidence: Random: 7201.613 -> 7205.510 us (0.05% slower)
+
+E032 — V1 exponential galloping
+- Status: RETAINED
+- Key evidence: Random: 7698.847 -> 7714.423 us (0.20% slower)
+
+E033 — V1 ordered-boundary elision
+- Status: RETAINED
+- Key evidence: Random: 7707.490 -> 7715.527 us (0.10% slower)
+
+E034 — V1 asymmetric smaller-side merge
+- Status: REJECTED
+- Key evidence: Random: 7698.730 -> 8433.615 us (9.55% slower)
+
+E035 — V2 exponential galloping
+- Status: RETAINED
+- Key evidence: Random: 5290.070 -> 5341.730 us (0.98% slower)
+
+E036 — V2 Random router + branchless merge
+- Status: RETAINED
+- Key evidence: Force PowerSort on random: ~2.6% slower at 100k.
+
+E037 — Cross-variation 64-element probe
+- Status: ARCHITECTURE EVIDENCE / selectively propagated
+- Key evidence: At 100k the early >=6/6 rule activated on 98% of full-range Random and 98% of Random%100 in the initial 50-seed sample; later pile density separated them (98% vs 0%). A separate 200-seed held-out check reproduced this: 198/200 Random prefixes qualified early and passed the late density rule, while 197/200 Random%100 prefixes qualified early but 0/200 passed the late density rule.
+
+E038 — V3 Random router
+- Status: RETAINED
+- Key evidence: 300-trial process: Random 5993.120 -> 5168.022 us (13.77% faster).
+
+E039 — V5 blueprint-derived Random merge router
+- Status: RETAINED
+- Key evidence: Seed 12000001: Random 5393.147 -> 4713.476 us (12.60% faster). Sorted+Noise 1142.946 -> 1146.441 us (0.31% slower).
+
+E040 — V4/V6 blueprint-derived Random merge router
+- Status: RETAINED
+- Key evidence: V4 seed 43000033: Random 5783.413 -> 5044.724 us (12.77% faster). Sorted+Noise 1161.189 -> 1156.887 us (0.37% faster); other routine inputs remained near neutral at decision scale.
+
+E041 — V1 final-density/game-balance Random merge router
+- Status: RETAINED
+- Key evidence: 300-trial seed 9100000: Random 7734.697 -> 6903.124 us (10.75% faster).
+
+E043 — V2 two-stage early insertion routing
+- Status: RETAINED
+- Key evidence: 100k, 300 trials, seed set 1: Random: B -4.18%, C -4.62% vs A. Random%100: B +75.99% slower, C -11.20% faster vs A.
+
+E044 — Branchless merge unroll
+- Status: RETAINED at width 4
+- Key evidence: Generic k-way tournament merge was ~60.7% slower; the useful retained result was the width-4 branchless two-run merge unroll.
+
+E045 — Final-layout 5/7 gallop-trigger routing
+- Status: RETAINED
+- Key evidence: The prior global 5-vs-7 A/B had Sorted+Noise regressions of +0.40% to +0.70%; the routed candidate removed that regression.
+
+E046 — V1 early insertion routing + V2 merge ports
+- Status: RETAINED
+- Key evidence: 100k Random improved -1.90% and -1.79% across two independent seeds.
+
+E047 — V1 structured-side exact-hint routing
+- Status: RETAINED
+- Key evidence: 100k, 300 trials seed 9100000 after the >=4-pile guard: Random 4767.26 -> 4769.90 us ~0.06% slower Sorted+Noise(5%) 1735.15 -> 1488.13 us 14.24% faster Random%100 1605.96 -> 1608.78 us ~0.18% slower Alternating 493.36 -> 493.33 us neutral all other routine families approximately neutral.
+
+E048 — V2 insertion-route propagation
+- Status: MIXED: V3 retained; direct V5/V6 port rejected
+- Key evidence: Same-binary 100-trial A/B at 100k: seed 9100000: Random -3.02%, Random%100 -5.81%. seed 123456789: Random -3.06%, Random%100 -7.35%. Noise5/Saw were approximately neutral in the larger confirmation; the earlier 30-trial sweep also showed no systematic structured regression.
+
+E049 — Early-freeze out-of-loop hint/no-hint routing
+- Status: RETAINED
+- Key evidence: RETAIN in V4-V6 under the E050 canonical numbering. With canonical inputs the result is stronger and cleaner than the invalid first E049 table: Random and Random%100 improve substantially, while canonical structured workloads remain near baseline.
+
+E050 — Canonical V1-V6 numbering reset
+- Status: DOCUMENTATION/LABEL FIX
+- Historical housekeeping/planning record; procedural detail intentionally removed.
+
+E051 — V5 adaptive overflow planning
+- Status: DOCUMENTATION; followed by E059-E062
+- Historical housekeeping/planning record; procedural detail intentionally removed.
+
+E052 — Duplicate saturation / merge-threshold audit
+- Status: RETAINED signal; threshold later size-aware
+- Key evidence: Direct threshold-5 versus threshold-7 A/B across three seeds at 100k: K=1000: threshold 7 ~13.2% faster K=1500: ~6.8% faster K=2000: ~4.0% faster K=2500: ~1.7% faster K=3000: ~1.5% faster K=5000: neutral (~0.1% faster) full Random: essentially neutral (~0.4% slower mean, timing noise across seeds)
+
+E053 — Size-aware final pile-density routing
+- Status: RETAINED
+- Key evidence: n=10k: density ~5.9 was near parity; >=6.5 clearly favored branchless. Full Random density ~7.15 and branchless was ~11% faster.
+
+E054 — Remove early Random no-hint route
+- Status: SUPERSEDED/FALSIFIED by E065
+- Key evidence: Full Random: no-hint about 9.5% slower than hinted/inline.
+
+E055 — Broad natural-run batching
+- Status: REJECTED broadly; mechanism revived narrowly in E098
+- Key evidence: At n=100k over 30 seeds, profiling strict source runs >=4 elements found that compatible whole-run-to-one-pile assignments are essentially nonexistent for Random and Random%100, but materially present on structured inputs. Among eligible run elements, compatibility was about 47.6% for Sorted+Noise(5%), 39.8% for BlockSorted, ~4.9% for Sawtooth, and ~100% for OrganPipe/Rotated.
+
+E056 — V1 hint-miss scalar refinements
+- Status: REJECTED
+- Key evidence: The adjacent candidate initially appeared promising on Sorted+Noise(5%): ~5.1% and ~4.6% faster on the first two seeds.
+
+E057 — V7 exact-eight AVX2 pile search
+- Status: RETAINED as experimental variation
+- Key evidence: Isolated lookup sweep compared scalar bit-walk to sequential AVX2 scans at pile counts 4..256. Exactly eight tails was the only clear SIMD win: about 0.75-0.77x scalar lookup time (~23-25% faster). Four tails was slower, and 12+ tails was substantially slower because scanning multiple vectors loses to logarithmic scalar search.
+
+E058 — Probe-gated AVX2 small-pile continuation
+- Status: REJECTED
+- Key evidence: A final probe-only isolation (SIMD permitted during the first 64 values and unconditionally disabled afterward) averaged roughly: Random 0.9956 (~0.4% faster), Random%100 0.9988, Sorted+Noise5 0.9955, Sawtooth 0.9996, BlockSorted 0.9988, OrganPipe 1.0038, Rotated 0.9981. The Random result was not stable enough across seeds (one ~1.4% win, other seeds near parity/slightly slower) to justify a production route.
+
+E059 — V5 fixed band-size response surface
+- Status: CHARACTERIZED; size 32 unchanged
+- Key evidence: Ratios below are candidate / fixed-32 baseline; lower is faster.
+
+E060 — V5 simple adaptive/nonuniform shaping
+- Status: REJECTED; tree-aware idea remains open
+- Key evidence: Global metadata-derived sizing is not a general win. At 100k, run-count and median-derived sizes were roughly neutral on Random/Random%100 but regressed: Sawtooth ~10-11%, BlockSorted ~6-11%, Rotated ~8-14% across the two seeds.
+
+E061 — V2 per-pair merge routing
+- Status: PROMISING; finalized in E063
+- Key evidence: A narrower transition-band version therefore applied pair routing only for 20k<n<500k and normalized final pile density <=7.3, above the existing ~6.75 branchless entry threshold. K3000 again appeared ~4.4-5.3% faster and K5000 ~2.2-2.6% faster across the measured seeds.
+
+E062 — V5 power-of-two run shaping / scheduler audit
+- Status: REJECTED
+- Key evidence: Sorted+Noise and Sawtooth were typically ~0.5-1.8% slower.
+
+E063 — V2 1.5x transition-band pair routing
+- Status: SUPERSEDED/RETIRED by E101
+- Key evidence: K3000: 0.9191, 0.9163, 0.9318; mean 0.9224 (~7.8% faster).
+
+E064 — Active-roadmap cleanup / modularization audit
+- Status: DOCUMENTATION ONLY
+- Historical housekeeping/planning record; procedural detail intentionally removed.
+
+E065 — Restore early Random no-hint insertion
+- Status: RETAINED for V2/V3/V7
+- Key evidence: Restoring the early Random no-hint continuation recovered substantial Random/Random%100 insertion performance in V2/V3/V7.
+
+E066 — Benchmark methodology hardening
+- Status: SUPERSEDED in cadence/seed design by E077/E100
+
+E070 — Isolated checkpointed benchmark artifacts
+- Status: RETAINED infrastructure
+
+E071 — Public-repository documentation cleanup
+- Status: RETAINED
+
+E072 — include/src layout + Markdown benchmark output
+- Status: RETAINED
+
+E073 — Four-size/100-trial benchmark sweep
+- Status: SUPERSEDED by E077 trial policy
+- Key evidence: `benchmark_results.md` is now variation-centric: one table per V1-V7/std::sort, input families as rows, and 1k/10k/100k/1m as columns. Each completed cell contains the median paired ratio to std::sort and median time in microseconds; unfinished cells say `pending`.
+
+E074 — V7 capped 64-value SIMD probe
+- Status: NEUTRAL; experimental path only
+- Key evidence: Random%100 cap-8: 55/100 probes; 126 total spill values; max spill 6.
+
+E075 — V7 128/256 capped-probe sweep
+- Status: LONGER ONE-SHOT PROBES CLOSED
+- Key evidence: Median paired timing ratios: 8x128 / baseline V7 = 1.003246 (~0.32% slower) 16x128 / baseline V7 = 0.999240 (effectively neutral; cap overflow almost absent) 8x256 / baseline V7 = 1.179726 (~18.0% slower) 16x256 / baseline V7 = 1.000473 (effectively neutral) baseline V7 / std = 0.905007
+
+E076 — Default V7 8x128 capped probe
+- Status: RETAINED as SIMD demonstration, not speed claim
+- Key evidence: 8x128 / uncapped V7 median paired ratio: 1.003246 (~0.32% slower).
+
+E077 — Unique deterministic input per trial
+- Status: RETAINED current benchmark methodology
+
+E078 — Resumable benchmark execution
+- Status: RETAINED
+- Tested: make long canonical benchmark runs survive execution/process timeouts without restarting completed trial work.
+- Key evidence: Rationale: This allows 500-trial 100k and 50-trial 1m benchmark sweeps to be accumulated across multiple foreground invocations without discarding completed timings. The deterministic unique-seed-per-trial methodology makes exact continuation reproducible.
+
+E079 — V2 global cursor/step reconstruction
+- Status: RETAINED
+- Key evidence: Re-running the preserved E073 code on the current host reached 30/100 Random trials before timeout and already had a V2/std median paired ratio of ~1.0385. This agrees with E078/current local observations and indicates the older ~0.93 result was strongly affected by execution/build/host conditions rather than a later V2 algorithm regression.
+- Decision: retain branchless Random merge route.
+
+E080 — Blueprint normalization initial small-sample test
+- Status: SUPERSEDED by E081
+- Key evidence: 100k, 60 trials: median candidate/baseline per-trial ratio-of-ratios = 0.9966 (~0.34% faster). Candidate V2/std median 0.8778 vs baseline 0.8786 on this host run.
+
+E081 — V2 normalized blueprint reconstruction retest
+- Status: RETAINED
+- Key evidence: 100k, 500 paired Random trials: candidate/baseline median = 0.977205 baseline/std median = 0.890523 candidate/std median = 0.876217 => candidate about 2.28% faster end-to-end than E079 baseline.
+
+E082 — V2 raw-pointer branchless merge kernel
+- Status: RETAINED
+- Key evidence: The retained raw-pointer branchless merge improved V2 end-to-end ~9.0% at 100k and ~8.1% at 1m versus E081; broader 4-run fusion was ~54-57% slower and rejected.
+- Decision: REJECT; existing scan is slightly beneficial.
+
+E083 — E081/E082 cross-variation propagation
+- Status: PARTIAL; later reconciled/fixed by E084/E095
+
+E084 — Current source/log reconciliation
+- Status: DOCUMENTATION AUDIT; found V7 wiring discrepancy
+- Historical housekeeping/planning record; procedural detail intentionally removed.
+
+E085 — V2 bidirectional branchless merge
+- Status: RETAINED; propagation completed E087-E089
+- Key evidence: Bidirectional low/high-end merging cut the targeted merge phase ~42-46% and whole V2 Random ~29-33% versus E082.
+
+E086 — V2 large-n reconstruction step[] elimination
+- Status: RETAINED at >=500k
+- Key evidence: Removing reconstruction step[] was bad at 10k/100k (1.55x/1.26x) but crossed over at >=500k: ~3.2% faster at 500k, ~8.2% at 750k, ~13.1% at 1m.
+
+E087 — V3 bidirectional merge propagation
+- Status: RETAINED
+- Key evidence: V3 propagation of E085: ~26.9% faster at 10k, ~27.7% at 100k, ~18.9% at 1m.
+
+E088 — V4/V5 bidirectional merge propagation
+- Status: RETAINED
+- Key evidence: E085 propagation: V4 ~24.5/25.8/27.7% faster and V5 ~27.6/32.2/36.0% faster at 10k/100k/1m Random.
+
+E089 — V6/V1/V7 bidirectional merge propagation
+- Status: RETAINED; family propagation complete
+- Key evidence: E085 propagation: V6 ~28.6/32.9/34.2%, V1 ~24.2/28.3/16.9%, V7 ~25.8/29.9% with a later 1m recheck ~23.9% faster.
+
+E090 — V5 fixed 32-element smallsort network
+- Status: RETAINED for full bands
+- Key evidence: The 32-element V5 band network was ~28.4% faster than std::sort locally; whole V5 effect was ~2.9% faster at 10k, neutral at 100k, ~1.6% faster at 1m.
+
+E091 — V2 4-ary instruction-parallel pile search
+- Status: REJECTED
+- Key evidence: 10k: 5,000 trials, 2.62902x (~162.9% slower).
+
+E092 — V2 type-aware branchless merge cutoff <=96B
+- Status: RETAINED
+- Key evidence: Branchless bidirectional merge remained profitable through 96-byte trivially-copyable values (~15% merge-only win at 96B); 128B crossed to ~8% slower.
+
+E093 — E092 cutoff propagation to V1/V3/V4/V5/V6/V7
+- Status: RETAINED across family
+- Key evidence: At 100k, propagation remained strong at 32B (~30-42% faster across V1/V3-V7) and still positive at 96B (~7-12%).
+
+E094 — Hot/cold dedicated V2 merge continuation
+- Status: REJECTED / neutral
+
+E095 — V7 normalized reconstruction public-path wiring
+- Status: RETAINED; discrepancy resolved
+- Key evidence: 10k: 0.356354 (~64.4% faster reconstruction)
+
+E096 — V7 reconstruction step[] elimination
+- Status: RETAINED; no size threshold needed
+- Key evidence: Reconstruction-only median candidate/baseline ratios: n=10k: 0.994 (5000 trials; ~0.6% faster) n=100k: 0.966 (2000 trials; ~3.4% faster) n=200k: 0.960 (1200 trials; ~4.0% faster) n=300k: 0.954 (800 trials; ~4.6% faster) n=500k: 0.968 (500 trials; ~3.2% faster) n=750k: 0.9425 (350 trials; ~5.8% faster) n=1m: 0.940 (250 trials; ~6.0% faster)
+
+E097 — V5 frozen-tail Eytzinger search
+- Status: REJECTED
+- Key evidence: Results (candidate / baseline median paired ratio): n=10k, 1000 trials: insertion 1.3773 (~37.7% slower) full sort 1.1635 (~16.4% slower) n=100k, 600 trials: insertion 0.9980 (effectively neutral) full sort 0.9971 (effectively neutral) n=1m, 120 trials: insertion 1.7233 (~72.3% slower) full sort 1.2353 (~23.5% slower)
+
+E098 — Narrow gated V2 natural-run batching
+- Status: RETAINED
+- Key evidence: At 1m, narrow natural-run batching improved OrganPipe insertion ~42.8% / whole sort ~8.3%, and Rotated insertion ~33.8% / whole sort ~5.8%.
+
+E099 — E098 natural-run propagation to V1/V3/V4/V5/V6/V7
+- Status: RETAINED; stricter V5/V6 gate
+- Key evidence: V3-V7 generally show real local improvements even where whole-sort movement is only a few percent. At 1m, OrganPipe insertion improvements are typically ~7-10%; Rotated improvements are smaller and variation-dependent.
+
+E100 — Rotated split distribution + canonical A/B seeds
+- Status: RETAIN generator; seed policy centralized
+
+E101 — Revalidate E063 after E085
+- Status: RETIRED E063; no propagation
+- Key evidence: K3000, 100k: 660 qualifying trials; E063/current median ratio ~1.060 (~6.0% slower merge phase).
+
+E102 — V3 final-density routing recalibration
+- Status: RETAINED V3-specific 4/4.25/5 rule after high-trial recheck
+- Key evidence: A smaller set of fork-isolated whole-sort tests initially appeared to show regressions from those lower thresholds (roughly 5% at 10k K200 and 15% at 100k K600), so the first E102 decision conservatively retained 6.0 / 6.5 / 7.0.
+
+E103 — Testing-process/revisit taxonomy
+- Status: RETAINED; rejection classes + high-trial revisit roadmap
+- Key evidence: E097 mutable Eytzinger search: target insertion up to ~72% slower and whole sort ~24% slower.
+
+E104 — V3 E045 gallop-trigger high-trial revalidation
+- Status: RETAINED in V3; propagation audited
+- Key evidence: 100k Sawtooth (21 balanced runs, selector active, no PowerSort/branchless): phase: 3,000 pairs, trigger5/trigger7 median 0.9710 (~2.9% faster) full: 1,000 fork-isolated pairs, median 0.9840 (~1.6% faster)
+
+E105 — V7 repeated one-register AVX2 continuation
+- Status: RETAINED narrowly at 5k-20k low-pile layouts
+- Key evidence: Exact-eight AVX2 lookup was ~23-25% faster locally, but only a narrow V7 5k-20k low-pile integration remained worthwhile; broad/large-N routing was rejected.
+
+E106 — V5 data-aware first overflow-boundary shaping
+- Status: REJECTED; no production change
+- Key evidence: 4,000 reconstruction+merge phase pairs: 0.99667 (~0.33% faster locally);
+- Decision: reject this integration.
+
+E107 — V1 merge-density recalibration
+- Status: RETAINED V1-specific 3.5/4.25/5 rule
+- Key evidence: K150, density ~3.72: 0.8226 (~17.7% faster);
+
+E108 — V1/V2/V3 non-freezing parity audit + roadmap
+- Status: DOCUMENTATION/PLANNING; identified historical drift
+- Historical housekeeping/planning record; procedural detail intentionally removed.
+
+E109 — Common V1/V2/V3 convergence baseline
+- Status: RETAINED common policy baseline; regressions logged for retuning
+
+E110 — V1/V2/V3 MATERIALIZED GAME/RUN ORDER REVALIDATION
+- Status: REJECTED AS COMMON CHANGE; E109 DESCENDING-FIRST BASELINE RETAINED
+- Key evidence: Deltas below are candidate ascending-first median paired ratio to std::sort divided by the E109 descending-first baseline median paired ratio; negative is faster with ascending-first.
+
+E111 — V1/V2/V3 SELECTIVE POWERSORT REVALIDATION
+- Status: RETAINED REMOVAL; ADJACENT-PAIR SCHEDULING IS THE COMMON V1/V2/V3 BASELINE
+- Key evidence: Targeted paired guardrails used Sorted+Noise(5%) and OrganPipe at 500k (60 trials) and 1m (60 trials). Negative deltas below mean PowerSort OFF was faster.
+
+E112 — V1/V2/V3 ORDERED-BOUNDARY PROBING REVALIDATION
+- Status: REJECT ALWAYS-ON; RETAIN ADAPTIVE PROBING AS COMMON V1/V2/V3 BASELINE
+- Key evidence: V1: Alternating -13.20%, Random +1.29%, Random%100 +4.41%, Sorted+Noise +17.18%; most other structured workloads were within about 1%.
+
+E113 — V1/V2/V3 RANDOM-ROUTE CLASSIFIER / GAME-BALANCE REVALIDATION
+- Status: REJECT FINAL-BALANCE REPLACEMENT AND COMBINED GUARD; RETAIN EARLYRANDOMLIKE
+- Key evidence: E109 replaced V1's historical final >=25% minority-game balance prerequisite with the same first-64 `earlyRandomLike` prerequisite used by V2/V3. Was the old V1 final game-balance signal actually a generally useful classifier that should be restored or propagated?
+
+E114 — V1/V2/V3 common non-freezing density threshold revalidation     RETAINED CURRENT COMMON POLICY
+- Status: RETAINED CURRENT COMMON POLICY
+- Key evidence: 10k: mostly near-neutral. No broad gain from the historical-high policy. The main isolated signal was V3 Rotated, where the midpoint was about 7.3% faster.
+
+E115 — V1/V2/V3 POST-FLATTEN MERGE-DRIVER CONSOLIDATION
+- Status: RETAIN V1 ENDS-BASED DRIVER AS THE SINGLE COMMON V1/V2/V3 DRIVER
+- Key evidence: Consolidating on the ends-based driver reduced aggregate V1/V2/V3 timing ~2.3%; V1 structural gains included Sawtooth ~15.8%, BlockSorted ~10.6%, OrganPipe ~20.1%, Rotated ~39.3%.
+
+E116 — IPNSORT SCORECARD PHASE PROFILING
+- Status: RETAIN PROFILER / DIAGNOSTIC
+- Key evidence: Profiling showed 100k d20 was ~72% insertion-bound; Random/Zipf were roughly split between insertion and merge; p5 spread cost across insertion/reconstruction/merge.
+
+E117 — ADJACENT-EQUALITY INSERTION REUSE (V2/V3)
+- Status: RETAIN
+- Key evidence: Adjacent-equality reuse improved p5 ~7-9% and d20 ~3-4% in V2/V3.
+
+E118 — ROUTED ADJACENT-EQUALITY REUSE (V1)
+- Status: RETAIN
+- Key evidence: Routed V1 adjacent-equality reuse improved p5 ~21.6% at 10k / ~26.7% at 100k and d20 ~7.3% at 100k while keeping Random flat.
+
+E119 — MODERATE-CARDINALITY VALUE→PILE CACHE (V2/V3)
+- Status: RETAIN
+- Key evidence: V2 d20 improved ~34.2% at 10k / ~33.7% at 100k; V3 ~22.8% / ~19.4%.
+
+E120 — MODERATE-CARDINALITY VALUE→PILE CACHE (V1)
+- Status: RETAIN
+- Key evidence: V1 d20 improved ~11.8% at 10k / 19.8% at 100k with Random essentially flat.
+
+E121 — BULK SAME-TAG RECONSTRUCTION (V2)
+- Status: RETAIN
+- Key evidence: Bulk same-tag reconstruction improved V2 p5 ~9.4% at 10k / ~8.1% at 100k and s95 ~1.7-2.1%.
+
+E122 — EXPLICIT EQUAL-SPAN MERGE CONSUMPTION
+- Status: REJECT
+- Key evidence: Explicit equal-span merge handling regressed p5 ~4.6% at 10k / ~5.6% at 100k because existing galloping already exploited those spans.
+
+E123 — FIXED LOW-CARDINALITY DIRECT BACKEND (V2)
+- Status: RETAIN
+- Key evidence: Low-cardinality direct backend improved V2 d20 ~81% at 10k / ~84.4% at 100k; canonical Random%100 improved ~91%.
+
+E124 — ONE-WAY NATURAL-PREFIX SCAN (SIMULATED PATH)
+- Status: RETAIN
+- Key evidence: One-way prefix scanning improved ascending ~33%, descending ~45-58%, with smaller Rotated/long-prefix gains.
+
+E125 — DOMINANT-VALUE EXTRACT / RESIDUAL SORT / SPLICE (V2)
+- Status: SUPERSEDED BY E129
+- Key evidence: Dominant-value extraction initially improved p5 ~49% at 10k / ~63% at 100k, but was later superseded by E129.
+
+E126 — MULTI-HEAVY ZIPF EXTRACTION
+- Status: REJECT
+- Key evidence: Multi-heavy Zipf extraction was ~43% slower at 10k and only ~2.4% faster at 100k; extra full-array passes did not amortize.
+
+E127 — BROAD ZIPF VALUE→PILE CACHE
+- Status: REJECT
+- Key evidence: Broader Zipf value→pile caching regressed Zipf ~6.1% at 10k / ~3.8% at 100k.
+
+E128 — ROUTED HIGH-ENTROPY EQUALITY-AWARE PARTITION BACKEND (V2)
+- Status: RETAIN
+- Key evidence: High-entropy backend improved V2 Random ~56.1% at 10k / ~54.6% at 100k and Zipf ~65.2% / ~68.7%.
+
+E129 — DOMINANT-VALUE ROUTE TO E128 BACKEND (V2)
+- Status: RETAIN; SUPERSEDES E125 BACKEND
+- Key evidence: Routing dominant-value p5 to the equality-aware partition backend improved another ~45.9% at 10k / ~47.7% at 100k over E125.
+
+E130 — TAIL-RECURSION CONVERSION IN E128
+- Status: REJECT
+- Key evidence: Tail-recursion conversion regressed Random ~3.2%; rejected.
+
+E131 — RECOVER E128 ZIPF ROUTER THRESHOLD
+- Status: RETAIN; RECOVERY CORRECTION
+- Key evidence: Restoring the 44/64 high-entropy cutoff recovered the lost Zipf improvement (~65% at 10k) while keeping d20 separated.
+
+E132 — RECOVER INTEGER TWO-HALF / BIDIRECTIONAL SMALLSORT IN E128
+- Status: RETAIN; RECOVERY CORRECTION
+- Key evidence: Recovered two-half/bidirectional smallsort improved Random ~3.55% at 10k / ~3.19% at 100k, with smaller p5/Zipf gains.
+
+E133 — PROPAGATE SPECIALIZED PRE-PATIENCE BACKENDS TO V3
+- Status: RETAIN
+- Key evidence: V3 specialized-route propagation improved target workloads roughly 58-94%, while native structured paths remained V3.
+
+E134 — PROPAGATE SPECIALIZED PRE-PATIENCE BACKENDS TO V1
+- Status: RETAIN
+- Key evidence: V1 specialized-route propagation improved Random/Zipf/d20/p5 roughly 59-92%.
+
+E135 — PROPAGATE SPECIALIZED PRE-PATIENCE ROUTING TO V4-V7
+- Status: RETAIN
+- Key evidence: V4-V7 propagation improved Random ~46-56% and Random%100 ~92-93% at 10k; 100k retained similarly large target gains with structured paths neutral.
+
+E136 — PERMANENT HYBRID VS FORCED-PATIENCE RESEARCH HARNESS
+- Status: RETAIN (research instrumentation only)
+- Key evidence: Sawtooth, BlockSorted, OrganPipe, Rotated and monotonic inputs are essentially native-Patience workloads; Forced Patience is within ~0-1.5% of Hybrid and massively faster than direct partition.
+
+E137 — FORCED-PATIENCE V2 PHASE + GEOMETRY BASELINE
+- Status: RETAIN (research baseline)
+- Key evidence: Forced-Patience 100k baseline: Random 1215us insertion + 1422us merge (~2811us total); Random%100 1040us insertion (~1396us total); Sorted+Noise ~955us total.
+
+E138 — ONLINE RECONSTRUCTION + FIRST-MERGE FUSION
+- Status: REJECT
+- Key evidence: Online reconstruction→merge fusion was ~53% slower even with fixed buffers; per-element queue bookkeeping overwhelmed one saved pass.
+
+E139 — HIGH-CARDINALITY RANDOM SINGLE-GAME PATIENCE STUDY
+- Status: POSITIVE RESEARCH RESULT; NOT PRODUCTION DEFAULT
+- Key evidence: Single-game high-cardinality Random reduced ~872 runs to ~621 at 100k and improved Forced-Patience whole sort ~5%; kept as research evidence, not production policy.
+
+E140 — TWO-GAME INTERLEAVED ILP INSERTION
+- Status: REJECT
+- Key evidence: Interleaved two-game searches preserved exact geometry but were ~49% slower at 10k / ~59% slower at 100k.
+
+E141 — FREEZE GEOMETRY + RECURSIVE PATIENCE OVERFLOW STUDY
+- Status: DEFER / NOT RETAINED GLOBALLY
+- Key evidence: ~35% freeze reaches ~511 top-level runs, but creates ~28.6k overflow elements and is slower overall.
+
+E142 — COHERENT VALUE->PILE CACHE FOR PATIENCE INSERTION
+- Status: RETAIN (V2/V3 core mechanism)
+- Key evidence: Coherent value→pile caching improved d20 ~32-33% and Random%100 ~8.7% at 10k / ~33.8% at 100k in V2/V3.
+
+E143 — PROPAGATE E142 COHERENT CACHE TO V1 AND V4-V7
+- Status: RETAIN with variation-specific gates
+- Key evidence: Propagation retained variation-specific cache gates; duplicate-heavy 100k improvements remained substantial across the family while structured guardrails stayed neutral after gating.
+
+E144 — NUMERICAL INTERPOLATION-GUIDED PILE SEARCH
+- Status: REJECT
+- Key evidence: Interpolation-guided pile search was ~82% slower at 10k / ~88% slower at 100k insertion despite decent index prediction.
+
+E145 — V1 MONOTONE / EARLY-PROBE HANDOFF CORRECTIONS
+- Status: RETAIN
+- Key evidence: V1 handoff/scanner fixes removed artificial singleton topology; the one-direction scanner made Reverse dramatically faster while Random stayed neutral.
+
+E146 — PROPAGATE E145 HANDOFF/SCANNER SEMANTICS TO V2-V7
+- Status: RETAIN
+
+E147 — RESTORE NON-DEFAULT / CUSTOM-COMPARATOR GENERICITY AFTER E143
+- Status: RETAIN (correctness/API repair; numeric fast path unchanged)
+
+E148 — POST-PREFIX LOCALITY / STRUCTURE-PROBE HANDOFF AUDIT
+- Status: PARTIAL RETAIN (V2/V7); V1 candidate REJECTED
+- Key evidence: V7 post-prefix locality sampling improved Sawtooth ~6% and BlockSorted ~11-14%; V2 long-prefix index fix improved a 5%-sorted-prefix + 95%-Random case ~34% at 10k / ~37% at 100k.
+
+E149 — SAWTOOTH OVERLAPPING-RUN MERGE SPECIALIZATION
+- Status: REJECT
+- Key evidence: Sawtooth ≤32-run tournament merge was ~5x slower; identical-run memcmp fast path was neutral/slightly slower.
+
+E150 — FOUR-VALUE SNAPSHOT PILE-SEARCH BATCHING WITH CONFLICT REPAIR
+- Status: REJECT
+- Key evidence: Four-value snapshot/repair batching preserved exact geometry but slowed Random insertion ~38% at 10k / ~30% at 100k.
+
+E151 — BLOCKED PILE-TAIL SEARCH + AVX2 LOCAL SCAN
+- Status: REJECT
+- Key evidence: Blocked tails + AVX2 local scan slowed Random insertion ~10% at 10k / ~8% at 100k.
+
+E152 — FIRST-LEVEL TINY-RUN WEIGHTED PROFILE
+- Status: PROFILE / DEPRIORITIZE ITEM 8
+- Key evidence: At 100k Random, ≤32-element first-level pairs were only ~3.8% of pairs and ~0.3% of elements; tiny-run kernels deprioritized.
+
+E153 — V4 STRUCTURE-AWARE RECURSIVE PATIENCE OVERFLOW
+- Status: RETAIN (V4)
+- Key evidence: V4 structure-aware recursive overflow improved 100k Sawtooth ~23% and BlockSorted ~11%; 1m gains ~21%/~18%, while the gate rejects Alternating.
+
+E154 — V5/V6 STRUCTURE-AWARE RECURSIVE OVERFLOW PROPAGATION
+- Status: RETAIN V5 / REJECT V6
+- Key evidence: V5 retained a narrower recursive-overflow route: Sawtooth/BlockSorted ~8.5% faster at 100k and ~5.7%/~8.1% at 1m; analogous V6 treatment regressed and was rejected.
+
+E155 — WHOLE-ARRAY TINY PRIMITIVE SMALLSORT
+- Status: RETAINED for N <= 32 on trivially-copyable values with the default std::less<T> comparator.
+- Key evidence: For random u64 N≤32, the shared tiny path reduced current-V2 cost to roughly 0.21-0.28x at N=8-32; at N=32 it was ~0.66-0.74x std::sort.
+
+E156 — V2/V3 PROPAGATION AUDIT + CONTROLLED-VARIATION RECONCILIATION
+- Status: RETAIN AUDIT/REFACTOR; REJECT V3 FLATTEN CUTOFF
+- Key evidence: Audit found V2/V3 native policy semantically aligned but duplicated router/merge-selector code posed future drift risk; those policies now share helpers. The provisional V3 flatten cutoff was rejected and removed.
+
+E157 — V2/V3 RECONSTRUCTION-vs-FLATTEN SWEEP
+- Status: MEASUREMENT ONLY; NO PRODUCTION CHANGE.
+- Key evidence: V3 in-place flatten was slower than V2 reconstruction on every tested shape, with the gap growing sharply at large N; preserve V3 as an intentional experimental artifact.
+
+E158 — BIASED DUAL-GAME ASSIGNMENT / PILE-GEOMETRY THROTTLING
+- Status: REJECT; geometry signal retained.
+- Key evidence: starving the secondary game removed ~17-21% of piles, but deeper dominant-game searches erased the gain and could trigger worse merge routing.
+
+E159 — OUTER-QUARTER FIT-QUALITY DUAL-GAME OVERRIDE
+- Status: REJECT.
+- Key evidence: opposite-game rechecks almost never changed geometry and made insertion ~72-82% slower.
+
+E160 — V2 ON-THE-FLY BLUEPRINT TAG DECODE
+- Status: INCONCLUSIVE / SUPERSEDED BY E161.
+- Key evidence: structured bulk spans benefited, but source/layout sensitivity and Alternating regressions made the first integration untrustworthy.
+
+E161 — LAYOUT-CONTROLLED V2 BULK TAG DECODE
+- Status: RETAIN.
+- Key evidence: revalidated bulk-span decode under controlled layout and retained it in V2 reconstruction while preserving fallback for non-bulk layouts.
+
+E162 — E161 PROPAGATION AUDIT + V7 RAW BULK-SPAN RECONSTRUCTION
+- Status: RETAIN V7 PROPAGATION; other variations resolved intentionally.
+- Key evidence: restored/retuned V7's raw bulk-span reconstruction; V1/V3/V4-V6 either use different representations or already-equivalent logic.
+
+E163 — V4 DIRECT-TO-RECURSIVE-OVERFLOW GATHER
+- Status: REJECT; phase profile retained.
+- Key evidence: bypassing the normal gather did not pay; V4 overflow profiling instead identified where later work should focus.
+
+E164 — HIGH-ENTROPY ADAPTIVE PIVOT SELECTION
+- Status: RETAIN for >=8192 high-entropy partitions; dominant-value route exempt.
+- Key evidence: adaptive sampling improved the general partition backend enough to retain without disturbing duplicate-specialized routing.
+
+E165 — IPNSORT-STYLE CYCLIC PARTITION KERNEL PARITY
+- Status: PARTIAL RETAIN.
+- Key evidence: cyclic partitioning was retained for eligible 8-byte integrals but rejected for int where it did not beat the existing kernel.
+
+E166 — PRIMITIVE 18-32 SMALLSORT PARITY
+- Status: RETAIN.
+- Key evidence: specialized primitive smallsorts improved partition leaves in the 18-32 range.
+
+E167 — PARTITION CONTROL FLOW: RECURSE-LEFT / ITERATE-RIGHT
+- Status: RETAIN for the normal high-entropy route; dominant-value route exempt.
+- Key evidence: asymmetric recursion/iteration reduced control-flow overhead without helping the duplicate-specialized path.
+
+E165-E167 — PROPAGATION CLOSURE AUDIT
+- Status: COMPLETE.
+- Key evidence: retained partition-backend changes were propagated where applicable and intentionally excluded from semantically different routes.
+
+E168 — ANCESTOR/EQUALITY PARITY AUDIT
+- Status: REJECT.
+- Key evidence: ipnsort-style ancestor/equality handling did not beat Jessesort's existing equality shortcut.
+
+E169 — OPPOSITE-GAME NEW-PILE RESCUE
+- Status: REJECT.
+- Key evidence: rescue attempts produced essentially no useful pile-geometry change.
+
+E170 — V4/V5/V6 FREEZE-PERCENTAGE SWEEP
+- Status: MEASUREMENT ONLY.
+- Key evidence: no tested alternative displaced the 50% production freeze point.
+
+E171 — SAMPLED DUAL-GAME BLOCK ROUTER
+- Status: REJECT.
+- Key evidence: extra sampling/search cost raised insertion time while leaving downstream pile geometry effectively unchanged.
+
+E172 — LOW-MEMORY V3 BOUNDED MERGE BUFFER
+- Status: REJECT.
+- Key evidence: memory savings were real but the bounded merge path was too slow.
+
+E173 — INSERTION-TIME IN-PLACE FLATTEN DESTINATION AVAILABILITY
+- Status: CLOSED / NO CHANGE.
+- Key evidence: final permutation destinations are not certifiable online during ordinary insertion, so the proposed incremental flatten is not directly available.
+
+E174 — FREEZE-FAMILY PHASE REPROFILE
+- Status: DIAGNOSTIC.
+- Key evidence: after prior merge work, insertion and reconstruction—not final merge—became the dominant V4-V6 costs.
+
+E175 — V6 ADAPTIVE NATURAL LIVE OVERFLOW RUNS
+- Status: RETAIN.
+- Key evidence: natural-run-sized live overflow handling beat the older fixed-width adaptive rule on structured cases.
+
+E176 — V6 BIDIRECTIONAL NATURAL OVERFLOW RUNS
+- Status: VALIDATED FOR ROUTER STUDY; not default alone.
+- Key evidence: bidirectional natural overflow was useful on mixed-direction structure but needed routing rather than unconditional use.
+
+E177 — V6 OVERFLOW SHAPE SIGNAL AUDIT
+- Status: COMPLETE.
+- Key evidence: selected the multi-signal inputs used by the later V6 overflow router rather than relying on one pile-count threshold.
+
+E178 — V6 OVERFLOW KERNEL SHOOTOUT
+- Status: COMPLETE.
+- Key evidence: natural-vs-live tiers were validated; repair/deferred alternatives were not retained.
+
+E179 — V6 MULTI-TIER / GEOMETRY-FIRST ROUTER (A-E)
+- Status: RETAIN final E179E geometry-first router.
+- Key evidence: strict routing beat balanced routing; sampling tax was ~1%; final policy uses geometry/direction first and pile count second to avoid >10% structured regressions.
+
+E180 — CANONICAL BENCHMARK GOVERNANCE
+- Status: RETAIN; generator details finalized by E180C.
+- Key evidence: established the 12-row canonical suite, deterministic/resumable methodology, and consistent cross-size structured generators.
+
+E180B — 12-ROW BENCHMARK REDESIGN
+- Status: SUPERSEDED BY E180C.
+- Key evidence: useful intermediate redesign, reopened to fix structured scaling.
+
+E180C — n^(2/3) STRUCTURED-GENERATOR SCALE + FROZEN BASELINE
+- Status: RETAIN.
+- Key evidence: standardized structured run/block counts across N and froze the corrected baseline methodology.
+
+E181 — SHORT-PREFIX SAME-DIRECTION HANDOFF
+- Status: RETAIN.
+- Key evidence: corrected boundary ownership after short prefixes so continuation in the same natural direction avoids needless game switching.
+
+E182 — CANONICAL DIRECTION / TOPOLOGY AUDIT
+- Status: COMPLETE / MEASUREMENT ONLY.
+- Key evidence: verified generator directionality, run topology, and boundary behavior used by later routing experiments.
+
+E183 — GATED VALLEY BOUNDARY OWNERSHIP
+- Status: RETAIN.
+- Key evidence: selectively rescues valley boundaries back to the ascending game without broadly perturbing mixed-direction behavior.
+
+E184 — DIRECTION-AWARE ROUTER REVISIT
+- Status: COMPLETE / NO GENERAL CHANGE.
+- Key evidence: broad >64 directional-dominance routing was rejected; only the exact-balance low-pile case survived in E184B.
+
+E184B — EXACT-BALANCE LOW-PILE BIDIRECTIONAL ROUTE
+- Status: RETAIN in V6.
+- Key evidence: exact balanced low-pile geometry reliably identifies the bidirectional-natural overflow case.
+
+E185 — PEAK OWNERSHIP REVIEW
+- Status: KEEP PEAKS ASCENDING; no production change.
+- Key evidence: alternative peak ownership did not justify changing the established boundary convention.
+
+E186 — LINKED BLUEPRINT / POTENTIAL V8
+- Status: PLANNED / NOT RETAINED IN V2.
+- Key evidence: opened the linked-representation branch as a separate variation rather than complicating V2.
+
+E187 — PARTITION-BACKEND COMPLETENESS AUDIT
+- Status: COMPLETE.
+- Key evidence: closed the primitive ipnsort follow-up after confirming the retained high-entropy backend pieces were already represented or not worthwhile.
+
+E188 — DUAL-GAME ASSIGNMENT CLOSURE AUDIT
+- Status: COMPLETE; area dormant.
+- Key evidence: repeated assignment heuristics failed to improve geometry enough to cover their extra searches; reopen only with a genuinely new signal/state model.
+
+E189 — V2/V7 RECONSTRUCTION TRAFFIC AUDIT
+- Status: RETAIN V7 restoration/retune.
+- Key evidence: restored the missed raw bulk-span decode in V7 and closed the conventional reconstruction-pass cleanup queue.
+
+E190 — MODERN INDEX-TAIL RETEST
+- Status: UNIVERSAL REPLACEMENT REJECTED; V9/genericity path retained.
+- Key evidence: index tails were not a cheap-type V2 replacement but remained important for move-only and type-domain work.
+
+E191 — V8 LINKED-BLUEPRINT BASELINE
+- Status: ESTABLISHED EXPERIMENTAL VARIATION.
+- Key evidence: linked reconstruction was made a separate V8 baseline rather than replacing V2.
+
+E192 — V8 LINKED-BLUEPRINT STABILIZATION
+- Status: RETAIN BASELINE.
+- Key evidence: corrected/stabilized the linked implementation sufficiently for controlled follow-up experiments.
+
+E193 — V8 ROUTING COVERAGE / FORCED-LINKED BASELINE
+- Status: RETAIN REFERENCE.
+- Key evidence: measured where linked reconstruction actually executes and established a forced-linked control for router studies.
+
+E194 — V8 CATASTROPHIC-SHAPE FALLBACK ROUTER
+- Status: PROMISING CANDIDATE / superseded by later V8 routing work.
+- Key evidence: routing away from linked reconstruction on clearly hostile geometry removed the worst failures.
+
+E195 — V8 NOISE-DENSITY FALLBACK ROUTER
+- Status: PROMISING CANDIDATE / superseded by later V8 routing work.
+- Key evidence: noise density provided another useful rejection signal for the linked path.
+
+E196 — V8 LINKED FIRST-MERGE FUSION
+- Status: PARTIAL / not retained alone.
+- Key evidence: fusion helped Sawtooth/OrganPipe but did not eliminate linked metadata traffic; kept as a component for later layouts.
+
+E197 — V8 LINKED FUSION BOUNDARY FAST PATHS
+- Status: NO standalone retain.
+- Key evidence: ordered/reverse-disjoint checks could not rescue cases dominated by metadata construction/traversal cost.
+
+E198 — V8 IN-PLACE ELEMENT LINKS
+- Status: RETAIN into later V8.
+- Key evidence: reusing blueprint storage for links removed a second O(n) link array and broadly improved the linked path.
+
+E199 — V8 IN-PLACE LINKS + FIRST-MERGE FUSION
+- Status: RETAIN into later V8.
+- Key evidence: combined the cheaper link representation with first-level fusion; strong on several structured/noisy rows but still needed locality routing.
+
+E200 — V8 COMPACT SPAN-LINKED RECONSTRUCTION
+- Status: RETAIN into later V8.
+- Key evidence: span compression was excellent on contiguous structured layouts but poor on Alternating, which creates nearly one span per element.
+
+E201 — V8 LINKED-ONLY LOCALITY ROUTER
+- Status: RETAIN V8 BASELINE.
+- Key evidence: first-64 span density routes between compact spans and in-place element links; full canonical acceptance passed.
+
+E202 — V9 U64 INDEX-TAIL BASELINE
+- Status: RETAIN AS V9 CANDIDATE.
+- Key evidence: established a current index-tail baseline for primitive performance and later genericity work.
+
+E203 — V9 MOVE-ONLY GENERIC COMPLETION + MAINTAINED INTEGRATION
+- Status: RETAIN.
+- Key evidence: completed non-copyable/move-only support while preserving the index-tail insertion mechanism as a maintained variation.
+
+E204 — RANDOM BASELINE REGRESSION / EXPERIMENT-LEAKAGE AUDIT
+- Status: COMPLETE / NO REVERT.
+- Key evidence: V1-V7 hashes matched E189; apparent Random regression reproduced with untouched old code and was traced to host/session and benchmark-context differences, not experiment leakage.
+
+E205 — BENCHMARK CONTEXT STABILITY / PRECONDITIONER AUDIT
+- Status: RETAIN existing rotating order; reject added preconditioner.
+- Key evidence: 8-vs-10-algorithm rotation drift stayed <~0.5%, while self-warming perturbed absolute V2 time by ~6%; same-session/CPU governance became mandatory.
+
+E206 — TYPE-DOMAIN VALUE-TAIL VS INDEX-TAIL STUDY
+- Status: MEASUREMENT / TYPE MAP.
+- Key evidence: index tails remained slower for cheap trivial records but became attractive for nontrivial owners and were required for move-only types; later results were re-reduced order-neutrally.
+
+E207 — TYPE-ROUTING BOUNDARY MAP
+- Status: COMPLETE.
+- Key evidence: no reliable trivial-size crossover through 96 bytes; copy/nontrivial traits were more predictive than sizeof(T).
+
+E208 — LARGE-TRIVIAL / NONTRIVIAL-OWNER ROUTING COMPLETION
+- Status: TYPE MAP COMPLETE / NO SORT-CODE CHANGE.
+- Key evidence: no defensible byte threshold through 256-byte trivial records; conservative type-only guidance became non-copyable or nontrivial-owner -> indexed, trivial-copyable -> simulated/value-tail.
+
+E209 — V10 ALLOCATION-FREE BOUNDED BASELINE
+- Status: RETAIN as maintained zero-allocation baseline.
+- Key evidence: fixed tail/run metadata plus allocation-free fallback sorted canonical and move-only cases with zero heap allocations, though structured performance was initially much slower than V2.
+
+E210 — V10 FIXED-WORKSPACE COMPRESSION
+- Status: RETAIN.
+- Key evidence: reduced explicit fixed metadata peak to ~2.56 KiB with equivalent routing/correctness and essentially neutral timing.
+
+E211 — BOUNDED-CHUNK CAPACITY ANALYSIS, RIGID 63/64 BASELINE
+- Status: COMPLETE / NO CODE CHANGE.
+- Key evidence: quantified where fixed directional capacities overflow and established rigid 63/64 as the control for adaptive-capacity work.
+
+E212 — ADAPTIVE PER-CHUNK GAME-CAPACITY ANALYSIS
+- Status: COMPLETE / CANDIDATE IDENTIFIED.
+- Key evidence: simulations showed shared/adaptive capacity could materially reduce directional waste on some structured shapes.
+
+E213 — V10 MONOTONE-CONFIRMED ADAPTIVE CAPACITY
+- Status: REJECT.
+- Key evidence: adaptive capacity postponed Sawtooth pile overflow only to hit the 64-run limit, making 1m Sawtooth ~35.6% slower.
+
+E214 — NAIVE CHUNK SEALING + ALLOCATION-FREE ROTATION MERGE
+- Status: REJECT.
+- Key evidence: sealing/sorting chunks and recursively rotation-merging them was catastrophically slower on Noise/Alternating and still ~17% slower on targeted 1m Sawtooth.
+
+E215 — LIVE PILE-RECYCLING STRUCTURAL SCREEN
+- Status: ANALYSIS COMPLETE / DEFERRED.
+- Key evidence: live recycling looked structurally plausible, but V10 lacks allocation-free membership metadata needed to merge active scattered piles safely.
+
+E216 — V11 SHARED 127-TAIL POOL + SELECTIVE LOW-RUN IN-PLACE MERGE
+- Status: RETAIN / V11 BANKED.
+- Key evidence: shared bounded tail storage plus geometry-gated in-place natural-run merging materially improved the allocation-free branch while preserving zero-allocation/move-only guarantees.
+
+E217 — V11 BOUNDED LIVE RUN-STATE RECLAMATION
+- Status: RETAIN.
+- Key evidence: when >64 long natural runs are encountered, V11 reclaims descriptors by merging the smallest adjacent completed pair; 1m MixedDirectionRuns fell from ~34.5 ms to ~19.1 ms without allocating.
+
+E218 — V11 EARLY REPEATED-OVERLAP / SAWTOOTH ROUTER
+- Status: RETAIN.
+- Key evidence: early repeated-ramp detection avoids the full classification pass before allocation-free fallback; 1m Sawtooth dropped from ~22.1 ms to ~10.9 ms while E217's Mixed win remained.
+
+E219 — V11 FREE-8 SMALLEST-ADJACENT RECLAMATION
+- Status: REJECT.
+- Key evidence: batching 8 minimum-adjacent merges reduced capacity events but added premature movement; 1m Mixed was ~1.0024x E218.
+
+E220 — V11 ALL-21 LOCAL THREE-RUN RECLAMATION
+- Status: REJECT / useful baseline.
+- Key evidence: 21 disjoint a-vs-c triple merges in one event were nearly neutral (~0.9971x on 1m Mixed) despite extra merges, showing scheduler scans were not the bottleneck.
+
+E221 — V11 POWERSORT-GUIDED 21-MERGE RECLAMATION
+- Status: REJECT / CLOSE SCHEDULER STUDY.
+- Key evidence: PowerSort-guided 21-way reclamation was ~1.0106x on 1m Mixed; deeper reclamation-policy microstudies were deprioritized.
+
+E222 — V3-DERIVED BOUNDED PERMUTATION PRIMITIVE
+- Status: REJECT.
+- Key evidence: fixed-window V3 cycle reconstruction remained ~1.8-7.5x slower than the allocation-free partition fallback because the subsequent in-place combine dominated.
+
+E223 — POST-E218 FULLY-SHARED-127 CAPACITY REASSESSMENT
+- Status: REJECT.
+- Key evidence: Noise5/10 still exhaust the total 127-tail budget; removing 63/64 directional caps only postpones fallback and does not solve the large-N cost.
+
+E224 — DENSE-RANGE COUNTING BACKEND
+- Status: INVALID / BENCHMARK-DOMAIN OVERFIT.
+- Key evidence: the apparent huge Noise5/10 win exploited the generator-specific [0,n) numeric universe, not generic comparison-sort structure. Production remained pre-E224 and a guardrail against generator-domain overfitting was added.
+
+E225 — V2 BOUNDED LONG-NATURAL-RUN DIRECT ROUTE — RETAINED
+-----------------------------------------------------------------------
+- Goal: produce a high-impact V2 speedup by removing whole Patience/blueprint/reconstruction phases on inputs
+  that are already a small sequence of long natural runs, without using canonical generator identities or
+  numeric-domain properties. CPU: AMD EPYC 9V74 80-Core Processor; GCC 14.2.0; C++20 -O3 -march=native -DNDEBUG.
+- Final route, before V2 Patience insertion and only for n>=10k: require the first 64 values to be nondecreasing under
+  `Less`; require at least one inversion in nine evenly spaced coarse samples so fully Sorted returns to existing V2;
+  then perform a mutation-free natural-run preflight into fixed `NaturalRun[128]`. If a 129th run would be needed,
+  reject before mutation. If accepted, reverse descending natural runs, collect their ends, and merge them directly
+  with V2's existing O(n) auxiliary merge storage. The route is comparator-defined and supports custom strict-weak
+  orderings; it does not inspect key ranges/cardinality/seeds.
+- Mechanism screen: unconditional direct natural-run merging showed large headroom but was bad on Alternating and
+  Noise10, motivating the generic structural router. The final <=128-run preflight also prevents the adversarial
+  `64 sorted values + random suffix` case from entering the route.
+- Final source-integrated causal A/B, frozen pre-E225 V2 -> candidate, order-neutral ratios:
+    * 10k: Sawtooth 0.663, Mixed 0.918, Block 0.276, OrganPipe 0.583, Rotated 0.276.
+    * 100k: Sawtooth 0.721, Mixed 0.506, Block 0.340, OrganPipe 0.674, Rotated 0.483.
+    * 1m x50: Sawtooth 0.739, Mixed 0.938, Block 0.412, OrganPipe 0.663, Rotated 0.513.
+  Mixed is intentionally partial because only its ascending-prefix subset enters E225. Exact us and raw A/B evidence
+  are under `benchmarks/baselines/e225/`.
+- Genericity/safety: a 100k adversarial 64-sorted-prefix/random-suffix input was rejected before mutation; a
+  non-default-constructible record using a custom descending comparator entered the route and sorted correctly.
+- Regression audit: same-binary duplicate template instantiation can visibly perturb inactive rows (e.g. Reverse), so
+  those flags were not dismissed. A fresh exact-frozen 10k full-suite baseline and three separate-build 1m repeats
+  were used to isolate dispatch/code-layout cost. Reverse was essentially identical in every separate-build repeat;
+  Random/Noise/Alternating varied in both directions with no reproducible candidate penalty. Random was explicitly
+  reviewed. Earlier old-session full-suite comparisons also moved unchanged V1-V11 cells together and were treated
+  as host/session evidence rather than causal E225 deltas.
+- Full acceptance: final bounded candidate completed canonical V1-V11 + std::sort, all 12 workloads, 500 trials at
+  1k/10k/100k and 50 at 1m, with no correctness failures. Final production V2 medians include 100k Sawtooth
+  655.109 us, Mixed 133.478 us, Block 81.572 us, OrganPipe 144.610 us, Rotated 39.860 us; 1m respective medians
+  7.287/4.514/1.762/2.302/1.149 ms. Full tables and compressed raw trials are preserved in the E225 baseline folder.
+- Propagation audit: V2 = PROPAGATED+TESTED+RETAINED. V1 and V3-V11 = INTENTIONALLY DIFFERENT / NOT APPLICABLE
+  for E225 propagation because this is a V2 public-wrapper pre-router that bypasses the variations' defining
+  insertion/reconstruction mechanisms. All eleven variations were still TESTED in full acceptance.
+- Decision: RETAIN E225. Do not tune the 64/9/128 gates as a micro-study next; move to phase measurement of the
+  remaining Random/Noise paths for the next high-impact experiment.
+
+E226 — BENCHMARK MULTI-VARIATION SELECTOR — RETAINED
+-----------------------------------------------------------------------
+- Scope: benchmark infrastructure only; no sorting implementation, generator, seed schedule, warmup, timing,
+  validation, resume, statistics, or canonical trial-count logic changed. This is a meaningful benchmark refactor
+  and is numbered E226 at user request.
+- Replaced the E225 single optional selector (`selected_variation=V2`) with a comma-separated selector mask
+  (`selected_variations=V2,V5,V9`). `all` or an omitted fifth argument still selects every Jessesort variation.
+  Any explicit selection automatically includes `std::sort` because paired ratios require the same-trial baseline.
+- Parser rejects empty/unknown tokens and `std::sort` as an explicitly requested Jessesort variation. Duplicate
+  variation names are harmless because selection is represented by the existing fixed boolean algorithm mask.
+- Validation smoke: `./benchmark 1 1000 0 "" V2,V5,V9` produced raw rows only for V2/V5/V9/std::sort across
+  all 12 canonical inputs. A no-selector `./benchmark 1 1000 0` run produced V1-V11/std::sort, confirming default
+  behavior is preserved. Both completed without correctness failures.
+- Evidence: `benchmarks/benchmark.cpp.pre-e226` is the exact pre-refactor benchmark source;
+  `benchmarks/baselines/e226/benchmark_selector.diff` contains the audited source diff.
+- Decision: RETAIN E226. This changes benchmark selection ergonomics only and is not a sorting-performance result.
+
+
+E227 — E225 NATURAL-RUN PRE-ROUTER PROPAGATION — RETAINED
+-----------------------------------------------------------------------
+- Goal: propagate the high-impact E225 early structural route beyond V2 wherever doing so preserves each
+  variation's resource model. CPU: AMD EPYC 9V74 80-Core Processor; GCC 14.2.0; C++20 -O3 -march=native -DNDEBUG.
+- Scope: V1 and V3-V9 now call the same comparator-only `tryLongAscendingNaturalRunDirect` pre-router from their
+  public wrappers after tiny-sort handling and before their defining Patience/freeze/SIMD/linked/index-tail
+  pipelines. V2 is unchanged because it already owns E225. V10/V11 are intentionally NOT propagated because
+  E225 allocates O(n) merge scratch and would violate their zero-allocation contract.
+- Primary methodology: frozen E226 headers vs propagated candidate, canonical generators/seeds, E226 selector
+  `V1,V2,V3,V4,V5,V6,V7,V8,V9`, 500 trials at 10k and 100k. V2 was deliberately unchanged and served as an
+  internal session-noise control.
+- 100k candidate/frozen median-time ratios on the major routed structured rows:
+    * V1: Sawtooth 0.403, Mixed 0.188, Block 0.106, OrganPipe 0.570, Rotated 0.257.
+    * V3: 0.418, 0.170, 0.074, 0.407, 0.227.
+    * V4: 0.430, 0.214, 0.114, 0.626, 0.314.
+    * V5: 0.435, 0.209, 0.112, 0.572, 0.098.
+    * V6: 0.473, 0.197, 0.102, 0.440, 0.082.
+    * V7: 0.752, 0.475, 0.273, 0.698, 0.372.
+    * V8: 0.762, 0.389, 0.220, 0.727, 0.301.
+    * V9: 0.565, 0.294, 0.159, 0.763, 0.455.
+  These converge toward the same direct natural-run backend cost because the route intentionally bypasses each
+  variation's downstream representation when structural proof succeeds. Mixed remains partial because E225's
+  ascending-prefix gate accepts only a subset of MixedDirectionRuns trials.
+- Regression audit: several inactive rows moved >1% across separate benchmark sessions, but the unchanged V2
+  control moved comparably (notably 10k Alternating), showing substantial session/code-placement noise. At 100k
+  Random and Random%25 remained approximately neutral across the propagated family. No generic-domain assumptions
+  were added; this is the exact E225 comparator-defined structural route.
+- Secondary acceptance: full V1-V11 + std::sort canonical sweep completed with 500 trials at 1k/10k/100k and
+  50 trials at 1m, all 12 inputs, with no correctness failures. V10/V11 remain byte-unmodified by E227.
+- Decision: RETAIN. E225 is now a shared early structural router for allocating V1-V9, while V10/V11 preserve
+  their allocation-free identities. Evidence: `benchmarks/baselines/e227/`.
+
+
+E228 — PERMANENT MIXED-PHASE ROUTER-SAFETY INPUTS — RETAINED
+-----------------------------------------------------------------------
+- Scope: benchmark/router-safety infrastructure only; no Jessesort algorithm, timing, seed mixer, warmup,
+  execution-order, validation, statistics, or original 12 generator bodies changed. CPU for the initial timed
+  baseline: AMD EPYC 9V74 80-Core Processor; GCC 14.2.0; C++20 -O3 -march=native -DNDEBUG.
+- Added `MixedPhase3`: contiguous near-equal phases Sorted+Noise(5%) -> MixedDirectionRuns -> Random. The first
+  phase intentionally attempts to mislead a prefix-only structured router; the second exercises both natural
+  directions / dual-Patience games; the final phase introduces late high entropy.
+- Added `MixedPhase12`: one contiguous near-equal phase from each of the 12 E180C baseline generators in their
+  frozen baseline order. Phase endpoints use integer proportional boundaries, so lengths differ by at most one
+  element and exactly cover n. Each phase is generated by calling the existing unchanged generator on that phase
+  length with the same trial RNG stream; no input-name information is exposed to sorting code.
+- Historical comparability: original InputType numeric IDs and all 12 generator bodies remain unchanged, so their
+  canonical trial seeds are unchanged. The default benchmark now appends the two router-safety rows after Rotated.
+- Validation: all V1-V11 + std::sort completed a 10k smoke trial on all 14 rows with no correctness failures.
+  Current V2 100k x500 initial baselines: MixedPhase3 median 2425.753 us, paired ratio 0.7781 vs std::sort;
+  MixedPhase12 median 1524.820 us, paired ratio 0.6116.
+- E225 route audit at 100k x500: Random/Sorted/Reverse/Noise5/Noise10/Random25/Alternating/MixedPhase3/
+  MixedPhase12 = 0/500 accepts; Sawtooth 500/500, MixedDirectionRuns 261/500, BlockSorted 499/500,
+  OrganPipe 500/500, Rotated 498/500. Thus the current E225 route does not trust its initial probe alone: its
+  mutation-free full <=128-natural-run preflight rejects both phase-change rows. The repeated-probe roadmap is
+  aimed at other prefix-derived routing decisions and future streaming adaptation, not at weakening E225's proof.
+- Decision: RETAIN both inputs as permanent router-safety rows. Do not tune routing against their exact one-third
+  or one-twelfth boundaries; use them to detect unsafe extrapolation and to evaluate repeated-probe policies.
+- Evidence: `benchmarks/baselines/e228/`.

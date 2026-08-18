@@ -1,8 +1,8 @@
-#ifndef JESSESORT_SIMULATED_EARLY_FREEZE_HPP
-#define JESSESORT_SIMULATED_EARLY_FREEZE_HPP
+#ifndef JESSESORT_E229_JESSESORT_SIMULATED_FROZEN_DIRECT_MERGE_PROBE_ROUTED_ADJACENT_ADAPTIVE_BUFFERED_DEFERRED_BANDS32_H
+#define JESSESORT_E229_JESSESORT_SIMULATED_FROZEN_DIRECT_MERGE_PROBE_ROUTED_ADJACENT_ADAPTIVE_BUFFERED_DEFERRED_BANDS32_H
 
 #include <jessesort/tiny_sort.h>
-#include <jessesort/v2_simulated.h>
+#include <jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h>
 
 #include <algorithm>
 #include <array>
@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace jessesort::simulated_early_freeze {
+namespace jessesort::simulated_early_freeze_direct_merge {
 
 // V5 freezes the simulated pile structure early, collects later values into
 // small unsorted overflow bands, then sorts those bands during reconstruction.
@@ -26,10 +26,10 @@ namespace jessesort::simulated_early_freeze {
 // Shared blueprint encoding and merge logic are maintained in v2_simulated.h.
 // This header keeps only the compact early-freeze pile search plus the
 // freeze/overflow-specific pipeline.
-using simulated::OVERFLOW_TAG;
-using simulated::isAscTag;
-using simulated::isDescTag;
-using simulated::localPileId;
+using simulated_direct_merge::OVERFLOW_TAG;
+using simulated_direct_merge::isAscTag;
+using simulated_direct_merge::isDescTag;
+using simulated_direct_merge::localPileId;
 
 template <bool UseHint = true, typename T, typename Less = std::less<T>>
 inline int findDescendingPileWithTails(
@@ -112,12 +112,12 @@ inline void simulateInsertValueDescendingPiles(
         tails[static_cast<std::size_t>(pileIndex)] = value;
         ++descCounts[static_cast<std::size_t>(pileIndex)];
     } else {
-        assert(pileIndex >= 0 && static_cast<uint32_t>(pileIndex) <= simulated::PILE_MASK);
+        assert(pileIndex >= 0 && static_cast<uint32_t>(pileIndex) <= simulated_direct_merge::PILE_MASK);
         tails.push_back(value);
         descCounts.push_back(1);
     }
     lastPileIndex = pileIndex;
-    blueprint[originalIndex] = simulated::makeDescTag(static_cast<uint32_t>(pileIndex));
+    blueprint[originalIndex] = simulated_direct_merge::makeDescTag(static_cast<uint32_t>(pileIndex));
 }
 
 template <bool UseHint = true, typename T, typename Less = std::less<T>>
@@ -141,12 +141,12 @@ inline void simulateInsertValueAscendingPiles(
         tails[static_cast<std::size_t>(pileIndex)] = value;
         ++ascCounts[static_cast<std::size_t>(pileIndex)];
     } else {
-        assert(pileIndex >= 0 && static_cast<uint32_t>(pileIndex) <= simulated::PILE_MASK);
+        assert(pileIndex >= 0 && static_cast<uint32_t>(pileIndex) <= simulated_direct_merge::PILE_MASK);
         tails.push_back(value);
         ascCounts.push_back(1);
     }
     lastPileIndex = pileIndex;
-    blueprint[originalIndex] = simulated::makeAscTag(static_cast<uint32_t>(pileIndex));
+    blueprint[originalIndex] = simulated_direct_merge::makeAscTag(static_cast<uint32_t>(pileIndex));
 }
 
 
@@ -334,7 +334,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
 
     result.blueprint.resize(n);
 
-    const std::size_t reservePiles = simulated::estimatePileReserve(result.freezePoint);
+    const std::size_t reservePiles = simulated_direct_merge::estimatePileReserve(result.freezePoint);
     result.ascCounts.reserve(reservePiles);
     result.descCounts.reserve(reservePiles);
     result.ascTails.reserve(reservePiles);
@@ -349,7 +349,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
     const bool confirmedShortSameDirectionPrefix =
         prefixDirection != PrefixDirection::Unknown &&
         prefixEnd < MinPrefixPileLength &&
-        jessesort::simulated::confirmedShortSameDirectionPrefix(
+        jessesort::simulated_direct_merge::confirmedShortSameDirectionPrefix(
             arr, prefixEnd, prefixDirection == PrefixDirection::Descending, less,
             MinPrefixPileLength);
     const bool materializePrefix =
@@ -361,24 +361,24 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
         if (prefixDirection == PrefixDirection::Ascending) {
             result.ascTails.push_back(arr[prefixEnd - 1]);
             result.ascCounts.push_back(prefixEnd);
-            std::fill_n(result.blueprint.begin(), prefixEnd, simulated::makeAscTag(0));
+            std::fill_n(result.blueprint.begin(), prefixEnd, simulated_direct_merge::makeAscTag(0));
             descendingMode = false;
         } else {
             result.descTails.push_back(arr[prefixEnd - 1]);
             result.descCounts.push_back(prefixEnd);
-            std::fill_n(result.blueprint.begin(), prefixEnd, simulated::makeDescTag(0));
+            std::fill_n(result.blueprint.begin(), prefixEnd, simulated_direct_merge::makeDescTag(0));
             descendingMode = true;
         }
     } else {
         if (prefixDirection == PrefixDirection::Descending) {
             result.descTails.push_back(arr[0]);
             result.descCounts.push_back(1);
-            result.blueprint[0] = simulated::makeDescTag(0);
+            result.blueprint[0] = simulated_direct_merge::makeDescTag(0);
             descendingMode = true;
         } else {
             result.ascTails.push_back(arr[0]);
             result.ascCounts.push_back(1);
-            result.blueprint[0] = simulated::makeAscTag(0);
+            result.blueprint[0] = simulated_direct_merge::makeAscTag(0);
             descendingMode = false;
         }
     }
@@ -453,7 +453,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
         }
         if (overflow) {
             observeOverflowSample(value);
-            result.blueprint[i] = simulated::OVERFLOW_TAG;
+            result.blueprint[i] = simulated_direct_merge::OVERFLOW_TAG;
             ++result.overflowCount;
         }
     };
@@ -535,7 +535,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
                             }
                             std::fill(result.blueprint.begin() + static_cast<std::ptrdiff_t>(i),
                                       result.blueprint.begin() + static_cast<std::ptrdiff_t>(runEnd),
-                                      simulated::makeAscTag(static_cast<uint32_t>(firstPile)));
+                                      simulated_direct_merge::makeAscTag(static_cast<uint32_t>(firstPile)));
                             lastPileIndexAscending = firstPile;
                             descendingMode = false;
                             postPrefixDirectionOverride = false;
@@ -557,7 +557,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
                             }
                             std::fill(result.blueprint.begin() + static_cast<std::ptrdiff_t>(i),
                                       result.blueprint.begin() + static_cast<std::ptrdiff_t>(runEnd),
-                                      simulated::makeDescTag(static_cast<uint32_t>(firstPile)));
+                                      simulated_direct_merge::makeDescTag(static_cast<uint32_t>(firstPile)));
                             lastPileIndexDescending = firstPile;
                             descendingMode = true;
                             postPrefixDirectionOverride = false;
@@ -588,9 +588,9 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
     }
 
     const bool coherentCacheCandidate = enableCoherentValuePileCache &&
-        simulated::coherentValuePileCacheSampleCandidate(arr, less, arr.size() >= 50000);
+        simulated_direct_merge::coherentValuePileCacheSampleCandidate(arr, less, arr.size() >= 50000);
     if (coherentCacheCandidate) {
-        if constexpr (simulated::specializedIntegralEligible<T, Less>) {
+        if constexpr (simulated_direct_merge::specializedIntegralEligible<T, Less>) {
             struct CacheEntry {
                 std::uint64_t key = 0;
                 std::uint32_t pile = 0;
@@ -627,8 +627,8 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
                     ++counts[p];
                     lastPile = static_cast<int>(p);
                     result.blueprint[originalIndex] = descendingMode
-                        ? simulated::makeDescTag(static_cast<std::uint32_t>(p))
-                        : simulated::makeAscTag(static_cast<std::uint32_t>(p));
+                        ? simulated_direct_merge::makeDescTag(static_cast<std::uint32_t>(p))
+                        : simulated_direct_merge::makeAscTag(static_cast<std::uint32_t>(p));
                     return;
                 }
 
@@ -641,7 +641,7 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
                 }
                 if (pileIndex == static_cast<int>(tails.size()) && frozen) {
                     observeOverflowSample(value);
-                    result.blueprint[originalIndex] = simulated::OVERFLOW_TAG;
+                    result.blueprint[originalIndex] = simulated_direct_merge::OVERFLOW_TAG;
                     ++result.overflowCount;
                     return;
                 }
@@ -661,8 +661,8 @@ FrozenInsertionResult<T> simulatePatienceInsertionBlueprintEarlyFreezeImpl(
                 cache[b] = CacheEntry{key, static_cast<std::uint32_t>(p), true};
                 lastPile = pileIndex;
                 result.blueprint[originalIndex] = descendingMode
-                    ? simulated::makeDescTag(static_cast<std::uint32_t>(p))
-                    : simulated::makeAscTag(static_cast<std::uint32_t>(p));
+                    ? simulated_direct_merge::makeDescTag(static_cast<std::uint32_t>(p))
+                    : simulated_direct_merge::makeAscTag(static_cast<std::uint32_t>(p));
             };
 
             std::size_t i = processStart;
@@ -864,11 +864,11 @@ inline bool blueprintPrefixLooksRandomLike(
     std::size_t descPiles = 0;
     for (std::size_t i = 0; i < prefixElements; ++i) {
         const uint32_t tag = blueprint[i];
-        if (tag == simulated::OVERFLOW_TAG) continue;
+        if (tag == simulated_direct_merge::OVERFLOW_TAG) continue;
 
         const std::size_t pilesSeen =
-            static_cast<std::size_t>(simulated::localPileId(tag)) + 1;
-        if (simulated::isDescTag(tag)) {
+            static_cast<std::size_t>(simulated_direct_merge::localPileId(tag)) + 1;
+        if (simulated_direct_merge::isDescTag(tag)) {
             descPiles = std::max(descPiles, pilesSeen);
         } else {
             ascPiles = std::max(ascPiles, pilesSeen);
@@ -983,14 +983,14 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithOverflowBands(
     std::size_t overflowSeen = 0;
     for (std::size_t i = 0; i < n; ++i) {
         const uint32_t tag = blueprint[i];
-        if (tag == simulated::OVERFLOW_TAG) {
+        if (tag == simulated_direct_merge::OVERFLOW_TAG) {
             tmp[normalCount + overflowSeen] = arr[i];
             ++overflowSeen;
             continue;
         }
 
-        const bool desc = simulated::isDescTag(tag);
-        const std::size_t local = static_cast<std::size_t>(simulated::localPileId(tag));
+        const bool desc = simulated_direct_merge::isDescTag(tag);
+        const std::size_t local = static_cast<std::size_t>(simulated_direct_merge::localPileId(tag));
         if (desc) tmp[--descCounts[local]] = arr[i];
         else tmp[ascCounts[local]++] = arr[i];
     }
@@ -999,7 +999,7 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithOverflowBands(
     if (overflowCount != 0 && patienceSortOverflow) {
         std::vector<T> overflow(
             tmp.begin() + static_cast<std::ptrdiff_t>(normalCount), tmp.end());
-        simulated::sortImplCore(overflow, less, true, false, false, false);
+        simulated_direct_merge::sortImplCore(overflow, less, true, false, false, false);
         std::move(overflow.begin(), overflow.end(),
                   tmp.begin() + static_cast<std::ptrdiff_t>(normalCount));
         runStart.push_back(n);
@@ -1027,14 +1027,14 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithOverflowBands(
 template <typename T, typename Less = std::less<T>>
 void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool useE090SmallSort = false, bool naturalRunRoute = false, bool enableSpecializedRoutes = false, bool enableCoherentValuePileCache = true, bool patienceSortOverflow = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
-                  "jessesort::simulated_early_freeze::sort requires copyable values because pile tails are stored by value");
+                  "jessesort::simulated_early_freeze_direct_merge::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
-                  "jessesort::simulated_early_freeze::sort requires movable values for merging");
+                  "jessesort::simulated_early_freeze_direct_merge::sort requires movable values for merging");
     static_assert(std::is_invocable_r_v<bool, Less&, const T&, const T&>,
                   "Comparator must be callable as bool(const T&, const T&)");
 
     if (arr.size() < 2) return;
-    if constexpr (simulated::specializedIntegralEligible<T, Less>) {
+    if constexpr (simulated_direct_merge::specializedIntegralEligible<T, Less>) {
         if (enableSpecializedRoutes) {
             bool prefixMayMix = true;
             if (arr.size() >= 4) {
@@ -1042,7 +1042,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                 const bool desc = less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
                 prefixMayMix = !(asc || desc);
             }
-            if (prefixMayMix && simulated::trySpecializedPrePatienceRoutes(arr, less)) return;
+            if (prefixMayMix && simulated_direct_merge::trySpecializedPrePatienceRoutes(arr, less)) return;
         }
     }
     FrozenInsertionResult<T> sim =
@@ -1069,18 +1069,19 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
             arr, sim.blueprint, std::move(sim.ascCounts),
             std::move(sim.descCounts), sim.overflowCount, tmp, less,
             useE090SmallSort, routedPatienceOverflow);
-    simulated::mergeRunsFromTmpToArr(
+    simulated_direct_merge::mergeRunsFromTmpToArr(
         tmp, arr, std::move(runStart), less,
-        simulated::MergeSchedule::defer_dominant_first_endpoint,
+        simulated_direct_merge::MergeSchedule::defer_dominant_first_endpoint,
         useRandomBranchlessMerge, 7, bidirectionalBranchlessMerge);
 }
 
 template <typename T, typename Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
     if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
+    if (arr.size() >= 10000 && jessesort::simulated_direct_merge::tryLongAscendingNaturalRunDirect(arr, less)) return;
     sortImpl(arr, less, true, true, true, true, true, true);
 }
 
 
-} // namespace jessesort::simulated_early_freeze
+} // namespace jessesort::simulated_early_freeze_direct_merge
 #endif

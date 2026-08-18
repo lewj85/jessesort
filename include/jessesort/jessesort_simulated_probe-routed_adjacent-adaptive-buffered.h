@@ -1,5 +1,5 @@
-#ifndef JESSESORT_SIMULATED_HPP
-#define JESSESORT_SIMULATED_HPP
+#ifndef JESSESORT_E229_JESSESORT_SIMULATED_PROBE_ROUTED_ADJACENT_ADAPTIVE_BUFFERED_H
+#define JESSESORT_E229_JESSESORT_SIMULATED_PROBE_ROUTED_ADJACENT_ADAPTIVE_BUFFERED_H
 
 #include <jessesort/tiny_sort.h>
 #include <vector>
@@ -18,7 +18,7 @@
 #include <array>
 
 
-namespace jessesort::simulated {
+namespace jessesort::simulated_legacy {
 
 #if defined(__GNUC__) || defined(__clang__)
 #define JESSESORT_PREFIX_CONFIRM_NOINLINE __attribute__((noinline))
@@ -962,7 +962,7 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprintImpl(
     const bool confirmedShortSameDirectionPrefix =
         prefixDirection != PrefixDirection::Unknown &&
         prefixEnd < MinPrefixPileLength &&
-        jessesort::simulated::confirmedShortSameDirectionPrefix(
+        jessesort::simulated_legacy::confirmedShortSameDirectionPrefix(
             arr, prefixEnd, prefixDirection == PrefixDirection::Descending, less,
             MinPrefixPileLength);
     const bool materializePrefix =
@@ -2918,9 +2918,9 @@ void sortImplCore(std::vector<T>& arr, Less less, bool enableNaturalRunRoute,
                   bool enableHighEntropyPartition = true,
                   bool enableCoherentValuePileCache = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
-                  "jessesort::simulated::sort requires copyable values because pile tails are stored by value");
+                  "jessesort::simulated_legacy::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
-                  "jessesort::simulated::sort requires movable values for merging");
+                  "jessesort::simulated_legacy::sort requires movable values for merging");
     static_assert(std::is_invocable_r_v<bool, Less&, const T&, const T&>,
                   "Comparator must be callable as bool(const T&, const T&)");
 
@@ -3033,5 +3033,5 @@ void sort(std::vector<T>& arr, Less less = Less{}) {
     sortImpl(arr, less, true);
 }
 
-} // namespace jessesort::simulated
+} // namespace jessesort::simulated_legacy
 #endif

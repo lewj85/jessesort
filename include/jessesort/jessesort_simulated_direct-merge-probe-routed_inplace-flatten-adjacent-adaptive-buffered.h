@@ -1,8 +1,8 @@
-#ifndef JESSESORT_SIMULATED_INPLACE_FLATTEN_HPP
-#define JESSESORT_SIMULATED_INPLACE_FLATTEN_HPP
+#ifndef JESSESORT_E229_JESSESORT_SIMULATED_DIRECT_MERGE_PROBE_ROUTED_INPLACE_FLATTEN_ADJACENT_ADAPTIVE_BUFFERED_H
+#define JESSESORT_E229_JESSESORT_SIMULATED_DIRECT_MERGE_PROBE_ROUTED_INPLACE_FLATTEN_ADJACENT_ADAPTIVE_BUFFERED_H
 
 #include <jessesort/tiny_sort.h>
-#include <jessesort/v2_simulated.h>
+#include <jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h>
 
 #include <algorithm>
 #include <cassert>
@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace jessesort::simulated_inplace_flatten {
+namespace jessesort::simulated_inplace_flatten_direct_merge {
 
 // Convert the packed pile blueprint into a source-index -> destination-index
 // permutation, then resolve that permutation in place with cycle swaps.
@@ -71,9 +71,9 @@ std::vector<std::size_t> flattenTaggedBlueprintInPlace(
         for (std::size_t i = 0; i < n; ++i) {
             const std::uint32_t tag = blueprint[i];
             const std::size_t local = static_cast<std::size_t>(
-                jessesort::simulated::localPileId(tag));
+                jessesort::simulated_direct_merge::localPileId(tag));
             const std::size_t destination =
-                jessesort::simulated::isDescTag(tag)
+                jessesort::simulated_direct_merge::isDescTag(tag)
                     ? --descCounts[local]
                     : ascCounts[local]++;
             blueprint[i] = static_cast<std::uint32_t>(destination);
@@ -96,8 +96,8 @@ std::vector<std::size_t> flattenTaggedBlueprintInPlace(
         for (std::size_t i = 0; i < n; ++i) {
             const std::uint32_t tag = blueprint[i];
             const std::size_t local = static_cast<std::size_t>(
-                jessesort::simulated::localPileId(tag));
-            destination[i] = jessesort::simulated::isDescTag(tag)
+                jessesort::simulated_direct_merge::localPileId(tag));
+            destination[i] = jessesort::simulated_direct_merge::isDescTag(tag)
                 ? --descCounts[local]
                 : ascCounts[local]++;
         }
@@ -125,9 +125,9 @@ std::vector<std::size_t> flattenTaggedBlueprintInPlace(
 template <typename T, typename Less = std::less<T>>
 void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false, bool enableSpecializedRoutes = false, bool enableCoherentValuePileCache = true) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
-                  "jessesort::simulated_inplace_flatten::sort requires copyable values because pile tails are stored by value");
+                  "jessesort::simulated_inplace_flatten_direct_merge::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
-                  "jessesort::simulated_inplace_flatten::sort requires movable values for permutation swaps and merging");
+                  "jessesort::simulated_inplace_flatten_direct_merge::sort requires movable values for permutation swaps and merging");
     static_assert(std::is_invocable_r_v<bool, Less&, const T&, const T&>,
                   "Comparator must be callable as bool(const T&, const T&)");
 
@@ -135,7 +135,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         return;
     }
 
-    if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+    if constexpr (jessesort::simulated_direct_merge::specializedIntegralEligible<T, Less>) {
         if (enableSpecializedRoutes) {
             bool specialValuePrefixMayMix = true;
             if (arr.size() >= 4) {
@@ -145,7 +145,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                     less(arr[1], arr[0]) && less(arr[2], arr[1]) && less(arr[3], arr[2]);
                 specialValuePrefixMayMix = !(firstThreeAscending || firstThreeDescending);
             }
-            if (specialValuePrefixMayMix && jessesort::simulated::trySpecializedPrePatienceRoutes(arr, less)) {
+            if (specialValuePrefixMayMix && jessesort::simulated_direct_merge::trySpecializedPrePatienceRoutes(arr, less)) {
                 return;
             }
         }
@@ -154,8 +154,8 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     std::vector<std::size_t> runStart;
     bool branchlessRandomMerge = false;
     {
-        jessesort::simulated::SimulatedInsertionResult<T> sim =
-            jessesort::simulated::simulatePatienceInsertionBlueprint(
+        jessesort::simulated_direct_merge::SimulatedInsertionResult<T> sim =
+            jessesort::simulated_direct_merge::simulatePatienceInsertionBlueprint(
                 arr, less, true, naturalRunRoute, enableCoherentValuePileCache);
 
         if (sim.alreadySortedAscending) return;
@@ -165,7 +165,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         }
 
         branchlessRandomMerge =
-            jessesort::simulated::shouldUseRandomBranchlessMerge(sim, arr.size());
+            jessesort::simulated_direct_merge::shouldUseRandomBranchlessMerge(sim, arr.size());
 
         // V3's defining difference from V2: resolve the exact same simulated
         // blueprint into the same run order by permutation-cycle flattening
@@ -187,7 +187,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     // E111: the reconciled V1/V2/V3 revalidation no longer supports the
     // selective PowerSort path here. Keep the current adjacent-pair scheduler.
     std::vector<std::size_t> ends(runStart.begin() + 1, runStart.end());
-    jessesort::simulated::mergeRunsAdjacentPairsEnds(
+    jessesort::simulated_direct_merge::mergeRunsAdjacentPairsEnds(
         tmp, arr, ends, less, branchlessRandomMerge, bidirectionalBranchlessMerge);
     arr = std::move(tmp);
 }
@@ -198,9 +198,10 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
 template <typename T, typename Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
     if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
+    if (arr.size() >= 10000 && jessesort::simulated_direct_merge::tryLongAscendingNaturalRunDirect(arr, less)) return;
     sortImpl(arr, less, true, true, true, true);
 }
 
-} // namespace jessesort::simulated_inplace_flatten
+} // namespace jessesort::simulated_inplace_flatten_direct_merge
 
 #endif

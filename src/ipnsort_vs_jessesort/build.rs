@@ -14,12 +14,12 @@ fn run(mut cmd: Command) {
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let repo = manifest.join("deps/jessesort");
+    let repo = manifest.join("../..").canonicalize().expect("resolve enclosing JesseSort repository");
     let include = repo.join("include");
     let bridge = manifest.join("cpp/bridge.cpp");
 
     if !repo.exists() {
-        panic!("deps/jessesort missing; run ./setup.sh first");
+        panic!("enclosing JesseSort repository missing");
     }
 
     println!("cargo:rerun-if-changed={}", bridge.display());

@@ -1,8 +1,8 @@
-#ifndef JESSESORT_ACTUAL_PILES_HPP
-#define JESSESORT_ACTUAL_PILES_HPP
+#ifndef JESSESORT_E229_JESSESORT_PHYSICAL_DIRECT_MERGE_PROBE_ROUTED_ADJACENT_ADAPTIVE_BUFFERED_H
+#define JESSESORT_E229_JESSESORT_PHYSICAL_DIRECT_MERGE_PROBE_ROUTED_ADJACENT_ADAPTIVE_BUFFERED_H
 
 #include <jessesort/tiny_sort.h>
-#include <jessesort/v2_simulated.h>
+#include <jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace jessesort::actual_piles {
+namespace jessesort::actual_piles_direct_merge {
 
 // V1 is the direct physical-pile formulation: values are appended to real
 // patience piles during insertion, then those piles are flattened and merged.
@@ -76,9 +76,9 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
               bool naturalRunRoute = false, bool adjacentEqualFastPath = true,
               bool enableSpecializedRoutes = false, bool enableCoherentValuePileCache = false) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,
-                  "jessesort::actual_piles::sort requires copyable values because pile tails are stored by value");
+                  "jessesort::actual_piles_direct_merge::sort requires copyable values because pile tails are stored by value");
     static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
-                  "jessesort::actual_piles::sort requires movable values for pile flattening and merging");
+                  "jessesort::actual_piles_direct_merge::sort requires movable values for pile flattening and merging");
     static_assert(std::is_invocable_r_v<bool, Less&, const T&, const T&>,
                   "Comparator must be callable as bool(const T&, const T&)");
 
@@ -123,7 +123,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         return;
     }
 
-    if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+    if constexpr (jessesort::simulated_direct_merge::specializedIntegralEligible<T, Less>) {
         if (enableSpecializedRoutes) {
             bool specialValuePrefixMayMix = true;
             if (n >= 4) {
@@ -135,17 +135,17 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
             }
             if (specialValuePrefixMayMix) {
                 T dominant = arr[0];
-                if (jessesort::simulated::dominantValueSampleCandidate(arr, dominant, less)) {
-                    jessesort::simulated::highEntropyQuickSort(
+                if (jessesort::simulated_direct_merge::dominantValueSampleCandidate(arr, dominant, less)) {
+                    jessesort::simulated_direct_merge::highEntropyQuickSort(
                         arr.data(), arr.size(),
                         2 * static_cast<int>(std::bit_width(arr.size())), less,
                         false, T{}, false, true, nullptr, false);
                     return;
                 }
 
-                if (jessesort::simulated::lowCardinalityDirectionGate(arr, less) &&
-                    jessesort::simulated::lowCardinalitySampleCandidate(arr, less) &&
-                    jessesort::simulated::trySortLowCardinalityDirectConfirmed(arr, less)) {
+                if (jessesort::simulated_direct_merge::lowCardinalityDirectionGate(arr, less) &&
+                    jessesort::simulated_direct_merge::lowCardinalitySampleCandidate(arr, less) &&
+                    jessesort::simulated_direct_merge::trySortLowCardinalityDirectConfirmed(arr, less)) {
                     return;
                 }
 
@@ -166,7 +166,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                     }
                 }
                 if (!highEntropyPrefixAlternates &&
-                    jessesort::simulated::trySortHighEntropyPartitionDirect(arr, less)) {
+                    jessesort::simulated_direct_merge::trySortHighEntropyPartitionDirect(arr, less)) {
                     return;
                 }
             }
@@ -177,7 +177,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     // values are moved into physical piles; the continuation cache itself is
     // maintained coherently by invalidating entries when baseArray tails change.
     const bool coherentValuePileCacheCandidate = enableCoherentValuePileCache &&
-        jessesort::simulated::coherentValuePileCacheSampleCandidate(arr, less, n >= 50000);
+        jessesort::simulated_direct_merge::coherentValuePileCacheSampleCandidate(arr, less, n >= 50000);
 
     std::vector<std::vector<T>> ascPiles;
     std::vector<std::vector<T>> descPiles;
@@ -207,7 +207,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     const bool confirmedShortSameDirectionPrefix =
         prefixDirection != PrefixDirection::Unknown &&
         prefixEnd < MinPrefixPileLength &&
-        jessesort::simulated::confirmedShortSameDirectionPrefix(
+        jessesort::simulated_direct_merge::confirmedShortSameDirectionPrefix(
             arr, prefixEnd, prefixDirection == PrefixDirection::Descending, less,
             MinPrefixPileLength);
     const bool materializePrefix =
@@ -475,7 +475,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
                 previousValue = insertNormalTracked(value, descendingMode);
         }
     } else if (coherentValuePileCacheCandidate) {
-        if constexpr (jessesort::simulated::specializedIntegralEligible<T, Less>) {
+        if constexpr (jessesort::simulated_direct_merge::specializedIntegralEligible<T, Less>) {
             struct CacheEntry {
                 std::uint64_t key = 0;
                 std::uint32_t pile = 0;
@@ -662,7 +662,7 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     }
     // E115: V1-V3 share one post-flatten adjacent-pair merge driver.
     // V1 naturally stores run ends, so no run-boundary conversion is needed.
-    jessesort::simulated::mergeRunsAdjacentPairsEnds(
+    jessesort::simulated_direct_merge::mergeRunsAdjacentPairsEnds(
         flat, buffer, ends, less, useRandomBranchlessMerge, bidirectionalBranchlessMerge);
     arr = std::move(flat);
 }
@@ -670,8 +670,9 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
 template <class T, class Less = std::less<T>>
 void sort(std::vector<T>& arr, Less less = Less{}) {
     if (jessesort::detail::tryTinyInsertionSort(arr, less)) return;
+    if (arr.size() >= 10000 && jessesort::simulated_direct_merge::tryLongAscendingNaturalRunDirect(arr, less)) return;
     sortImpl(arr, less, true, true, true, true, true);
 }
 
-} // namespace jessesort::actual_piles
+} // namespace jessesort::actual_piles_direct_merge
 #endif
