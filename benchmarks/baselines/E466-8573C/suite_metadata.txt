@@ -1,0 +1,14 @@
+method_version=E466-cell-atomic-grouped-checkpoint-v3
+cpu_model=INTEL(R) XEON(R) PLATINUM 8573C
+sizes=10000,100000
+total_trials=500
+warmups=2
+cooldown_seconds=1
+process_policy=one uninterrupted size/algorithm/input cell per process
+commit_policy=cell is canonical only after all trials complete and validate; partial cell is discarded
+checkpoint_policy=10k: after all 14 inputs for an algorithm; 100k: after each committed input cell
+resume_policy=completed cells are skipped; interrupted cell reruns from trial 0; an uncheckpointed completed 10k cell survives only in the live workspace until its 14-input algorithm group checkpoint
+benchmark_exe_sha256=a99a16259886658265facc4eb6084e2659ead40ccb7a73f4fc9739d21b27a45e
+benchmark_cpp_sha256=2cac9b351e34377394cb4d40573231b8b88c3020ae3dc925edf35d0b62d408b9
+benchmark_seed_sha256=56031efedd6a69058ea1f3d5dfe353790cac69d91f27bbc138ea49e2b79373d8
+runner_sha256=fcc81fcd609f6b17f6a9bf6b74a6bc1957e5a0a876e4f4050b14f51d545be1bc

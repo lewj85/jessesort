@@ -1,17 +1,16 @@
-# Build outputs
+# Build products
+/build/
 /benchmark
+/benchmark-clang
+/benchmark_*
+/e*_phase_meta*
 *.o
+*.clang.o
 *.out
 *.exe
 
-# Every benchmark invocation writes to an isolated results/run_* directory.
-# Results are analysis artifacts, not repository state.
+# Ephemeral benchmark output
 /results/
-/build/
-/tests/
 
-# Editor / OS noise
-.DS_Store
-.devcontainer/
-.vscode/
-.idea/
+# Other
+/tests/

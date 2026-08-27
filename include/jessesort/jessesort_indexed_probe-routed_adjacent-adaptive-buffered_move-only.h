@@ -13,7 +13,6 @@
 
 namespace jessesort::index_tail_legacy {
 
-using Clock = std::chrono::steady_clock;
 
 template<class T>
 struct IndexSimResult {
@@ -127,22 +126,164 @@ std::vector<std::size_t> reconstructMoveOnly(
     return start;
 }
 
+
+
+template<class T,class Less>
+inline void mergeCrossForward(std::vector<T>& leftBuf,std::vector<T>& rightBuf,
+                              std::size_t b,std::size_t m,std::size_t e,Less less,unsigned trigger=7){
+    if(b==m) return;
+    if(m==e){std::move(leftBuf.begin()+b,leftBuf.begin()+m,rightBuf.begin()+b);return;}
+    if(!less(rightBuf[m],leftBuf[m-1])){std::move(leftBuf.begin()+b,leftBuf.begin()+m,rightBuf.begin()+b);return;}
+    if(!less(leftBuf[b],rightBuf[e-1])){
+        const std::size_t ll=m-b;
+        std::move(rightBuf.begin()+m,rightBuf.begin()+e,rightBuf.begin()+b);
+        std::move(leftBuf.begin()+b,leftBuf.begin()+m,rightBuf.begin()+(e-ll));
+        return;
+    }
+    std::size_t i=b,j=m,o=b;unsigned lw=0,rw=0;
+    while(i<m&&j<e){
+        if(less(rightBuf[j],leftBuf[i])){
+            if(o!=j) rightBuf[o]=std::move(rightBuf[j]);
+            ++o;++j;++rw;lw=0;
+            if(rw>=trigger&&i<m&&j<e){
+                std::size_t step=1;while(j+step<e&&less(rightBuf[j+step],leftBuf[i]))step<<=1;
+                std::size_t lo=j,hi=std::min(e,j+step+1);
+                while(lo<hi){auto q=lo+(hi-lo)/2;if(less(rightBuf[q],leftBuf[i]))lo=q+1;else hi=q;}
+                if(o!=j)std::move(rightBuf.begin()+j,rightBuf.begin()+lo,rightBuf.begin()+o);
+                o+=lo-j;j=lo;rw=0;
+            }
+        }else{
+            rightBuf[o++]=std::move(leftBuf[i++]);++lw;rw=0;
+            if(lw>=trigger&&i<m&&j<e){
+                std::size_t step=1;while(i+step<m&&!less(rightBuf[j],leftBuf[i+step]))step<<=1;
+                std::size_t lo=i,hi=std::min(m,i+step+1);
+                while(lo<hi){auto q=lo+(hi-lo)/2;if(!less(rightBuf[j],leftBuf[q]))lo=q+1;else hi=q;}
+                std::move(leftBuf.begin()+i,leftBuf.begin()+lo,rightBuf.begin()+o);
+                o+=lo-i;i=lo;lw=0;
+            }
+        }
+    }
+    if(i<m)std::move(leftBuf.begin()+i,leftBuf.begin()+m,rightBuf.begin()+o);
+    else if(j<e&&o!=j)std::move(rightBuf.begin()+j,rightBuf.begin()+e,rightBuf.begin()+o);
+}
+
+template<class T,class Less>
+inline void mergeCrossBackward(std::vector<T>& leftBuf,std::vector<T>& rightBuf,
+                               std::size_t b,std::size_t m,std::size_t e,Less less,unsigned trigger=7){
+    if(m==e)return;
+    if(b==m){std::move(rightBuf.begin()+m,rightBuf.begin()+e,leftBuf.begin()+b);return;}
+    if(!less(rightBuf[m],leftBuf[m-1])){std::move(rightBuf.begin()+m,rightBuf.begin()+e,leftBuf.begin()+m);return;}
+    if(!less(leftBuf[b],rightBuf[e-1])){
+        std::move_backward(leftBuf.begin()+b,leftBuf.begin()+m,leftBuf.begin()+e);
+        std::move(rightBuf.begin()+m,rightBuf.begin()+e,leftBuf.begin()+b);
+        return;
+    }
+    std::size_t i=m,j=e,o=e;unsigned lw=0,rw=0;
+    while(i>b&&j>m){
+        if(less(rightBuf[j-1],leftBuf[i-1])){
+            leftBuf[--o]=std::move(leftBuf[--i]);++lw;rw=0;
+            if(lw>=trigger&&i>b&&j>m){
+                const T& key=rightBuf[j-1];std::size_t step=1;
+                while(step<i-b&&less(key,leftBuf[i-1-step]))step<<=1;
+                std::size_t lo=(step>=i-b)?b:i-step,hi=i;
+                while(lo<hi){auto q=lo+(hi-lo)/2;if(!less(key,leftBuf[q]))lo=q+1;else hi=q;}
+                const std::size_t len=i-lo;std::move_backward(leftBuf.begin()+lo,leftBuf.begin()+i,leftBuf.begin()+o);
+                o-=len;i=lo;lw=0;
+            }
+        }else{
+            leftBuf[--o]=std::move(rightBuf[--j]);++rw;lw=0;
+            if(rw>=trigger&&i>b&&j>m){
+                const T& key=leftBuf[i-1];std::size_t step=1;
+                while(step<j-m&&!less(rightBuf[j-1-step],key))step<<=1;
+                std::size_t lo=(step>=j-m)?m:j-step,hi=j;
+                while(lo<hi){auto q=lo+(hi-lo)/2;if(less(rightBuf[q],key))lo=q+1;else hi=q;}
+                const std::size_t len=j-lo;std::move(rightBuf.begin()+lo,rightBuf.begin()+j,leftBuf.begin()+(o-len));
+                o-=len;j=lo;rw=0;
+            }
+        }
+    }
+    if(j>m){const std::size_t len=j-m;std::move(rightBuf.begin()+m,rightBuf.begin()+j,leftBuf.begin()+(o-len));}
+}
+
+struct ResidentRun { std::size_t begin,end; bool inSecond; };
+
+template<class T,class Less>
+inline void mergeRunsZeroCopyCarry(std::vector<T>& first,std::vector<T>& second,
+                                   const std::vector<std::size_t>& starts,Less less){
+    std::vector<ResidentRun> runs,next;
+    runs.reserve(starts.size());next.reserve(starts.size());
+    for(std::size_t i=0;i+1<starts.size();++i)runs.push_back({starts[i],starts[i+1],false});
+    bool probeOrdered=true;
+    while(runs.size()>1){
+        if(probeOrdered){
+            const std::size_t old=runs.size();next.clear();
+            for(const ResidentRun& q:runs){
+                if(!next.empty()&&next.back().inSecond==q.inSecond){
+                    auto& in=q.inSecond?second:first;
+                    if(!less(in[q.begin],in[next.back().end-1])){next.back().end=q.end;continue;}
+                }
+                next.push_back(q);
+            }
+            runs.swap(next);
+            const std::size_t removed=old-runs.size();
+            probeOrdered=runs.size()<=64||removed*4>=old;
+            if(runs.size()<=1)break;
+        }
+        next.clear();std::size_t r=0;
+        const bool carryLeft=(runs.size()&1u)&&runs.size()>1&&
+            (runs.front().end-runs.front().begin>runs.back().end-runs.back().begin);
+        if(carryLeft){next.push_back(runs.front());r=1;}
+        for(;r<runs.size();r+=2){
+            if(r+1==runs.size()){next.push_back(runs[r]);continue;}
+            const ResidentRun A=runs[r],B=runs[r+1];
+            const std::size_t b=A.begin,m=A.end,e=B.end;bool out;
+            if(A.inSecond==B.inSecond){
+                auto& in=A.inSecond?second:first;
+                if(!less(in[m],in[m-1])){next.push_back({b,e,A.inSecond});continue;}
+                auto& dst=A.inSecond?first:second;
+                jessesort::simulated_legacy::mergeTwoAdjacentRunsToDest(in,dst,b,m,e,less,7);
+                out=!A.inSecond;
+            }else if(!A.inSecond&&B.inSecond){
+                if(A.end-A.begin>=B.end-B.begin){mergeCrossBackward(first,second,b,m,e,less);out=false;}
+                else{mergeCrossForward(first,second,b,m,e,less);out=true;}
+            }else{
+                if(A.end-A.begin>=B.end-B.begin){mergeCrossBackward(second,first,b,m,e,less);out=true;}
+                else{mergeCrossForward(second,first,b,m,e,less);out=false;}
+            }
+            next.push_back({b,e,out});
+        }
+        runs.swap(next);
+    }
+    if(!runs.empty()&&runs.front().inSecond)first.swap(second);
+}
+
 template<class T,class Less=std::less<T>>
 void sort(std::vector<T>& a,Less less=Less{}){
  static_assert(std::is_move_constructible_v<T> && std::is_move_assignable_v<T>,
                "jessesort::index_tail_legacy::sort requires movable values");
  static_assert(std::is_invocable_r_v<bool, Less&, const T&, const T&>,
                "Comparator must be callable as bool(const T&, const T&)");
- if(jessesort::detail::tryTinyInsertionSort(a,less))return;if(a.size()<2)return;
+ if(jessesort::detail::tryTinyInsertionSort(a,less)) return;
+ if(a.size()<2) return;
  bool mix=true;if(a.size()>=4){bool up=less(a[0],a[1])&&less(a[1],a[2])&&less(a[2],a[3]);bool dn=less(a[1],a[0])&&less(a[2],a[1])&&less(a[3],a[2]);mix=!(up||dn);} 
+ // E264: intentional inline mirror; shared noinline routing regressed canonical structured inputs.
+ // Keep synchronized with the owning simulated specialized router and audit drift explicitly.
  if constexpr(jessesort::simulated_legacy::specializedIntegralEligible<T,Less>){if(mix){T dom=a[0];if(jessesort::simulated_legacy::dominantValueSampleCandidate(a,dom,less)){jessesort::simulated_legacy::highEntropyQuickSort(a.data(),a.size(),2*(int)std::bit_width(a.size()),less,false,T{},false,true,nullptr,false);return;} if(jessesort::simulated_legacy::lowCardinalityDirectionGate(a,less)&&jessesort::simulated_legacy::lowCardinalitySampleCandidate(a,less)&&jessesort::simulated_legacy::trySortLowCardinalityDirectConfirmed(a,less))return; bool alt=false;if(a.size()>=8){int prev=0;alt=true;for(std::size_t i=1;i<8;++i){int d=less(a[i-1],a[i])?1:less(a[i],a[i-1])?-1:0;if(d==0||(prev&&d==prev)){alt=false;break;}prev=d;}}if(!alt&&jessesort::simulated_legacy::trySortHighEntropyPartitionDirect(a,less))return;}}
  auto s=simulate(a,less,true);if(s.alreadySortedAscending)return;if(s.reverseSortedDescending){std::reverse(a.begin(),a.end());return;}bool br=randomMerge(s,a.size());std::vector<T> tmp;std::vector<std::size_t> starts;
  if constexpr (std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>) {
-   starts=jessesort::simulated_legacy::reconstructTaggedBlueprintNormalizedForV2(a,std::move(s.blueprint),std::move(s.ascCounts),std::move(s.descCounts),tmp,false,true,true,true);
+   starts=jessesort::simulated_legacy::reconstructTaggedBlueprintNormalizedForSimulated(a,std::move(s.blueprint),std::move(s.ascCounts),std::move(s.descCounts),tmp,false,true,true,true);
  } else {
    starts=reconstructMoveOnly(a,s.blueprint,s.ascCounts,s.descCounts,tmp);
  }
- std::vector<std::size_t> ends(starts.begin()+1,starts.end());jessesort::simulated_legacy::mergeRunsAdjacentPairsEnds(tmp,a,ends,less,br,true);a=std::move(tmp);
+ bool zeroCopyCarry=false;
+ if(!br){
+   std::size_t largestRun=0; for(std::size_t i=0;i+1<starts.size();++i) largestRun=std::max(largestRun,starts[i+1]-starts[i]);
+   const std::size_t runCount=starts.empty()?0:starts.size()-1;
+   zeroCopyCarry=runCount>1 && largestRun*runCount*2>=a.size()*3;
+ }
+ if(zeroCopyCarry) mergeRunsZeroCopyCarry(tmp,a,starts,less);
+ else {jessesort::simulated_legacy::mergeRunsAdjacentPairsEnds(tmp,a,starts,less,br,true,1);}
+ a=std::move(tmp);
 }}
 
 #endif

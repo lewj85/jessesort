@@ -53,7 +53,7 @@ static std::string_view name(InputType t) {
 }
 
 static constexpr std::array<std::string_view, 8> kAlgorithmNames{
-    "V1", "V2", "V3", "V4", "V5", "V6", "V7", "std::sort"
+    "physical", "simulated", "simulated-inplace", "frozen-single", "frozen-deferred", "frozen-live", "avx2", "std::sort"
 };
 
 static constexpr std::array<InputType, 12> kInputs{
@@ -229,7 +229,7 @@ static void run_algorithm(int id, std::vector<int>& values) {
         case 3: jessesort::simulated_early_freeze_single_overflow::sort(values); break;
         case 4: jessesort::simulated_early_freeze::sort(values); break;
         case 5: jessesort::simulated_early_freeze_live::sort(values); break;
-        case 6: jessesort::simulated_simd_v7::sort(values); break;
+        case 6: jessesort::simulated_avx2_legacy::sort(values); break;
         case 7: std::sort(values.begin(), values.end()); break;
     }
 }

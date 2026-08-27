@@ -2,7 +2,7 @@
 #define JESSESORT_E229_JESSESORT_SIMULATED_FROZEN_PROBE_ROUTED_ADJACENT_POWERSORT_ADAPTIVE_BUFFERED_SINGLE_OVERFLOW_H
 
 #include <jessesort/tiny_sort.h>
-#include <jessesort/jessesort_simulated-frozen_probe-routed_adjacent-adaptive-buffered_deferred-bands32.h>
+#include <jessesort/detail_simulated_frozen_early_freeze_core.h>
 
 #include <algorithm>
 #include <cassert>
@@ -117,9 +117,9 @@ std::vector<std::size_t> reconstructFrozenBlueprintWithSingleOverflowRun(
     return runStart;
 }
 
-// Public V4 entry point: early freeze with one deferred overflow run.
+// Public frozen-single entry point: early freeze with one deferred overflow run.
 // E170 swept later freeze points but production intentionally remains at 50%
-// so V4 preserves its single-overflow architecture rather than converging on V2.
+// so frozen-single preserves its single-overflow architecture rather than converging on simulated.
 template <typename T, typename Less = std::less<T>>
 void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge, bool naturalRunRoute = false, bool enableSpecializedRoutes = false, bool patienceSortOverflow = false, bool enableCoherentValuePileCache = true) {
     static_assert(std::is_copy_constructible_v<T> && std::is_copy_assignable_v<T>,

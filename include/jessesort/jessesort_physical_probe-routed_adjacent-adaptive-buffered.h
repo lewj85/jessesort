@@ -3,6 +3,7 @@
 
 #include <jessesort/tiny_sort.h>
 #include <jessesort/jessesort_simulated_probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -14,7 +15,7 @@
 
 namespace jessesort::actual_piles_legacy {
 
-// V1 is the direct physical-pile formulation: values are appended to real
+// physical is the direct physical-pile formulation: values are appended to real
 // patience piles during insertion, then those piles are flattened and merged.
 // It intentionally remains structurally separate from the simulated family.
 
@@ -70,7 +71,7 @@ std::size_t findDescendingPileBitWalk(const std::vector<T>& tails, const T& valu
     return static_cast<std::size_t>(idx + 1);
 }
 
-// Public V1 entry point: physical patience piles followed by run merging.
+// Public physical entry point: physical patience piles followed by run merging.
 template <class T, class Less = std::less<T>>
 void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
               bool naturalRunRoute = false, bool adjacentEqualFastPath = true,
@@ -123,6 +124,9 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         return;
     }
 
+    // E264: intentionally inline mirror of the owning simulated specialized router.
+    // A shared noinline call regressed structured canonical inputs by >1%; keep this
+    // source synchronized with the owner and audit drift explicitly.
     if constexpr (jessesort::simulated_legacy::specializedIntegralEligible<T, Less>) {
         if (enableSpecializedRoutes) {
             bool specialValuePrefixMayMix = true;
@@ -611,13 +615,13 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
     const std::size_t ascCount = ascPiles.size();
     const std::size_t descCount = descPiles.size();
     const std::size_t finalPileCount = ascCount + descCount;
-    // E109: use the same earlyRandomLike probe prerequisite as V2/V3.
+    // E109: use the same earlyRandomLike probe prerequisite as simulated/simulated-inplace.
     __extension__ typedef unsigned __int128 Wide;
     const Wide finalPileSquare =
         static_cast<Wide>(finalPileCount) * finalPileCount;
-    // E109 convergence baseline: V1/V2/V3 share the same non-freezing
-    // branchless/general density thresholds: 3.5 / 4.25 / 5.0.  V1 also
-    // uses the same earlyRandomLike prerequisite as V2/V3.
+    // E109 convergence baseline: physical/simulated/simulated-inplace share the same non-freezing
+    // branchless/general density thresholds: 3.5 / 4.25 / 5.0.  physical also
+    // uses the same earlyRandomLike prerequisite as simulated/simulated-inplace.
     bool densitySelectsBranchless = false;
     if (n <= 20000) {
         densitySelectsBranchless =
@@ -660,11 +664,39 @@ void sortImpl(std::vector<T>& arr, Less less, bool bidirectionalBranchlessMerge,
         // instantiated for the ordinary numeric fast path.
         buffer = flat;
     }
-    // E115: V1-V3 share one post-flatten adjacent-pair merge driver.
-    // V1 naturally stores run ends, so no run-boundary conversion is needed.
-    jessesort::simulated_legacy::mergeRunsAdjacentPairsEnds(
-        flat, buffer, ends, less, useRandomBranchlessMerge, bidirectionalBranchlessMerge);
-    arr = std::move(flat);
+    // E115: physical/simulated/simulated-inplace share one post-flatten adjacent-pair merge driver.
+    // physical naturally stores run ends, so no run-boundary conversion is needed.
+    // E379: for compact, strongly size-imbalanced physical run sets, use the
+    // retained sliding stride-3 best-2-of-3 tree. The gate is derived from
+    // physical-owner geometry and is intentionally independent of input names.
+    bool useStride3 = false;
+    if (ends.size() >= 8 && ends.size() <= 32) {
+        std::vector<std::size_t> gateEnds; gateEnds.reserve(ends.size());
+        for (std::size_t r = 0; r < ends.size(); ++r) {
+            const std::size_t b = ends[r];
+            if (r + 1 == ends.size() || less(flat[b], flat[b - 1])) gateEnds.push_back(b);
+        }
+        const std::size_t rc = gateEnds.size();
+        if (rc >= 8 && rc <= 32) {
+            std::size_t prev = 0, largest = 0;
+            for (std::size_t e : gateEnds) { largest = std::max(largest, e - prev); prev = e; }
+            useStride3 = static_cast<unsigned long long>(largest) * rc * 10ULL >
+                         static_cast<unsigned long long>(n) * 21ULL;
+        }
+    }
+    if (useStride3) {
+        std::vector<std::size_t> starts; starts.reserve(ends.size() + 1);
+        starts.push_back(0);
+        starts.insert(starts.end(), ends.begin(), ends.end());
+        jessesort::simulated_direct_merge::detail::mergeRunsE375Tree(
+            flat, buffer, std::move(starts), less,
+            jessesort::simulated_direct_merge::detail::E375Schedule::sliding_stride3);
+        arr = std::move(buffer);
+    } else {
+        jessesort::simulated_legacy::mergeRunsAdjacentPairsEnds(
+            flat, buffer, ends, less, useRandomBranchlessMerge, bidirectionalBranchlessMerge);
+        arr = std::move(flat);
+    }
 }
 
 template <class T, class Less = std::less<T>>

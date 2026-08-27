@@ -20,6 +20,15 @@
 
 namespace jessesort::simulated_legacy {
 
+// E402: owner-specific propagation of the retained E354 small-N three-pile
+// exception. A perfectly nondecreasing first-64 probe with exactly three piles
+// skips E183 valley rescue below 32k; this targets very light delayed disorder.
+template <typename T, typename Less>
+inline bool e402First64HasInversion(const std::vector<T>& arr, Less less) {
+    for (std::size_t i = 1; i < 64; ++i) if (less(arr[i], arr[i - 1])) return true;
+    return false;
+}
+
 #if defined(__GNUC__) || defined(__clang__)
 #define JESSESORT_PREFIX_CONFIRM_NOINLINE __attribute__((noinline))
 #else
@@ -1088,7 +1097,7 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprintImpl(
             coherentValuePileCacheSampleCandidate(arr, less);
         const bool useSplit = sampleCount != 0 && sampleHits * 4 >= sampleCount * 3;
         const std::size_t e183ProbePiles = result.ascCounts.size() + result.descCounts.size();
-        const bool useValleyRescue = n >= 10000 && e183ProbePiles >= 3 && e183ProbePiles <= 12;
+        const bool useValleyRescue = n >= 10000 && e183ProbePiles >= 3 && e183ProbePiles <= 12 && !(n < 32768 && e183ProbePiles == 3 && !e402First64HasInversion(arr, less));
         if (i < n) {
             if (useValleyRescue) continuePatienceInsertionValleyRescue<EnableAdjacentEqualFastPath>(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
@@ -1125,7 +1134,7 @@ SimulatedInsertionResult<T> simulatePatienceInsertionBlueprintImpl(
             coherentValuePileCacheSampleCandidate(arr, less);
         const bool useSplit = sampleCount != 0 && sampleHits * 4 >= sampleCount * 3;
         const std::size_t e183ProbePiles = result.ascCounts.size() + result.descCounts.size();
-        const bool useValleyRescue = n >= 10000 && e183ProbePiles >= 3 && e183ProbePiles <= 12;
+        const bool useValleyRescue = n >= 10000 && e183ProbePiles >= 3 && e183ProbePiles <= 12 && !(n < 32768 && e183ProbePiles == 3 && !e402First64HasInversion(arr, less));
         if (i < n) {
             if (useValleyRescue) continuePatienceInsertionValleyRescue<EnableAdjacentEqualFastPath>(
                 arr, i, result, lastPileIndexAscending, lastPileIndexDescending, descendingMode, less);
@@ -1245,11 +1254,11 @@ std::vector<std::size_t> reconstructTaggedBlueprintToTemp_WithSplitCounts(
     return start;
 }
 
-// E081 V2-specific reconstruction path.  The blueprint is moved into this helper
+// E081 simulated-specific reconstruction path.  The blueprint is moved into this helper
 // so its packed local tags can be normalized in place without another allocation.
 // Other variations keep the generic reconstruction routine unchanged.
 template <typename T>
-std::vector<std::size_t> reconstructTaggedBlueprintNormalizedForV2(
+std::vector<std::size_t> reconstructTaggedBlueprintNormalizedForSimulated(
     const std::vector<T>& arr,
     std::vector<uint32_t> blueprint,
     std::vector<std::size_t> ascCounts,
@@ -1607,14 +1616,14 @@ void mergeTwoAdjacentRunsToDestBranchless(
     }
 }
 
-// E085 retained for V2: preserve the same two-run merge and comparison semantics as the
+// E085 retained for simulated: preserve the same two-run merge and comparison semantics as the
 // E082 raw-pointer kernel, but consume from both ends of the runs at once.
 // The low-end and high-end selections are independent dependency chains, giving
 // an out-of-order CPU useful comparison/move work to overlap without adding the
 // winner-selection overhead that made E082's general 4-run fusion regress.
 //
-// This is deliberately a separate kernel.  V3-V6 share mergeRunsFromTmpToArr(),
-// so V2 can use E085 without silently changing V3-V6 before propagation is tested.
+// This is deliberately a separate kernel.  simulated-inplace through frozen-live share mergeRunsFromTmpToArr(),
+// so simulated can use E085 without silently changing simulated-inplace through frozen-live before propagation is tested.
 template <typename T, typename Less = std::less<T>>
 void mergeTwoAdjacentRunsToDestBranchlessBidirectional(
     std::vector<T>& src,
@@ -1902,21 +1911,22 @@ void mergeRunsPowerSortStyle(
 
 } // namespace detail
 
-// Common V1-V3 adjacent-pair merge driver selected by E115.
+// Common physical/simulated/simulated-inplace adjacent-pair merge driver selected by E115.
 template <class T, class Less>
 void mergeRunsAdjacentPairsEnds(std::vector<T>& src, std::vector<T>& dst,
                std::vector<std::size_t>& ends, Less less, bool branchlessRandomMerge,
-               bool bidirectionalBranchlessMerge = false) {
-    if (ends.size() <= 1) return;
+               bool bidirectionalBranchlessMerge = false, std::size_t initialOffset = 0) {
+    if (ends.size() <= initialOffset + 1) return;
     unsigned gallopTrigger = 7;
     if (!branchlessRandomMerge) {
-        const std::size_t runCount = ends.size();
+        const std::size_t runCount = ends.size() - initialOffset;
         std::size_t largestRun = 0, prevEnd = 0;
-        for (std::size_t end : ends) {
+        for (std::size_t ei = initialOffset; ei < ends.size(); ++ei) {
+            const std::size_t end = ends[ei];
             largestRun = std::max(largestRun, end - prevEnd);
             prevEnd = end;
         }
-        // V2 E045 selector, tested independently here for V1 physical piles.
+        // simulated E045 selector, tested independently here for physical physical piles.
         if (runCount >= 12 && runCount <= 128 &&
             static_cast<unsigned long long>(largestRun) * runCount * 4 <=
                 static_cast<unsigned long long>(ends.back()) * 5) {
@@ -1926,25 +1936,26 @@ void mergeRunsAdjacentPairsEnds(std::vector<T>& src, std::vector<T>& dst,
     bool sourceIsSrc = true;
     bool probeOrderedBoundaries = true;
     std::vector<std::size_t> next;
-    next.reserve((ends.size() + 1) / 2);
+    next.reserve((ends.size() - initialOffset + 1) / 2);
 
-    while (ends.size() > 1) {
+    while (ends.size() - initialOffset > 1) {
         auto& in = sourceIsSrc ? src : dst;
         auto& out = sourceIsSrc ? dst : src;
 
-        // E109 convergence baseline: match V2/V3's adaptive ordered-boundary
+        // E109 convergence baseline: match simulated/simulated-inplace's adaptive ordered-boundary
         // probing. Keep probing while the run set is small or the scan removes
         // at least 25% of boundaries; otherwise stop paying for repeated scans.
         if (probeOrderedBoundaries) {
-            const std::size_t oldRuns = ends.size();
+            const std::size_t oldRuns = ends.size() - initialOffset;
             next.clear();
-            for (std::size_t r = 0; r + 1 < ends.size(); ++r) {
+            for (std::size_t r = initialOffset; r + 1 < ends.size(); ++r) {
                 const std::size_t boundary = ends[r];
                 if (less(in[boundary], in[boundary - 1]))
                     next.push_back(boundary);
             }
             next.push_back(ends.back());
             ends.swap(next);
+            initialOffset = 0;
             const std::size_t newRuns = ends.size();
             const std::size_t removed = oldRuns - newRuns;
             probeOrderedBoundaries = newRuns <= 64 || removed * 4 >= oldRuns;
@@ -2348,543 +2359,10 @@ bool trySortLowCardinalityDirectConfirmed(std::vector<T>& arr, Less less) {
     }
 }
 
-template <typename T, typename Less>
-inline void highEntropyCompareExchange(T* a, std::size_t i, std::size_t j, Less less) {
-    T x = a[i], y = a[j];
-    const bool swap = less(y, x);
-    a[i] = swap ? y : x;
-    a[j] = swap ? x : y;
-}
+#include <jessesort/detail_high_entropy_backend.inc>
 
-template <typename T, typename Less>
-inline void highEntropyNetwork9(T* a, Less less) {
-    static constexpr unsigned p[][2] = {{0,3},{1,7},{2,5},{4,8},{0,7},{2,4},{3,8},{5,6},{0,2},{1,3},{4,5},{7,8},{1,4},{3,6},{5,7},{0,1},{2,4},{3,5},{6,8},{2,3},{4,5},{6,7},{1,2},{3,4},{5,6}};
-    for (const auto& q : p) highEntropyCompareExchange(a, q[0], q[1], less);
-}
+#include <jessesort/detail_high_entropy_vector_routes.inc>
 
-template <typename T, typename Less>
-inline void highEntropyNetwork13(T* a, Less less) {
-    static constexpr unsigned p[][2] = {{0,12},{1,10},{2,9},{3,7},{5,11},{6,8},{1,6},{2,3},{4,11},{7,9},{8,10},{0,4},{1,2},{3,6},{7,8},{9,10},{11,12},{4,6},{5,9},{8,11},{10,12},{0,5},{3,8},{4,7},{6,11},{9,10},{0,1},{2,5},{6,9},{7,8},{10,11},{1,3},{2,4},{5,6},{9,10},{1,2},{3,4},{5,7},{6,8},{2,3},{4,5},{6,7},{8,9},{3,4},{5,6}};
-    for (const auto& q : p) highEntropyCompareExchange(a, q[0], q[1], less);
-}
-
-template <typename T, typename Less>
-inline void highEntropyInsertionFinish(T* a, std::size_t n, Less less) {
-    if (n < 2) return;
-    std::size_t pre = 1;
-    if (n >= 13) { highEntropyNetwork13(a, less); pre = 13; }
-    else if (n >= 9) { highEntropyNetwork9(a, less); pre = 9; }
-    for (std::size_t i = pre; i < n; ++i) {
-        T x = a[i];
-        if (!less(x, a[i - 1])) continue;
-        std::size_t j = i;
-        do { a[j] = a[j - 1]; --j; } while (j && less(x, a[j - 1]));
-        a[j] = x;
-    }
-}
-
-template <typename T, typename Less>
-inline void highEntropySmallSortBaseline(T* a, std::size_t n, Less less) {
-    if (n < 18) {
-        highEntropyInsertionFinish(a, n, less);
-        return;
-    }
-
-    const std::size_t mid = n / 2;
-    highEntropyInsertionFinish(a, mid, less);
-    highEntropyInsertionFinish(a + mid, n - mid, less);
-
-    std::array<T, 32> scratch{};
-    std::size_t left = 0;
-    std::size_t right = mid;
-    std::ptrdiff_t leftRev = static_cast<std::ptrdiff_t>(mid) - 1;
-    std::ptrdiff_t rightRev = static_cast<std::ptrdiff_t>(n) - 1;
-    std::size_t out = 0;
-    std::ptrdiff_t outRev = static_cast<std::ptrdiff_t>(n) - 1;
-
-    for (std::size_t i = 0; i < mid; ++i) {
-        const bool takeRight = less(a[right], a[left]);
-        scratch[out++] = takeRight ? a[right++] : a[left++];
-
-        const bool takeRightRev =
-            !less(a[static_cast<std::size_t>(rightRev)],
-                  a[static_cast<std::size_t>(leftRev)]);
-        scratch[static_cast<std::size_t>(outRev--)] =
-            takeRightRev ? a[static_cast<std::size_t>(rightRev--)]
-                         : a[static_cast<std::size_t>(leftRev--)];
-    }
-
-    if ((n & 1u) != 0u) {
-        const bool leftNonempty =
-            static_cast<std::ptrdiff_t>(left) <= leftRev;
-        scratch[out] = leftNonempty ? a[left] : a[right];
-    }
-    std::copy_n(scratch.begin(), n, a);
-}
-
-template <typename T, typename Less>
-inline void highEntropySmallSortIpnsortStyle(T* a, std::size_t n, Less less) {
-    // Rust's current integer network path is already algorithmically almost
-    // identical to Jesse's: 9/13 network + insertion completion, then a
-    // bidirectional merge for len>=18. E166 tests its remaining branchless
-    // pointer-arithmetic merge shape and single-loop half finishing.
-    if (n < 18) {
-        highEntropyInsertionFinish(a, n, less);
-        return;
-    }
-
-    const std::size_t mid = n / 2;
-
-    // Use one loop-shaped dispatch to mirror Rust's anti-unrolling structure.
-    T* region = a;
-    std::size_t regionLen = mid;
-    for (;;) {
-        highEntropyInsertionFinish(region, regionLen, less);
-        if (region != a) break;
-        region = a + mid;
-        regionLen = n - mid;
-    }
-
-    std::array<T, 32> scratch{};
-    const T* left = a;
-    const T* right = a + mid;
-    const T* leftRev = a + mid - 1;
-    const T* rightRev = a + n - 1;
-    T* dst = scratch.data();
-    T* dstRev = scratch.data() + n - 1;
-
-    for (std::size_t k = 0; k < mid; ++k) {
-        const bool takeLeft = !less(*right, *left);
-        const T* srcUp = takeLeft ? left : right;
-        *dst++ = *srcUp;
-        left += static_cast<std::size_t>(takeLeft);
-        right += static_cast<std::size_t>(!takeLeft);
-
-        const bool takeRightRev = !less(*rightRev, *leftRev);
-        const T* srcDown = takeRightRev ? rightRev : leftRev;
-        *dstRev-- = *srcDown;
-        rightRev -= static_cast<std::size_t>(takeRightRev);
-        leftRev -= static_cast<std::size_t>(!takeRightRev);
-    }
-
-    if ((n & 1u) != 0u) {
-        const T* leftEnd = leftRev + 1;
-        const bool leftNonempty = left < leftEnd;
-        *dst = *(leftNonempty ? left : right);
-    }
-
-    if constexpr (std::is_trivially_copyable_v<T>) {
-        std::memcpy(a, scratch.data(), n * sizeof(T));
-    } else {
-        std::copy_n(scratch.begin(), n, a);
-    }
-}
-
-struct HighEntropySmallSortMetrics {
-    std::uint64_t calls = 0;
-    std::uint64_t elements = 0;
-    std::uint64_t nanoseconds = 0;
-};
-
-template <typename T, typename Less>
-inline void highEntropySmallSort(
-    T* a, std::size_t n, Less less,
-    bool enableIpnsortStyleSmallSort = false,
-    HighEntropySmallSortMetrics* metrics = nullptr
-) {
-    using SmallClock = std::chrono::steady_clock;
-    const auto begin = metrics ? SmallClock::now() : SmallClock::time_point{};
-
-    if (enableIpnsortStyleSmallSort && n >= 18)
-        highEntropySmallSortIpnsortStyle(a, n, less);
-    else
-        highEntropySmallSortBaseline(a, n, less);
-
-    if (metrics) {
-        const auto end = SmallClock::now();
-        ++metrics->calls;
-        metrics->elements += n;
-        metrics->nanoseconds += static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count());
-    }
-}
-
-template <typename T, typename Less>
-inline std::size_t highEntropyMedian3Index(T* a, std::size_t x, std::size_t y, std::size_t z, Less less) {
-    if (less(a[y], a[x])) std::swap(x, y);
-    if (less(a[z], a[y])) std::swap(y, z);
-    if (less(a[y], a[x])) std::swap(x, y);
-    return y;
-}
-
-template <typename T, typename Less>
-inline std::size_t highEntropyAdaptiveMedian3Rec(
-    T* a,
-    std::size_t x,
-    std::size_t y,
-    std::size_t z,
-    std::size_t sectionSize,
-    Less less
-) {
-    // E164: C++ translation of ipnsort's adaptive pseudomedian geometry.
-    // Each level samples the starts of the 0/8, 4/8, and 7/8 subregions.
-    if (sectionSize * 8 >= 64) {
-        const std::size_t s = sectionSize / 8;
-        if (s != 0) {
-            x = highEntropyAdaptiveMedian3Rec(
-                a, x, x + 4 * s, x + 7 * s, s, less);
-            y = highEntropyAdaptiveMedian3Rec(
-                a, y, y + 4 * s, y + 7 * s, s, less);
-            z = highEntropyAdaptiveMedian3Rec(
-                a, z, z + 4 * s, z + 7 * s, s, less);
-        }
-    }
-    return highEntropyMedian3Index(a, x, y, z, less);
-}
-
-template <typename T, typename Less>
-inline std::size_t highEntropyPivotIndex(
-    T* a, std::size_t n, Less less, bool enableAdaptiveLargePivot = true
-) {
-    // E164: recursive adaptive sampling pays for itself only on large high-entropy
-    // partitions. Dominant-value/equality-filtered routes explicitly keep the
-    // previous median-of-3 / fixed-ninther policy.
-    if (enableAdaptiveLargePivot && n >= 8192) {
-        const std::size_t s = n / 8;
-        return highEntropyAdaptiveMedian3Rec(
-            a, 0, 4 * s, 7 * s, s, less);
-    }
-    if (n < 128) return highEntropyMedian3Index(a, 0, n / 2, n - 1, less);
-    const std::size_t s = n / 8, m = n / 2;
-    const std::size_t a1 = highEntropyMedian3Index(a, 0, s, 2 * s, less);
-    const std::size_t a2 = highEntropyMedian3Index(a, m - s, m, m + s, less);
-    const std::size_t a3 = highEntropyMedian3Index(a, n - 1 - 2 * s, n - 1 - s, n - 1, less);
-    return highEntropyMedian3Index(a, a1, a2, a3, less);
-}
-
-template <typename T, typename Pred>
-inline std::size_t highEntropyCyclicPred(T* a, std::size_t len, Pred pred) {
-    if (len == 0) return 0;
-    T gap = a[0];
-    T* gapPos = a;
-    std::size_t num = 0;
-    std::size_t i = 1;
-    auto body = [&](T x, T* right) {
-        const bool take = pred(x);
-        T* left = a + num;
-        *gapPos = *left;
-        *left = x;
-        gapPos = right;
-        num += static_cast<std::size_t>(take);
-    };
-    for (; i + 1 < len; i += 2) { body(a[i], a + i); body(a[i + 1], a + i + 1); }
-    for (; i < len; ++i) body(a[i], a + i);
-    const bool take = pred(gap);
-    T* left = a + num;
-    *gapPos = *left;
-    *left = gap;
-    num += static_cast<std::size_t>(take);
-    return num;
-}
-
-template <typename T, typename Pred>
-inline std::size_t highEntropyCyclicPredIpnsortStyle8(
-    T* v, std::size_t len, Pred pred
-) {
-    if (len == 0) return 0;
-
-    T gapValue;
-    std::memcpy(&gapValue, v, sizeof(T));
-    T* gapPos = v;
-    T* right = v + 1;
-    std::size_t numLt = 0;
-
-    auto body = [&](T* rightPtr) {
-        const bool rightIsLt = pred(*rightPtr);
-        T* left = v + numLt;
-        std::memmove(gapPos, left, sizeof(T));
-        std::memcpy(left, rightPtr, sizeof(T));
-        gapPos = rightPtr;
-        numLt += static_cast<std::size_t>(rightIsLt);
-    };
-
-    T* const end = v + len;
-    T* const unrollEnd = v + len - 1;
-    while (right < unrollEnd) {
-        body(right); ++right;
-        body(right); ++right;
-    }
-    while (right < end) {
-        body(right);
-        ++right;
-    }
-
-    const bool gapIsLt = pred(gapValue);
-    T* left = v + numLt;
-    std::memmove(gapPos, left, sizeof(T));
-    std::memcpy(left, &gapValue, sizeof(T));
-    numLt += static_cast<std::size_t>(gapIsLt);
-    return numLt;
-}
-
-template <typename T, typename Less>
-inline std::size_t highEntropyPartition(
-    T* a, std::size_t n, std::size_t pivotIndex, Less less
-) {
-    // E165 follow-up: source-integrated u64 testing found a small but consistent
-    // local gain for the ipnsort-style gap loop. Keep it compile-time isolated
-    // to eligible 8-byte integral primitives; canonical 4-byte int retains the
-    // prior Jesse kernel exactly.
-    if constexpr (specializedIntegralEligible<T, Less> && sizeof(T) == 8) {
-        std::swap(a[0], a[pivotIndex]);
-        const T pivot = a[0];
-        const std::size_t p = highEntropyCyclicPredIpnsortStyle8(
-            a + 1, n - 1, [&](const T& x) { return less(x, pivot); });
-        std::swap(a[0], a[p]);
-        return p;
-    } else {
-        std::swap(a[pivotIndex], a[n - 1]);
-        const T pivot = a[n - 1];
-        const std::size_t p = highEntropyCyclicPred(
-            a, n - 1, [&](const T& x) { return less(x, pivot); });
-        std::swap(a[p], a[n - 1]);
-        return p;
-    }
-}
-
-struct HighEntropyControlFlowMetrics {
-    std::uint64_t functionEntries = 0;
-    std::uint64_t loopIterations = 0;
-    std::uint64_t maxCallDepth = 0;
-};
-
-template <typename T, typename Less>
-void highEntropyQuickSort(T* a, std::size_t n, int depth, Less less,
-                          bool hasAncestor = false, T ancestor = T{},
-                          bool enableAdaptiveLargePivot = true,
-                          bool enableIpnsortStyleSmallSort = true,
-                          HighEntropySmallSortMetrics* smallSortMetrics = nullptr,
-                          bool iterateRight = true,
-                          HighEntropyControlFlowMetrics* controlMetrics = nullptr,
-                          std::uint64_t callDepth = 1) {
-    if (controlMetrics) {
-        ++controlMetrics->functionEntries;
-        controlMetrics->maxCallDepth =
-            std::max(controlMetrics->maxCallDepth, callDepth);
-    }
-
-    for (;;) {
-        if (controlMetrics) ++controlMetrics->loopIterations;
-
-        if (n <= 32) {
-            using SmallClock = std::chrono::steady_clock;
-            const auto smallBegin =
-                smallSortMetrics ? SmallClock::now() : SmallClock::time_point{};
-
-            if (n < 18) {
-                highEntropyInsertionFinish(a, n, less);
-            } else if constexpr (specializedIntegralEligible<T, Less>) {
-                if (enableIpnsortStyleSmallSort)
-                    highEntropySmallSortIpnsortStyle(a, n, less);
-                else
-                    highEntropySmallSortBaseline(a, n, less);
-            } else {
-                highEntropySmallSortBaseline(a, n, less);
-            }
-
-            if (smallSortMetrics) {
-                const auto smallEnd = SmallClock::now();
-                ++smallSortMetrics->calls;
-                smallSortMetrics->elements += n;
-                smallSortMetrics->nanoseconds += static_cast<std::uint64_t>(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        smallEnd - smallBegin).count());
-            }
-            return;
-        }
-
-        if (depth <= 0) {
-            std::make_heap(a, a + n, less);
-            std::sort_heap(a, a + n, less);
-            return;
-        }
-
-        const std::size_t pi =
-            highEntropyPivotIndex(a, n, less, enableAdaptiveLargePivot);
-        const T pivot = a[pi];
-
-        if (hasAncestor && !less(ancestor, pivot)) {
-            const std::size_t eq = highEntropyCyclicPred(
-                a, n, [&](const T& x) { return !less(ancestor, x); });
-
-            if (!iterateRight) {
-                highEntropyQuickSort(
-                    a + eq, n - eq, depth - 1, less, false, T{},
-                    enableAdaptiveLargePivot, enableIpnsortStyleSmallSort,
-                    smallSortMetrics, false, controlMetrics, callDepth + 1);
-                return;
-            }
-
-            a += eq;
-            n -= eq;
-            --depth;
-            hasAncestor = false;
-            ancestor = T{};
-            continue;
-        }
-
-        const std::size_t p = highEntropyPartition(a, n, pi, less);
-
-        if (!iterateRight) {
-            highEntropyQuickSort(
-                a, p, depth - 1, less, false, T{},
-                enableAdaptiveLargePivot, enableIpnsortStyleSmallSort,
-                smallSortMetrics, false, controlMetrics, callDepth + 1);
-            highEntropyQuickSort(
-                a + p + 1, n - p - 1, depth - 1, less, true, pivot,
-                enableAdaptiveLargePivot, enableIpnsortStyleSmallSort,
-                smallSortMetrics, false, controlMetrics, callDepth + 1);
-            return;
-        }
-
-        // E167 candidate: recurse only into the left partition and iterate on
-        // the right, matching ipnsort's control-flow shape.
-        highEntropyQuickSort(
-            a, p, depth - 1, less, false, T{},
-            enableAdaptiveLargePivot, enableIpnsortStyleSmallSort,
-            smallSortMetrics, true, controlMetrics, callDepth + 1);
-
-        a += p + 1;
-        n -= p + 1;
-        --depth;
-        hasAncestor = true;
-        ancestor = pivot;
-    }
-}
-
-template <typename T, typename Less>
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline))
-#endif
-bool highEntropySampleCandidate(const std::vector<T>& arr, Less less) {
-    if constexpr (!specializedIntegralEligible<T, Less>) {
-        (void)arr; (void)less; return false;
-    } else {
-        if (arr.size() < 10000) return false;
-        std::array<std::uint64_t, 128> keys{};
-        std::array<unsigned char, 128> valid{};
-        std::size_t distinct = 0;
-        const std::size_t end = std::min<std::size_t>(64, arr.size());
-        for (std::size_t i = 0; i < end; ++i) {
-            const std::uint64_t key = specializedIntegralKey(arr[i]);
-            std::size_t slot = static_cast<std::size_t>((key * 11400714819323198485ULL) >> 57);
-            for (;;) {
-                if (!valid[slot]) { valid[slot] = 1; keys[slot] = key; ++distinct; break; }
-                if (keys[slot] == key) break;
-                slot = (slot + 1) & 127u;
-            }
-        }
-        return distinct >= 44;
-    }
-}
-
-template <typename T, typename Less>
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline))
-#endif
-bool trySortHighEntropyPartitionDirect(std::vector<T>& arr, Less less) {
-    if constexpr (!specializedIntegralEligible<T, Less>) {
-        (void)arr; (void)less; return false;
-    } else {
-        if (!highEntropySampleCandidate(arr, less)) return false;
-        highEntropyQuickSort(
-            arr.data(), arr.size(),
-            2 * static_cast<int>(std::bit_width(arr.size())), less,
-            false, T{}, true, true, nullptr, true);
-        return true;
-    }
-}
-
-template <typename T, typename Less>
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline))
-#endif
-bool dominantValueSampleCandidate(const std::vector<T>& arr, T& dominant, Less less) {
-    if constexpr (!specializedIntegralEligible<T, Less>) {
-        (void)arr; (void)dominant; (void)less; return false;
-    } else {
-        if (arr.size() < 10000) return false;
-        T candidate = arr[0];
-        int balance = 0;
-        for (std::size_t i = 0; i < 8; ++i) {
-            if (arr[i] == candidate) ++balance;
-            else if (--balance < 0) { candidate = arr[i]; balance = 1; }
-        }
-        std::size_t firstEight = 0;
-        for (std::size_t i = 0; i < 8; ++i) firstEight += arr[i] == candidate ? 1u : 0u;
-        if (firstEight < 6) return false;
-        std::size_t sampleCount = 0;
-        const std::size_t end = std::min<std::size_t>(64, arr.size());
-        for (std::size_t i = 0; i < end; ++i) sampleCount += arr[i] == candidate ? 1u : 0u;
-        if (sampleCount < 56) return false;
-        dominant = candidate;
-        return true;
-    }
-}
-
-
-// Shared pre-Patience router used by V1-V7 propagation experiments.  The
-// caller is responsible for cheap structural/monotonic guards before entering
-// this helper.  Returning true means the input was fully sorted by a
-// specialized backend and no pile representation should be built.
-template <typename T, typename Less>
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline))
-#endif
-bool trySpecializedPrePatienceRoutes(std::vector<T>& arr, Less less) {
-    if constexpr (!specializedIntegralEligible<T, Less>) {
-        (void)arr; (void)less;
-        return false;
-    } else {
-        T dominant = arr[0];
-        if (dominantValueSampleCandidate(arr, dominant, less)) {
-            highEntropyQuickSort(
-                arr.data(), arr.size(),
-                2 * static_cast<int>(std::bit_width(arr.size())), less,
-                false, T{}, false,
-                true, nullptr, false);
-            return true;
-        }
-
-        if (lowCardinalityDirectionGate(arr, less) &&
-            lowCardinalitySampleCandidate(arr, less) &&
-            trySortLowCardinalityDirectConfirmed(arr, less)) {
-            return true;
-        }
-
-        bool highEntropyPrefixAlternates = false;
-        if (arr.size() >= 8) {
-            int previousDirection = 0;
-            highEntropyPrefixAlternates = true;
-            for (std::size_t i = 1; i < 8; ++i) {
-                int direction = 0;
-                if (less(arr[i - 1], arr[i])) direction = 1;
-                else if (less(arr[i], arr[i - 1])) direction = -1;
-                if (direction == 0 ||
-                    (previousDirection != 0 && direction == previousDirection)) {
-                    highEntropyPrefixAlternates = false;
-                    break;
-                }
-                previousDirection = direction;
-            }
-        }
-        if (!highEntropyPrefixAlternates &&
-            trySortHighEntropyPartitionDirect(arr, less)) {
-            return true;
-        }
-        return false;
-    }
-}
 
 template <typename T>
 inline bool shouldUseRandomBranchlessMerge(
@@ -2998,7 +2476,7 @@ void sortImplCore(std::vector<T>& arr, Less less, bool enableNaturalRunRoute,
     std::vector<T> tmp;
 
     std::vector<std::size_t> runStart =
-        reconstructTaggedBlueprintNormalizedForV2(
+        reconstructTaggedBlueprintNormalizedForSimulated(
             arr,
             std::move(sim.blueprint),
             std::move(sim.ascCounts),
@@ -3010,9 +2488,9 @@ void sortImplCore(std::vector<T>& arr, Less less, bool enableNaturalRunRoute,
             true   // E161 decode raw bulk tags on the fly; skip normalization pass
         );
 
-    // E115: V1-V3 now share the ends-based adjacent-pair merge driver.
+    // E115: physical/simulated/simulated-inplace now share the ends-based adjacent-pair merge driver.
     // It computes its own E045 gallop trigger from the final run lengths.
-    // E111: PowerSort was revalidated across V1/V2/V3 after convergence and
+    // E111: PowerSort was revalidated across physical/simulated/simulated-inplace after convergence and
     // no longer earns its selector complexity. Use adjacent-pair scheduling.
     std::vector<std::size_t> ends(runStart.begin() + 1, runStart.end());
     mergeRunsAdjacentPairsEnds(

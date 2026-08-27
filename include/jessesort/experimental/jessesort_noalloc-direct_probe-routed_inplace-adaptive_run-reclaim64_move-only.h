@@ -1,0 +1,4 @@
+#ifndef JESSESORT_NOALLOC_DIRECT_EXPERIMENTAL_COMPAT_H
+#define JESSESORT_NOALLOC_DIRECT_EXPERIMENTAL_COMPAT_H
+#include <jessesort/jessesort_noalloc-direct_probe-routed_inplace-adaptive_run-reclaim64_move-only.h>
+#endif
