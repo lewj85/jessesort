@@ -1,0 +1,10 @@
+generated_utc=2026-08-27T07:01:09Z
+n=100000
+trials=500
+warmups=2
+jessesort_source=50aec638cabb2817c0e64974944b14dcb5825a16
+sort_research_rs_commit=8d3eae46244e527554a302dce8358966d1cf7f22
+rustc=rustc 1.100.0-nightly (bff8e12ff 2026-08-26)
+g++=g++ (Debian 14.2.0-19) 14.2.0
+uname=Linux 96a7155c7fc6 5.15.153.1-microsoft-standard-WSL2 #1 SMP Fri Mar 29 23:14:13 UTC 2024 x86_64 GNU/Linux
+cpu=13th Gen Intel(R) Core(TM) i9-13900K

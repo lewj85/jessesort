@@ -7,7 +7,7 @@ cd "$ROOT"
 mkdir -p deps results
 
 if [[ ! -f "$JESSESORT_ROOT/include/jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h" ]]; then
-  echo "Expected E229 layer-tagged JesseSort headers were not found in: $JESSESORT_ROOT" >&2
+  echo "Expected current tagged JesseSort headers were not found in: $JESSESORT_ROOT" >&2
   exit 1
 fi
 
@@ -22,7 +22,7 @@ fi
 if git -C "$JESSESORT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "JesseSort commit: $(git -C "$JESSESORT_ROOT" rev-parse HEAD)"
 else
-  echo "JesseSort source: local enclosing E229 tree (no git metadata)"
+  echo "JesseSort source: local enclosing repository tree (no git metadata)"
 fi
 echo "sort-research-rs commit: $(git -C deps/sort-research-rs rev-parse HEAD)"
 

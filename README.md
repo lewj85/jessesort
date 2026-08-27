@@ -21,13 +21,13 @@ Regarding memory: most simulated implementations use `O(n)` auxiliary storage. M
 
 ## Speed tests
 
-Jessesort is up to 58x faster than `std::sort` with GCC/libstdc++, up to 51x faster than `std::sort` with Clang/libc++, and up to 13x faster than `ipnsort` in Rust. See below for speed comparisons.
+**Jessesort is up to 58x faster than `std::sort` with GCC/libstdc++, up to 51x faster than `std::sort` with Clang/libc++, and up to 37x faster than `ipnsort` in Rust.** See below for speed comparisons.
+
+In the tables below, A ratio of 0.5 means Jessesort takes 50% as much time to sort things (2x faster). A ratio of 0.05 means Jessesort takes 5% as much time to sort things (20x faster). **Ratios <1.0 mean Jessesort is faster.**
 
 ### std::sort with GCC (libstdc++)
 
 Cells are **median paired ratio vs `std::sort` (median microseconds)** from 500 trials on n=100k elements using an Intel Xeon Platinum 8573C with GCC 14.2.0 (libstdc++) in C++20 with `-O3 -march=native -DNDEBUG`. The full 20-variation x 14-input x four-size baseline is saved in `benchmarks/baselines/e229/e229_all_variations_combined.md`.
-
-**Scores less than 1.0 mean Jessesort is faster.**
 
 | Input | physical | simulated | frozen-single | indexed | noalloc-direct | noalloc-low-run | simulated-direct | phase-map | std::sort |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -69,29 +69,31 @@ Note that the code here was developed primarily with GCC and libstdc++, not clan
 
 ### ipnsort
 
-Results below are direct timing comparisons with an AMD Ryzen 7 7445HS CPU. Both algorithms ran in their native language: ipnsort was run in Rust, Jessesort was run in C++. See the `src/ipnsort_vs_jessesort/` folder for more details.
+Results below are direct timing comparisons with an Intel i9-13900K CPU. Both algorithms ran in their native language: ipnsort was run in Rust, Jessesort was run in C++. See the `src/ipnsort_vs_jessesort/` folder for more details.
 
 - type: u64
 - n: 100000
 - trials per pattern: 500
 - warmups per pattern: 2
 - shared cold-like preconditioner: false
-- inputs: Jessesort benchmark inputs, order-preserving int->u64 encoding
+- inputs: 14 canonical JesseSort benchmark inputs, order-preserving int->u64 encoding
 
-| Pattern | ipnsort µs | physical µs | simulated µs | simulated-direct µs | indexed µs | noalloc µs | noalloc-low-run µs | simulated/ipnsort | simulated-direct/ipnsort | best Jessesort/ipnsort |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Random | 932.327 | 1107.630 | 1106.707 | 1121.137 | 1104.991 | 1099.430 | 1105.214 | 1.187 | 1.203 | 1.179 |
-| Sorted | 21.227 | 42.284 | 31.861 | 31.901 | 42.374 | 21.277 | 21.348 | 1.501 | 1.503 | 1.002 |
-| Reverse | 27.598 | 30.869 | 73.131 | 73.111 | 94.147 | 30.949 | 31.019 | 2.650 | 2.649 | 1.119 |
-| Sorted+Noise(5%) | 987.791 | 1898.816 | 1122.736 | 771.332 | 1088.610 | 1160.015 | 1161.144 | 1.137 | 0.781 | 0.781 |
-| Sorted+Noise(10%) | 1028.002 | 2346.818 | 1184.158 | 1169.915 | 1474.362 | 1170.976 | 1171.597 | 1.152 | 1.138 | 1.138 |
-| Random%25 | 251.660 | 105.907 | 105.819 | 106.343 | 105.841 | 106.037 | 106.102 | 0.420 | 0.423 | 0.420 |
-| Alternating | 904.247 | 1282.351 | 366.404 | 351.375 | 615.324 | 1231.776 | 1238.690 | 0.405 | 0.389 | 0.389 |
-| Sawtooth | 589.337 | 1963.941 | 688.143 | 494.755 | 1045.841 | 1942.803 | 645.240 | 1.168 | 0.840 | 0.840 |
-| MixedDirectionRuns | 892.322 | 1381.436 | 337.160 | 281.571 | 652.214 | 2171.173 | 1347.977 | 0.378 | 0.316 | 0.316 |
-| BlockSorted | 821.189 | 1396.120 | 269.755 | 110.150 | 624.697 | 2334.664 | 1316.673 | 0.328 | 0.134 | 0.134 |
-| OrganPipe | 1007.441 | 921.839 | 190.435 | 140.377 | 192.601 | 1402.265 | 505.183 | 0.189 | 0.139 | 0.139 |
-| Rotated | 758.514 | 857.853 | 179.358 | 54.530 | 151.373 | 128.444 | 129.285 | 0.236 | 0.072 | **0.072** |
+| Input | physical | simulated | frozen-single | indexed | noalloc-direct | noalloc-low-run | simulated-direct | simulated-direct-phase-map-mature | ipnsort |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Random | 1.1371 (1748.751) | 1.1298 (1737.541) | 1.1291 (1736.575) | 1.1328 (1742.278) | 1.1264 (1732.407) | 1.1286 (1735.797) | 1.1315 (1740.231) | 1.1351 (1745.766) | **1.0000 (1537.966)** |
+| Sorted | 1.0123 (17.965) | 1.0003 (17.752) | 1.3551 (24.047) | 1.0008 (17.760) | 1.0198 (18.098) | 1.0102 (17.926) | 1.0179 (18.063) | 1.0169 (18.046) | **1.0000 (17.745)** |
+| Reverse | 1.0360 (27.120) | 1.0363 (27.129) | 1.2654 (33.126) | 1.0359 (27.118) | 1.0395 (27.212) | 1.0388 (27.194) | 1.0365 (27.133) | 1.0374 (27.157) | **1.0000 (26.179)** |
+| Sorted+Noise(5%) | 1.1424 (1767.425) | 0.8430 (1304.214) | 1.0626 (1644.048) | 0.7955 (1230.715) | 0.6716 (1039.144) | 1.1805 (1826.345) | **0.4676 (723.525)** | 0.4795 (741.804) | 1.0000 (1547.151) |
+| Sorted+Noise(10%) | 1.3841 (2139.009) | 1.1248 (1738.249) | 1.2905 (1994.348) | 1.1188 (1728.986) | 1.1216 (1733.285) | 1.1270 (1741.617) | **0.7436 (1149.129)** | 0.7665 (1184.495) | 1.0000 (1545.393) |
+| Random%25 | 0.5438 (282.745) | **0.5412 (281.375)** | 0.5412 (281.390) | 0.5424 (281.997) | 0.5435 (282.575) | 0.5430 (282.313) | 0.5431 (282.375) | 0.5465 (284.153) | 1.0000 (519.944) |
+| Alternating | 0.6801 (1060.118) | 0.5582 (870.103) | 0.6498 (1012.864) | 0.5329 (830.562) | 0.0451 (70.288) | 1.3655 (2128.312) | **0.0400 (62.373)** | 0.0431 (67.105) | 1.0000 (1558.672) |
+| Sawtooth | 1.8180 (2107.426) | 1.1804 (1368.390) | 1.6955 (1965.434) | 1.2166 (1410.295) | 1.2134 (1406.582) | 1.2102 (1402.862) | **0.0851 (98.602)** | 0.0917 (106.327) | 1.0000 (1159.227) |
+| MixedDirectionRuns | 0.8736 (1324.701) | 0.4881 (740.087) | 0.6940 (1052.341) | 0.4229 (641.182) | 0.1571 (238.180) | 0.6812 (1032.955) | **0.1196 (181.360)** | 0.1875 (284.312) | 1.0000 (1516.322) |
+| BlockSorted | 0.9077 (1292.031) | 0.3904 (555.726) | 0.7009 (997.646) | 0.4255 (605.591) | 0.1171 (166.684) | 0.6392 (909.910) | **0.0717 (102.001)** | 0.0779 (110.909) | 1.0000 (1423.407) |
+| OrganPipe | 0.4244 (744.817) | 0.1495 (262.387) | 0.2690 (472.184) | 0.1422 (249.531) | **0.0553 (96.977)** | 0.3036 (532.891) | 0.1126 (197.704) | 0.1185 (207.937) | 1.0000 (1755.122) |
+| Rotated | 0.4388 (599.459) | 0.1700 (232.260) | 0.2417 (330.124) | 0.0746 (101.881) | **0.0266 (36.341)** | 0.2127 (290.625) | 0.0312 (42.587) | 0.0343 (46.854) | 1.0000 (1366.091) |
+| MixedPhase3 | 1.9627 (3056.871) | 1.6587 (2583.465) | 2.0437 (3183.087) | 1.7780 (2769.223) | 1.1724 (1826.003) | 1.1750 (1830.117) | 1.6523 (2573.494) | **0.8866 (1380.837)** | 1.0000 (1557.486) |
+| MixedPhase12 | 1.1841 (1717.471) | 1.1807 (1712.589) | 1.1851 (1718.897) | 1.1824 (1714.943) | 1.1775 (1707.923) | 1.1743 (1703.220) | 1.1818 (1714.136) | **0.9165 (1329.287)** | 1.0000 (1450.430) |
 
 ## Algorithm overview
 

@@ -1,5 +1,5 @@
 [package]
-name = "ipnsort_jessesort_e229_bench"
+name = "ipnsort_jessesort_bench"
 version = "0.3.0"
 edition = "2021"
 build = "build.rs"

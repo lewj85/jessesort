@@ -6,7 +6,7 @@ use std::time::Instant;
 
 const BASE_SEED: u32 = 0x8A5CD789;
 
-const PATTERNS: [(&str, i32); 12] = [
+const PATTERNS: [(&str, i32); 14] = [
     ("Random", 0),
     ("Sorted", 1),
     ("Reverse", 2),
@@ -19,25 +19,31 @@ const PATTERNS: [(&str, i32); 12] = [
     ("BlockSorted", 7),
     ("OrganPipe", 8),
     ("Rotated", 9),
+    ("MixedPhase3", 14),
+    ("MixedPhase12", 15),
 ];
 
-const JESSE_NAMES: [&str; 6] = [
+const JESSE_NAMES: [&str; 8] = [
     "physical",
     "simulated",
-    "simulated-direct",
+    "frozen-single",
     "indexed",
-    "noalloc",
+    "noalloc-direct",
     "noalloc-low-run",
+    "simulated-direct",
+    "simulated-direct-phase-map-mature",
 ];
 
 extern "C" {
     fn jesse_generate_u64(out: *mut u64, n: usize, input_type: i32, seed: u32);
     fn jesse_physical_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
     fn jesse_simulated_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
-    fn jesse_simulated_direct_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
+    fn jesse_frozen_single_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
     fn jesse_indexed_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
-    fn jesse_noalloc_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
+    fn jesse_noalloc_direct_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
     fn jesse_noalloc_low_run_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
+    fn jesse_simulated_direct_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
+    fn jesse_simulated_direct_phase_map_mature_u64(input: *const u64, n: usize, output: *mut u64) -> f64;
 }
 
 fn trial_seed(base_seed: u32, n: usize, input_ordinal: i32, trial: usize) -> u32 {
@@ -71,18 +77,20 @@ fn run_jesse(id: usize, source: &[u64]) -> (f64, Vec<u64>) {
         match id {
             1 => jesse_physical_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
             2 => jesse_simulated_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
-            3 => jesse_simulated_direct_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
+            3 => jesse_frozen_single_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
             4 => jesse_indexed_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
-            5 => jesse_noalloc_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
+            5 => jesse_noalloc_direct_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
             6 => jesse_noalloc_low_run_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
+            7 => jesse_simulated_direct_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
+            8 => jesse_simulated_direct_phase_map_mature_u64(source.as_ptr(), source.len(), out.as_mut_ptr()),
             _ => unreachable!(),
         }
     };
     (us, out)
 }
 
-fn execution_order(trial: usize) -> [usize; 7] {
-    let mut order = [0usize, 1, 2, 3, 4, 5, 6]; // ipnsort + six JesseSort targets
+fn execution_order(trial: usize) -> [usize; 9] {
+    let mut order = [0usize, 1, 2, 3, 4, 5, 6, 7, 8]; // ipnsort + eight current JesseSort defaults
     let block = trial / order.len();
     let rotation = trial % order.len();
     order.rotate_left(rotation);
@@ -106,13 +114,13 @@ fn main() -> std::io::Result<()> {
     writeln!(raw, "pattern,n,trial,seed,algorithm,order_position,time_us")?;
 
     let mut summary = String::new();
-    summary.push_str("# ipnsort vs layer-tagged JesseSort (E229)\n\n");
+    summary.push_str("# ipnsort vs current JesseSort defaults\n\n");
     summary.push_str(&format!(
-        "- type: u64\n- n: {}\n- trials per pattern: {}\n- warmups per pattern: {}\n- shared cold-like preconditioner: false\n- inputs: E189 canonical JesseSort benchmark inputs, order-preserving int->u64 encoding\n\n",
+        "- type: u64\n- n: {}\n- trials per pattern: {}\n- warmups per pattern: {}\n- shared cold-like preconditioner: false\n- inputs: 14 canonical JesseSort benchmark inputs, order-preserving int->u64 encoding\n\n",
         n, trials, warmups
     ));
-    summary.push_str("| Pattern | ipnsort µs | physical µs | simulated µs | simulated-direct µs | indexed µs | noalloc µs | noalloc-low-run µs | simulated/ipnsort | simulated-direct/ipnsort | best Jesse/ipnsort |\n");
-    summary.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+    summary.push_str("| Input | physical | simulated | frozen-single | indexed | noalloc-direct | noalloc-low-run | simulated-direct | simulated-direct-phase-map-mature | ipnsort |\n");
+    summary.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
 
     for &(pattern_name, pattern_id) in &PATTERNS {
         for w in 0..warmups {
@@ -131,7 +139,7 @@ fn main() -> std::io::Result<()> {
             }
         }
 
-        let mut times: [Vec<f64>; 7] = std::array::from_fn(|_| Vec::with_capacity(trials));
+        let mut times: [Vec<f64>; 9] = std::array::from_fn(|_| Vec::with_capacity(trials));
 
         for trial in 0..trials {
             let seed = trial_seed(BASE_SEED, n, pattern_id, trial);
@@ -162,25 +170,23 @@ fn main() -> std::io::Result<()> {
             raw.flush()?;
         }
 
-        let medians: [f64; 7] = std::array::from_fn(|i| median(times[i].clone()));
+        let medians: [f64; 9] = std::array::from_fn(|i| median(times[i].clone()));
         let ip = medians[0];
-        let best = medians[1..].iter().copied().fold(f64::INFINITY, f64::min);
-
-        summary.push_str(&format!(
-            "| {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} |\n",
+        let row = format!(
+            "| {} | {:.4} ({:.3} us) | {:.4} ({:.3} us) | {:.4} ({:.3} us) | {:.4} ({:.3} us) | {:.4} ({:.3} us) | {:.4} ({:.3} us) | {:.4} ({:.3} us) | {:.4} ({:.3} us) | 1.0000 ({:.3} us) |\n",
             pattern_name,
-            ip,
-            medians[1], medians[2], medians[3], medians[4], medians[5], medians[6],
-            medians[2] / ip, medians[3] / ip, best / ip
-        ));
-
-        println!(
-            "| {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} |",
-            pattern_name,
-            ip,
-            medians[1], medians[2], medians[3], medians[4], medians[5], medians[6],
-            medians[2] / ip, medians[3] / ip, best / ip
+            medians[1] / ip, medians[1],
+            medians[2] / ip, medians[2],
+            medians[3] / ip, medians[3],
+            medians[4] / ip, medians[4],
+            medians[5] / ip, medians[5],
+            medians[6] / ip, medians[6],
+            medians[7] / ip, medians[7],
+            medians[8] / ip, medians[8],
+            ip
         );
+        summary.push_str(&row);
+        print!("{}", row);
     }
 
     fs::write(summary_path, &summary)?;

@@ -1,11 +1,11 @@
 #include "benchmark_seed.h"
-#include <jessesort/v1_actual_piles.h>
-#include <jessesort/v2_simulated.h>
-#include <jessesort/v3_inplace_simulated.h>
-#include <jessesort/v4_single_overflow.h>
-#include <jessesort/v5_deferred_bands.h>
-#include <jessesort/v6_live_bands.h>
-#include <jessesort/v7_avx2.h>
+#include <jessesort/jessesort_physical_probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated_probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/experimental/jessesort_simulated_probe-routed_inplace-flatten-adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated-frozen_probe-routed_adjacent-powersort-adaptive-buffered_single-overflow.h>
+#include <jessesort/experimental/jessesort_simulated-frozen_probe-routed_adjacent-adaptive-buffered_deferred-bands32.h>
+#include <jessesort/experimental/jessesort_simulated-frozen_probe-routed_adjacent-timsort-adaptive-buffered_live-bands32.h>
+#include <jessesort/experimental/jessesort_simulated-avx2_probe-routed_adjacent-adaptive-buffered_capped-probe8x128.h>
 
 #include <algorithm>
 #include <array>
@@ -223,12 +223,12 @@ static double timed(F&& f) {
 
 static void run_algorithm(int id, std::vector<int>& values) {
     switch (id) {
-        case 0: jessesort::actual_piles::sort(values); break;
-        case 1: jessesort::simulated::sort(values); break;
-        case 2: jessesort::simulated_inplace_flatten::sort(values); break;
-        case 3: jessesort::simulated_early_freeze_single_overflow::sort(values); break;
-        case 4: jessesort::simulated_early_freeze::sort(values); break;
-        case 5: jessesort::simulated_early_freeze_live::sort(values); break;
+        case 0: jessesort::actual_piles_legacy::sort(values); break;
+        case 1: jessesort::simulated_legacy::sort(values); break;
+        case 2: jessesort::simulated_inplace_flatten_legacy::sort(values); break;
+        case 3: jessesort::simulated_early_freeze_single_overflow_legacy::sort(values); break;
+        case 4: jessesort::simulated_early_freeze_legacy::sort(values); break;
+        case 5: jessesort::simulated_early_freeze_live_legacy::sort(values); break;
         case 6: jessesort::simulated_avx2_legacy::sort(values); break;
         case 7: std::sort(values.begin(), values.end()); break;
     }

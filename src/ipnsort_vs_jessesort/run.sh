@@ -14,7 +14,7 @@ if [[ ! -d deps/sort-research-rs/.git ]]; then
   exit 1
 fi
 if [[ ! -f "$JESSESORT_ROOT/include/jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h" ]]; then
-  echo "Expected E229 layer-tagged JesseSort headers missing from enclosing repository." >&2
+  echo "Expected current tagged JesseSort headers missing from enclosing repository." >&2
   exit 1
 fi
 
@@ -23,7 +23,7 @@ mkdir -p results
 if git -C "$JESSESORT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   JESSESORT_SOURCE="$(git -C "$JESSESORT_ROOT" rev-parse HEAD)"
 else
-  JESSESORT_SOURCE="local-e229-tree-no-git-metadata"
+  JESSESORT_SOURCE="local-jessesort-tree-no-git-metadata"
 fi
 
 {

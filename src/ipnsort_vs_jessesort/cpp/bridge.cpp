@@ -1,9 +1,11 @@
 #include <jessesort/jessesort_physical_probe-routed_adjacent-adaptive-buffered.h>
 #include <jessesort/jessesort_simulated_probe-routed_adjacent-adaptive-buffered.h>
-#include <jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated-frozen_probe-routed_adjacent-powersort-adaptive-buffered_single-overflow.h>
 #include <jessesort/jessesort_indexed_probe-routed_adjacent-adaptive-buffered_move-only.h>
-#include <jessesort/experimental/jessesort_noalloc_bounded-fallback_inplace-adaptive_partition-heapsort-fallback.h>
+#include <jessesort/jessesort_noalloc-direct_probe-routed_inplace-adaptive_run-reclaim64_move-only.h>
 #include <jessesort/experimental/jessesort_noalloc-low-run-merge_overlap-routed_inplace-adaptive_run-reclaim64.h>
+#include <jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort_simulated-direct_phase-map-mature_probe-routed_adjacent-adaptive-buffered.h>
 
 #include <algorithm>
 #include <chrono>
@@ -29,7 +31,9 @@ enum class InputType : int {
     OrganPipe = 8,
     Rotated = 9,
     SortedNoise10 = 12,
-    MixedDirectionRuns = 13
+    MixedDirectionRuns = 13,
+    MixedPhase3 = 14,
+    MixedPhase12 = 15
 };
 
 static std::size_t structured_scale(std::size_t n) {
@@ -40,10 +44,17 @@ static std::size_t structured_scale(std::size_t n) {
 // Order-preserving map from signed int32 ordering into unsigned u64 ordering.
 // For any int32 a,b: a < b iff encode(a) < encode(b), and equality is preserved.
 static std::uint64_t encode_int(int x) {
-    static_assert(sizeof(int) == 4, "E189 generator fidelity requires 32-bit int");
+    static_assert(sizeof(int) == 4, "benchmark generator fidelity requires 32-bit int");
     const std::uint32_t bits = static_cast<std::uint32_t>(x);
     return static_cast<std::uint64_t>(bits ^ 0x80000000u);
 }
+
+static constexpr InputType kBaselineInputs[] = {
+    InputType::Random, InputType::Sorted, InputType::Reverse,
+    InputType::NearlySorted, InputType::SortedNoise10, InputType::Random25,
+    InputType::Alternating, InputType::Sawtooth, InputType::MixedDirectionRuns,
+    InputType::BlockSorted, InputType::OrganPipe, InputType::Rotated
+};
 
 static void generate_int_exact(std::vector<int>& v, InputType t, std::mt19937& rng) {
     const std::size_t n = v.size();
@@ -166,6 +177,34 @@ static void generate_int_exact(std::vector<int>& v, InputType t, std::mt19937& r
                 v.end());
             break;
         }
+        case InputType::MixedPhase3: {
+            static constexpr InputType phases[] = {
+                InputType::NearlySorted, InputType::MixedDirectionRuns, InputType::Random
+            };
+            std::size_t begin = 0;
+            for (std::size_t phase = 0; phase < 3; ++phase) {
+                const std::size_t end = n * (phase + 1) / 3;
+                std::vector<int> part(end - begin);
+                generate_int_exact(part, phases[phase], rng);
+                std::copy(part.begin(), part.end(),
+                          v.begin() + static_cast<std::ptrdiff_t>(begin));
+                begin = end;
+            }
+            break;
+        }
+        case InputType::MixedPhase12: {
+            constexpr std::size_t phase_count = sizeof(kBaselineInputs) / sizeof(kBaselineInputs[0]);
+            std::size_t begin = 0;
+            for (std::size_t phase = 0; phase < phase_count; ++phase) {
+                const std::size_t end = n * (phase + 1) / phase_count;
+                std::vector<int> part(end - begin);
+                generate_int_exact(part, kBaselineInputs[phase], rng);
+                std::copy(part.begin(), part.end(),
+                          v.begin() + static_cast<std::ptrdiff_t>(begin));
+                begin = end;
+            }
+            break;
+        }
     }
 }
 
@@ -207,10 +246,10 @@ double jesse_simulated_u64(const std::uint64_t* input, std::size_t n,
     });
 }
 
-double jesse_simulated_direct_u64(const std::uint64_t* input, std::size_t n,
-                                  std::uint64_t* output) {
+double jesse_frozen_single_u64(const std::uint64_t* input, std::size_t n,
+                               std::uint64_t* output) {
     return timed_sort(input, n, output, [](auto& v) {
-        jessesort::simulated_direct_merge::sort(v);
+        jessesort::simulated_early_freeze_single_overflow_legacy::sort(v);
     });
 }
 
@@ -221,10 +260,10 @@ double jesse_indexed_u64(const std::uint64_t* input, std::size_t n,
     });
 }
 
-double jesse_noalloc_u64(const std::uint64_t* input, std::size_t n,
-                         std::uint64_t* output) {
+double jesse_noalloc_direct_u64(const std::uint64_t* input, std::size_t n,
+                                std::uint64_t* output) {
     return timed_sort(input, n, output, [](auto& v) {
-        jessesort::allocation_free_bounded::sort(v);
+        jessesort::allocation_free_direct::sort(v);
     });
 }
 
@@ -232,6 +271,20 @@ double jesse_noalloc_low_run_u64(const std::uint64_t* input, std::size_t n,
                                  std::uint64_t* output) {
     return timed_sort(input, n, output, [](auto& v) {
         jessesort::allocation_free_low_run::sort(v);
+    });
+}
+
+double jesse_simulated_direct_u64(const std::uint64_t* input, std::size_t n,
+                                  std::uint64_t* output) {
+    return timed_sort(input, n, output, [](auto& v) {
+        jessesort::simulated_direct_merge::sort(v);
+    });
+}
+
+double jesse_simulated_direct_phase_map_mature_u64(
+        const std::uint64_t* input, std::size_t n, std::uint64_t* output) {
+    return timed_sort(input, n, output, [](auto& v) {
+        jessesort::simulated_direct_phase_map_mature::sort(v);
     });
 }
 
