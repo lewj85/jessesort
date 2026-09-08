@@ -8,6 +8,12 @@ cd "$ROOT"
 N="${1:-10000}"
 TRIALS="${2:-500}"
 WARMUPS="${3:-2}"
+SUITE="${4:-canonical}"
+
+case "$SUITE" in
+  canonical|ood|all) ;;
+  *) echo "suite must be canonical, ood, or all" >&2; exit 2 ;;
+esac
 
 if [[ ! -d deps/sort-research-rs/.git ]]; then
   echo "ipnsort dependency missing. Run ./setup.sh first." >&2
@@ -31,6 +37,7 @@ fi
   echo "n=$N"
   echo "trials=$TRIALS"
   echo "warmups=$WARMUPS"
+  echo "suite=$SUITE"
   echo "jessesort_source=$JESSESORT_SOURCE"
   echo "sort_research_rs_commit=$(git -C deps/sort-research-rs rev-parse HEAD)"
   echo "rustc=$(rustc +nightly --version)"
@@ -42,7 +49,7 @@ fi
 } > results/system.txt
 
 export RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=native"
-cargo +nightly run --release -- "$N" "$TRIALS" "$WARMUPS"
+cargo +nightly run --release -- "$N" "$TRIALS" "$WARMUPS" "$SUITE"
 
 echo
 cat results/summary.md

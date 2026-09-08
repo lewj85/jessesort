@@ -1,5 +1,6 @@
 #include <jessesort/jessesort.h>
 #include <jessesort/jessesort_noalloc.h>
+#include "ood_families.h"
 
 #include <algorithm>
 #include <chrono>
@@ -222,6 +223,28 @@ void jesse_generate_u64(std::uint64_t* out, std::size_t n,
     std::mt19937 rng(seed);
     std::vector<int> signed_values(n);
     generate_int_exact(signed_values, static_cast<InputType>(input_type), rng);
+    for (std::size_t i = 0; i < n; ++i)
+        out[i] = encode_int(signed_values[i]);
+}
+
+std::size_t jesse_ood_family_count() {
+    static const auto families = jessesort::bench::ood::families();
+    return families.size();
+}
+
+const char* jesse_ood_family_name(std::size_t family_index) {
+    static const auto families = jessesort::bench::ood::families();
+    return family_index < families.size() ? families[family_index].name.c_str() : nullptr;
+}
+
+void jesse_generate_ood_u64(std::uint64_t* out, std::size_t n,
+                            std::size_t family_index, std::uint64_t seed) {
+    static const auto families = jessesort::bench::ood::families();
+    if (family_index >= families.size()) return;
+
+    std::mt19937_64 rng(seed);
+    std::vector<int> signed_values(n);
+    families[family_index].generate(signed_values, rng);
     for (std::size_t i = 0; i < n; ++i)
         out[i] = encode_int(signed_values[i]);
 }

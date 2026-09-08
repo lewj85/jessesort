@@ -1,8 +1,9 @@
-generated_utc=2026-09-08T08:12:26Z
+generated_utc=2026-09-08T09:02:18Z
 n=100000
 trials=500
 warmups=2
-jessesort_source=16611bbb957a9160116deaf5bcdd328618da919f
+suite=all
+jessesort_source=ceee8b339cdeff182bcf79f4374088db8c2a348a
 sort_research_rs_commit=8d3eae46244e527554a302dce8358966d1cf7f22
 rustc=rustc 1.100.0-nightly (cea272fa3 2026-09-07)
 g++=g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0

@@ -2,7 +2,7 @@
 
 This benchmark compares Rust **ipnsort** with the three maintained JesseSort public paths that are relevant to production and no-allocation work:
 
-1. **`simulated-direct live-phase`** — `jessesort::sort`, the current public/default simulated-direct live-phase path.
+1. **`simulated-direct_live-map`** — `jessesort::sort`, the current public/default E733->E732 simulated-direct live-phase path.
 2. **`adaptive-noalloc`** — `jessesort::noalloc::sort_adaptive`, the performance-oriented maintained no-allocation path.
 3. **`strict-noalloc`** — `jessesort::sort_unstable_noalloc`, the bounded-stack, no-heap, worst-case `O(n log n)` public contender intended for eventual direct Rust unstable-sort comparison.
 4. **`ipnsort`** — Rust ipnsort from `sort-research-rs`.
@@ -11,11 +11,17 @@ Historical physical/simulated/frozen/indexed/direct/phase-map representatives ar
 
 ## Inputs and type fidelity
 
-The benchmark uses the 14 canonical JesseSort input families:
+The benchmark can run the 14 canonical JesseSort input families, the maintained
+47-family expanded OOD suite, or both.
 
 Random, Sorted, Reverse, Sorted+Noise(5%), Sorted+Noise(10%), Random%25, Alternating, Sawtooth, MixedDirectionRuns, BlockSorted, OrganPipe, Rotated, MixedPhase3, and MixedPhase12.
 
-The JesseSort generators are implemented directly in `cpp/bridge.cpp` using C++ `std::mt19937` and the canonical seed mixing. They first generate the canonical signed 32-bit topology and then map each value to `u64` with:
+The canonical generators are implemented directly in `cpp/bridge.cpp` using
+C++ `std::mt19937` and the canonical seed mixing. OOD names, definitions, order,
+`std::mt19937_64`, and seed schedule come directly from the enclosing repository's
+`benchmarks/ood/ood_families.h`, preventing a second copy of the OOD definitions
+from drifting. Both suites first generate signed 32-bit topology and then map
+each value to `u64` with:
 
 ```cpp
 uint64_t(uint32_t(x) ^ 0x80000000u)
@@ -49,9 +55,13 @@ chmod +x setup.sh run.sh
 ## Run
 
 ```bash
-./run.sh 10000 500 2
-./run.sh 100000 500 2
+./run.sh 100000 500 2 canonical
+./run.sh 100000 500 2 ood
+./run.sh 100000 500 2 all
 ```
+
+The optional fourth argument is `canonical`, `ood`, or `all`; it defaults to
+`canonical` for compatibility with earlier commands.
 
 Outputs are written to:
 
@@ -62,7 +72,10 @@ Outputs are written to:
 The summary columns are:
 
 ```text
-| Input | simulated-direct_live-phase | adaptive-noalloc | strict-noalloc | ipnsort |
+| Input | simulated-direct_live-map | adaptive-noalloc | strict-noalloc | ipnsort |
 ```
 
-Each JesseSort cell reports `median/ipnsort (median microseconds)`; ipnsort is the `1.0000` reference. `system.txt` records CPU/compiler/toolchain and source provenance for each run.
+Each JesseSort cell reports `median/ipnsort (median microseconds)`; ipnsort is the
+`1.0000` reference. When `all` is selected, the Markdown output contains separate
+Canonical and Expanded OOD tables. The raw CSV includes a `suite` column.
+`system.txt` records the selected suite, CPU/compiler/toolchain, and source provenance.
