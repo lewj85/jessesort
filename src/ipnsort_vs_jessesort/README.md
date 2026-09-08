@@ -2,7 +2,7 @@
 
 This benchmark compares Rust **ipnsort** with the three maintained JesseSort public paths that are relevant to production and no-allocation work:
 
-1. **`production-e733`** — `jessesort::sort`, the current public/default E733->E732 simulated-direct live-phase path.
+1. **`simulated-direct live-phase`** — `jessesort::sort`, the current public/default simulated-direct live-phase path.
 2. **`adaptive-noalloc`** — `jessesort::noalloc::sort_adaptive`, the performance-oriented maintained no-allocation path.
 3. **`strict-noalloc`** — `jessesort::sort_unstable_noalloc`, the bounded-stack, no-heap, worst-case `O(n log n)` public contender intended for eventual direct Rust unstable-sort comparison.
 4. **`ipnsort`** — Rust ipnsort from `sort-research-rs`.
@@ -62,7 +62,7 @@ Outputs are written to:
 The summary columns are:
 
 ```text
-| Input | production-e733 | adaptive-noalloc | strict-noalloc | ipnsort |
+| Input | simulated-direct_live-phase | adaptive-noalloc | strict-noalloc | ipnsort |
 ```
 
 Each JesseSort cell reports `median/ipnsort (median microseconds)`; ipnsort is the `1.0000` reference. `system.txt` records CPU/compiler/toolchain and source provenance for each run.

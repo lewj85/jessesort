@@ -1,0 +1,10 @@
+generated_utc=2026-09-08T08:12:26Z
+n=100000
+trials=500
+warmups=2
+jessesort_source=16611bbb957a9160116deaf5bcdd328618da919f
+sort_research_rs_commit=8d3eae46244e527554a302dce8358966d1cf7f22
+rustc=rustc 1.100.0-nightly (cea272fa3 2026-09-07)
+g++=g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+uname=Linux 476a0d669f60 6.6.87.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux
+cpu=AMD Ryzen 7 7445HS w/ Radeon 740M Graphics
