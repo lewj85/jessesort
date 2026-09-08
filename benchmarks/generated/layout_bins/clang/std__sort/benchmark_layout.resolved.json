@@ -1,0 +1,18 @@
+{
+  "config": "benchmarks/config/benchmark_layouts.json",
+  "layout_sha256": "1412b971890679e6a63b880a72833356229091e67069b9fff41ed15e18d01da0",
+  "layouts": [
+    {
+      "base": "std::sort",
+      "call": "std::sort",
+      "header": "algorithm",
+      "modules": {
+        "backends": "std::sort"
+      },
+      "name": "std::sort",
+      "overrides": {}
+    }
+  ],
+  "registry": "benchmarks/config/pipeline_registry.json",
+  "schema_version": 1
+}

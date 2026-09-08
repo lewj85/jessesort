@@ -1,0 +1,19 @@
+{
+  "config": "benchmarks/config/benchmark_layouts.json",
+  "layout_sha256": "defeb3b4d63020242145e437c92b31abe2b97c0e67d426540563eee8b3c3e6b6",
+  "layouts": [
+    {
+      "base": "simulated-direct_live-phase",
+      "call": "jessesort::backbone::sort",
+      "header": "jessesort/jessesort_backbone.h",
+      "modules": {
+        "lineage": "E691\u2192E701\u2192E706\u2192E723\u2192E726\u2192E732\u2192E733-public-promotion",
+        "role": "public-default-reference"
+      },
+      "name": "simulated-direct_live-phase",
+      "overrides": {}
+    }
+  ],
+  "registry": "benchmarks/config/pipeline_registry.json",
+  "schema_version": 1
+}

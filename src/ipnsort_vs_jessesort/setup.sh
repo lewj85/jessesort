@@ -6,8 +6,8 @@ JESSESORT_ROOT="$(cd "$ROOT/../.." && pwd)"
 cd "$ROOT"
 mkdir -p deps results
 
-if [[ ! -f "$JESSESORT_ROOT/include/jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h" ]]; then
-  echo "Expected current tagged JesseSort headers were not found in: $JESSESORT_ROOT" >&2
+if [[ ! -f "$JESSESORT_ROOT/include/jessesort/jessesort.h" ]]; then
+  echo "Expected current JesseSort production header was not found in: $JESSESORT_ROOT" >&2
   exit 1
 fi
 

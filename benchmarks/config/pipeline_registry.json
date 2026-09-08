@@ -1,0 +1,440 @@
+{
+  "schema_version": 1,
+  "pipelines": {
+    "physical": {
+      "header": "jessesort/detail/pipelines/reference/physical.h",
+      "call": "jessesort::actual_piles_legacy::sort",
+      "modules": {
+        "decomposition": "physical",
+        "realization": "physical-materialized",
+        "scheduling": "adj-adaptive",
+        "merge": "adaptive-buffer",
+        "backends": "pipeline-owned"
+      },
+      "overrides": {}
+    },
+    "simulated": {
+      "header": "jessesort/detail/pipelines/reference/simulated.h",
+      "call": "jessesort::simulated_legacy::sort",
+      "modules": {
+        "decomposition": "simulated-blueprint",
+        "realization": "blueprint-scatter",
+        "scheduling": "adj-powersort-routed",
+        "merge": "adaptive-buffer",
+        "backends": "pipeline-owned"
+      },
+      "overrides": {}
+    },
+    "frozen-single": {
+      "header": "jessesort/detail/pipelines/reference/frozen_single.h",
+      "call": "jessesort::simulated_early_freeze_single_overflow_legacy::sort",
+      "modules": {
+        "decomposition": "frozen/early_freeze_core",
+        "overflow": "single-run",
+        "realization": "blueprint-plus-overflow",
+        "scheduling": "adj-powersort-routed",
+        "merge": "adaptive-buffer",
+        "backends": "pipeline-owned"
+      },
+      "overrides": {}
+    },
+    "indexed": {
+      "header": "jessesort/detail/pipelines/reference/indexed.h",
+      "call": "jessesort::index_tail_legacy::sort",
+      "modules": {
+        "decomposition": "indexed",
+        "realization": "indexed-reconstruction",
+        "scheduling": "adj-adaptive",
+        "merge": "adaptive-buffer",
+        "backends": "pipeline-owned"
+      },
+      "overrides": {}
+    },
+    "noalloc-direct": {
+      "header": "jessesort/detail/pipelines/reference/noalloc_direct.h",
+      "call": "jessesort::allocation_free_direct::sort",
+      "modules": {
+        "decomposition": "noalloc/bounded",
+        "realization": "direct-inplace",
+        "scheduling": "bounded-adaptive",
+        "merge": "inplace",
+        "backends": "noalloc-fallback"
+      },
+      "overrides": {}
+    },
+    "noalloc-low-run": {
+      "header": "jessesort/detail/pipelines/reference/noalloc_low_run.h",
+      "call": "jessesort::allocation_free_low_run::sort",
+      "modules": {
+        "decomposition": "noalloc/low_run_merge",
+        "realization": "inplace",
+        "scheduling": "live-run-reclaim",
+        "merge": "inplace",
+        "backends": "noalloc-fallback"
+      },
+      "overrides": {}
+    },
+    "simulated-direct": {
+      "header": "jessesort/detail/pipelines/reference/simulated_direct.h",
+      "call": "jessesort::simulated_direct_merge::sort",
+      "modules": {
+        "decomposition": "simulated-direct-fused",
+        "realization": "direct-fused",
+        "scheduling": "adj-best2of3-routed",
+        "merge": "adaptive-buffer",
+        "backends": "pipeline-owned"
+      },
+      "overrides": {}
+    },
+    "simulated-direct-phase-map-mature": {
+      "header": "jessesort/detail/pipelines/reference/phase_map_mature.h",
+      "call": "jessesort::simulated_direct_phase_map_mature::sort",
+      "modules": {
+        "classification": "phase_map/range_core",
+        "decomposition": "simulated-direct-fused",
+        "realization": "phase-range-engine",
+        "scheduling": "phase-map-mature",
+        "merge": "adaptive-buffer",
+        "backends": "phase-routed"
+      },
+      "overrides": {}
+    },
+    "simulated-direct_live-phase-reference": {
+      "header": "jessesort/detail/pipelines/reference/simulated-direct_live-phase.h",
+      "call": "jessesort::simulated_direct_live_phase::sort",
+      "modules": {
+        "classification": "galloping-three-behavior/phase-local",
+        "decomposition": "simulated-phase-range-per-game-pressure-overflow",
+        "overflow": "per-game-t9-deferred-banded",
+        "realization": "phase-range-engine-e691",
+        "scheduling": "adaptive-phase-merge",
+        "merge": "adaptive-buffer",
+        "backends": "generalization-first",
+        "lineage": "E691\u2192E701\u2192E706\u2192E723\u2192E726\u2192E732"
+      },
+      "overrides": {}
+    },
+    "physical-direct": {
+      "header": "jessesort/detail/pipelines/donors/physical_direct.h",
+      "call": "jessesort::actual_piles_direct_merge::sort",
+      "modules": {
+        "decomposition": "physical-direct-fused",
+        "realization": "direct-fused",
+        "scheduling": "pipeline-owned",
+        "merge": "adaptive-buffer",
+        "backends": "pipeline-owned"
+      },
+      "overrides": {}
+    },
+    "physical-direct-phase-map": {
+      "header": "jessesort/detail/pipelines/donors/physical_direct_phase_map.h",
+      "call": "jessesort::physical_direct_phase_map_mature::sort",
+      "modules": {
+        "classification": "phase_map/range_core",
+        "decomposition": "physical-direct-fused",
+        "realization": "phase-range-engine",
+        "scheduling": "phase-map-mature",
+        "merge": "adaptive-buffer",
+        "backends": "phase-routed"
+      },
+      "overrides": {}
+    },
+    "e501-streaming-denseflip": {
+      "header": "jessesort/detail/pipelines/donors/e501_streaming_denseflip.h",
+      "call": "jessesort::experimental::simulated_direct_streaming_denseflip_e501::sort",
+      "modules": {
+        "classification": "denseflip-production",
+        "decomposition": "simulated-direct-streaming-fused",
+        "realization": "streaming-direct-fused",
+        "scheduling": "pipeline-owned",
+        "merge": "adaptive-buffer",
+        "backends": "pipeline-owned"
+      },
+      "overrides": {}
+    },
+    "std::sort": {
+      "header": "algorithm",
+      "call": "std::sort",
+      "modules": {
+        "backends": "std::sort"
+      },
+      "overrides": {}
+    },
+    "canonical-fingerprint-multi-donor-router-e514": {
+      "header": "jessesort/research/experimental/routers/canonical_fingerprint_multi_donor_e514_distinct1024.h",
+      "call": "jessesort::experimental::canonical_fingerprint_multi_donor_e514::sort",
+      "modules": {
+        "classification": "canonical-fingerprint-multi-donor/e514-distinct1024",
+        "pipelines": "canonical-fingerprint-multi-donor/e514",
+        "decomposition": "fused-donor-specific",
+        "realization": "fused-donor-specific",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "coarse-structural-router-e517": {
+      "header": "jessesort/research/experimental/routers/coarse_structural_router_e517.h",
+      "call": "jessesort::experimental::coarse_structural_router_e517::sort",
+      "modules": {
+        "classification": "coarse-global-runs+local-alternation",
+        "pipelines": "coarse_structural_router_e517",
+        "decomposition": "donor-specific",
+        "realization": "donor-specific",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "coarse-structural-router-e518": {
+      "header": "jessesort/research/experimental/routers/coarse_structural_router_e518.h",
+      "call": "jessesort::experimental::coarse_structural_router_e518::sort",
+      "modules": {
+        "classification": "coarse-dense-global-runs+local-alternation",
+        "pipelines": "coarse_structural_router_e518",
+        "decomposition": "donor-specific",
+        "realization": "donor-specific",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "coarse-structural-router-e519": {
+      "header": "jessesort/research/experimental/routers/coarse_structural_router_e519.h",
+      "call": "jessesort::experimental::coarse_structural_router_e519::sort",
+      "modules": {
+        "classification": "coarse-dense-global-runs+local-alternation",
+        "pipelines": "coarse_structural_router_e519",
+        "decomposition": "donor-specific",
+        "realization": "donor-specific",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "coarse-structural-router-e520": {
+      "header": "jessesort/research/experimental/routers/coarse_structural_router_e520.h",
+      "call": "jessesort::experimental::coarse_structural_router_e520::sort",
+      "modules": {
+        "classification": "coarse-dense-global-runs+local-alternation-desc-early-exit",
+        "pipelines": "coarse_structural_router_e520",
+        "decomposition": "donor-specific",
+        "realization": "donor-specific",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "simulated-noalloc-direct-phase-map-e533": {
+      "header": "jessesort/research/experimental/hybrids/simulated_noalloc_direct_phase_map_e533.h",
+      "call": "jessesort::experimental::simulated_noalloc_direct_phase_map_e533::sort",
+      "modules": {
+        "classification": "sqrt(n)-simple-shape-nomination+exact-two-lane",
+        "decomposition": "phase-map-or-noalloc-direct",
+        "realization": "donor-owned",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "simulated-noalloc-direct-phase-map-e534": {
+      "header": "jessesort/research/experimental/hybrids/simulated_noalloc_direct_phase_map_e534.h",
+      "call": "jessesort::experimental::simulated_noalloc_direct_phase_map_e534::sort",
+      "modules": {
+        "classification": "5-checkpoint-monotone-fallback+sqrt(n)-simple-shape-nomination+exact-two-lane",
+        "decomposition": "phase-map-or-noalloc-direct",
+        "realization": "donor-owned",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "simulated-noalloc-direct-phase-map-e535": {
+      "header": "jessesort/research/experimental/hybrids/simulated_noalloc_direct_phase_map_e535.h",
+      "call": "jessesort::experimental::simulated_noalloc_direct_phase_map_e535::sort",
+      "modules": {
+        "classification": "integrated 5-checkpoint monotone fallback+sqrt(n)-simple-shape nomination+exact-two-lane",
+        "decomposition": "phase-map-or-noalloc-direct",
+        "realization": "integrated-phase-map-or-donor",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "simulated-noalloc-direct-phase-map-e536": {
+      "header": "jessesort/research/experimental/hybrids/simulated_noalloc_direct_phase_map_e536.h",
+      "call": "jessesort::experimental::simulated_noalloc_direct_phase_map_e536::sort",
+      "modules": {
+        "classification": "integrated monotone fallback+duplicate guard+sqrt(n)-simple-shape nomination+exact-two-lane",
+        "decomposition": "phase-map-or-noalloc-direct",
+        "realization": "integrated-phase-map-or-donor",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "simulated-noalloc-direct-phase-map-e537": {
+      "header": "jessesort/research/experimental/hybrids/simulated_noalloc_direct_phase_map_e537.h",
+      "call": "jessesort::experimental::simulated_noalloc_direct_phase_map_e537::sort",
+      "modules": {
+        "classification": "integrated descending early reject+monotone fallback+duplicate guard+sqrt(n)-simple-shape nomination+exact-two-lane",
+        "decomposition": "phase-map-or-noalloc-direct",
+        "realization": "integrated-phase-map-or-donor",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "simulated-noalloc-direct-phase-map-e539": {
+      "header": "jessesort/research/experimental/hybrids/simulated_noalloc_direct_phase_map_e539.h",
+      "call": "jessesort::experimental::simulated_noalloc_direct_phase_map_e539::sort",
+      "modules": {
+        "classification": "integrated descending reject+5-checkpoint monotone fallback+17-anchor complexity reject+duplicate guard+sqrt(n)-simple-shape nomination+exact-two-lane",
+        "decomposition": "phase-map-or-noalloc-direct",
+        "realization": "integrated-phase-map-or-donor",
+        "scheduling": "donor-owned",
+        "merge": "donor-owned",
+        "backends": "donor-owned"
+      },
+      "overrides": {}
+    },
+    "public-production-e610": {
+      "header": "jessesort/jessesort.h",
+      "call": "jessesort::sort",
+      "modules": {
+        "classification": "phase-map-mature",
+        "fallback": "dense-ghost E601+E607"
+      },
+      "overrides": {}
+    },
+    "public-pre-e610": {
+      "header": "jessesort/research/experimental/routers/public_pre_E610.h",
+      "call": "jessesort::experimental::public_pre_e610::sort",
+      "modules": {
+        "classification": "phase-map-mature",
+        "fallback": "pre-E610 dense-ghost"
+      },
+      "overrides": {}
+    },
+    "public-production": {
+      "header": "jessesort/jessesort.h",
+      "call": "jessesort::sort",
+      "modules": {
+        "role": "public-default",
+        "lineage": "E691\u2192E701\u2192E706\u2192E723\u2192E726\u2192E732\u2192E733-public-promotion"
+      },
+      "overrides": {}
+    },
+    "simulated-direct_live-phase": {
+      "header": "jessesort/jessesort_backbone.h",
+      "call": "jessesort::backbone::sort",
+      "modules": {
+        "role": "public-default-reference",
+        "lineage": "E691\u2192E701\u2192E706\u2192E723\u2192E726\u2192E732\u2192E733-public-promotion"
+      },
+      "overrides": {}
+    },
+    "performance-noalloc": {
+      "header": "jessesort/jessesort_noalloc.h",
+      "call": "jessesort::noalloc::sort_adaptive",
+      "modules": {
+        "role": "performance-noalloc",
+        "lineage": "E728-live-phase-adaptive-noalloc;E729-global-natural-run-prepass-retained"
+      },
+      "overrides": {}
+    },
+    "noalloc-reclaim-live-control": {
+      "header": "jessesort/research/experimental/noalloc/reclaim_batch_policies.h",
+      "call": "jessesort::experimental::noalloc_reclaim_live_control::sort",
+      "modules": {
+        "role": "experimental-noalloc-control",
+        "lineage": "maintained-noalloc-direct",
+        "scheduling": "live-smallest-adjacent"
+      },
+      "overrides": {}
+    },
+    "noalloc-reclaim-adjacent-pairs": {
+      "header": "jessesort/research/experimental/noalloc/reclaim_batch_policies.h",
+      "call": "jessesort::experimental::noalloc_reclaim_adjacent_pairs::sort",
+      "modules": {
+        "role": "experimental-noalloc",
+        "lineage": "maintained-noalloc-direct",
+        "scheduling": "batch-adjacent-pairs-64-to-32"
+      },
+      "overrides": {}
+    },
+    "noalloc-reclaim-shortest-two-of-three": {
+      "header": "jessesort/research/experimental/noalloc/reclaim_batch_policies.h",
+      "call": "jessesort::experimental::noalloc_reclaim_shortest_two_of_three::sort",
+      "modules": {
+        "role": "experimental-noalloc",
+        "lineage": "maintained-noalloc-direct",
+        "scheduling": "batch-shortest-two-of-three"
+      },
+      "overrides": {}
+    },
+    "strict-noalloc": {
+      "header": "jessesort/jessesort_noalloc.h",
+      "call": "jessesort::sort_unstable_noalloc",
+      "modules": {
+        "role": "strict-bounded-noalloc",
+        "lineage": "E728-strict-live-phase;E731-E729-prepass-retained;E735-strict-live-phase-production-promotion"
+      },
+      "overrides": {}
+    },
+    "e691-old": {
+      "header": "jessesort/research/experimental/e691_backbone_pre_e701.h",
+      "call": "jessesort::e691_backbone_pre_e701::sort",
+      "modules": {
+        "classification": "e691-pre-e701",
+        "decomposition": "e691",
+        "overflow": "e691",
+        "realization": "e691",
+        "scheduling": "e691",
+        "merge": "e691",
+        "backends": "e691"
+      },
+      "overrides": {}
+    },
+    "e704-run-descriptor-permutation": {
+      "header": "jessesort/research/experimental/merging/e704_run_descriptor_permutation.h",
+      "call": "jessesort::experimental::e704_run_descriptor_permutation::sort",
+      "modules": {
+        "role": "E704-experimental",
+        "lineage": "E701+exact-low-run-descriptor-permutation"
+      },
+      "overrides": {}
+    },
+    "e701-frozen": {
+      "header": "jessesort/research/experimental/e701_backbone_frozen.h",
+      "call": "jessesort::e701_backbone_frozen::sort",
+      "modules": {
+        "role": "experimental-control",
+        "lineage": "E701-tailcount-classifier-before-E706"
+      },
+      "overrides": {}
+    },
+    "e732-live-phase-prepass": {
+      "header": "jessesort/research/experimental/e732/live_phase_global_natural_prepass.h",
+      "call": "jessesort::research::e732_live_phase_global_natural_prepass::sort",
+      "modules": {
+        "decomposition": "E726-live-phase+E729-global-natural-prepass",
+        "realization": "allocating-prepared-runs",
+        "scheduling": "live-phase",
+        "merge": "E726-mature",
+        "backends": "pipeline-owned"
+      },
+      "overrides": {}
+    }
+  }
+}

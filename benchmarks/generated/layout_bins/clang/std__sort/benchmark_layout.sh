@@ -1,0 +1,3 @@
+# GENERATED FILE. Edit benchmarks/config/*.json, not this file.
+BENCH_LAYOUT_SHA256="1412b971890679e6a63b880a72833356229091e67069b9fff41ed15e18d01da0"
+ROUTINE_ALGORITHMS=("std::sort")

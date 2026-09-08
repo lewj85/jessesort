@@ -13,8 +13,8 @@ if [[ ! -d deps/sort-research-rs/.git ]]; then
   echo "ipnsort dependency missing. Run ./setup.sh first." >&2
   exit 1
 fi
-if [[ ! -f "$JESSESORT_ROOT/include/jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h" ]]; then
-  echo "Expected current tagged JesseSort headers missing from enclosing repository." >&2
+if [[ ! -f "$JESSESORT_ROOT/include/jessesort/jessesort.h" ]]; then
+  echo "Expected current JesseSort production header missing from enclosing repository." >&2
   exit 1
 fi
 

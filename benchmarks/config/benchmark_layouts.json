@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "description": "Routine maintained benchmark roster: E733/E732 public simulated-direct_live-phase, E729 adaptive noalloc, E735 strict live-phase noalloc, and std::sort control. Legacy E661/E731 and E728 prototypes are research-only.",
+  "layouts": [
+    {
+      "name": "simulated-direct_live-phase",
+      "base": "simulated-direct_live-phase"
+    },
+    {
+      "name": "noalloc",
+      "base": "performance-noalloc"
+    },
+    {
+      "name": "strict-noalloc",
+      "base": "strict-noalloc"
+    },
+    {
+      "name": "std::sort",
+      "base": "std::sort"
+    }
+  ]
+}

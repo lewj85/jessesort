@@ -1,130 +1,68 @@
-# ipnsort vs current JesseSort defaults
+# ipnsort vs maintained JesseSort production/noalloc paths
 
-This comparison uses the **14 canonical JesseSort benchmark input families** while keeping the JesseSort side synchronized with the eight defaults in `benchmarks/benchmark.cpp`.
+This benchmark compares Rust **ipnsort** with the three maintained JesseSort public paths that are relevant to production and no-allocation work:
 
-The compared sort type remains **u64** so results remain comparable to the prior ipnsort-vs-JesseSort runs.
+1. **`production-e733`** — `jessesort::sort`, the current public/default E733->E732 simulated-direct live-phase path.
+2. **`adaptive-noalloc`** — `jessesort::noalloc::sort_adaptive`, the performance-oriented maintained no-allocation path.
+3. **`strict-noalloc`** — `jessesort::sort_unstable_noalloc`, the bounded-stack, no-heap, worst-case `O(n log n)` public contender intended for eventual direct Rust unstable-sort comparison.
+4. **`ipnsort`** — Rust ipnsort from `sort-research-rs`.
 
-## JesseSort variations compared
+Historical physical/simulated/frozen/indexed/direct/phase-map representatives are intentionally excluded. They belong in the canonical JesseSort benchmark when mechanism isolation is needed, not in the current Rust comparison kit. E691 is likewise excluded for now: this folder is specifically the production/noalloc Rust comparison surface.
 
-The comparison mirrors the **eight current defaults in `benchmarks/benchmark.cpp`**, in the same order:
+## Inputs and type fidelity
 
-1. **`physical`** — literal physical-pile baseline.
-2. **`simulated`** — simulated-pile/blueprint baseline.
-3. **`frozen-single`** — early-freeze single-overflow representative.
-4. **`indexed`** — index-tail architecture.
-5. **`noalloc-direct`** — current general allocation-free/direct representative.
-6. **`noalloc-low-run`** — specialized allocation-free low-run representative.
-7. **`simulated-direct`** — direct-execution simulated descendant.
-8. **`simulated-direct-phase-map-mature`** — current mature phase-map default.
+The benchmark uses the 14 canonical JesseSort input families:
 
-The comparison itself sorts `u64`, so move-only capability is an architectural property rather than something exercised by this benchmark. For the no-allocation variants, the bridge's per-trial input/output vectors are created outside the timed sort region.
+Random, Sorted, Reverse, Sorted+Noise(5%), Sorted+Noise(10%), Random%25, Alternating, Sawtooth, MixedDirectionRuns, BlockSorted, OrganPipe, Rotated, MixedPhase3, and MixedPhase12.
 
-## Benchmark inputs
-
-1. Random
-2. Sorted
-3. Reverse
-4. Sorted+Noise(5%)
-5. Sorted+Noise(10%)
-6. Random%25
-7. Alternating
-8. Sawtooth
-9. MixedDirectionRuns
-10. BlockSorted
-11. OrganPipe
-12. Rotated
-13. MixedPhase3
-14. MixedPhase12
-
-The copied source files used as the authority are in `reference/`.
-
-## Exact benchmark input topology while retaining u64
-
-The JesseSort benchmark generators produce `std::vector<int>` using C++ `std::mt19937` and the standard
-library distributions. This kit deliberately generates those values **exactly in
-C++ first**.
-
-Each generated signed 32-bit integer is then mapped to u64 as:
+The JesseSort generators are implemented directly in `cpp/bridge.cpp` using C++ `std::mt19937` and the canonical seed mixing. They first generate the canonical signed 32-bit topology and then map each value to `u64` with:
 
 ```cpp
 uint64_t(uint32_t(x) ^ 0x80000000u)
 ```
 
-This is an order-preserving bijection from signed 32-bit integer order into
-unsigned integer order:
+This is order-preserving, so equality and signed integer ordering are preserved while both Rust and C++ sort the same `u64` data. The base seed remains `0x8A5CD789`.
 
-- equality is unchanged;
-- `a < b` is unchanged;
-- `a > b` is unchanged.
+## Methodology
 
-Therefore Alternating and MixedDirectionRuns need no special-case approximation,
-and the base benchmark input comparison topology is preserved while ipnsort and JesseSort
-still benchmark `u64`.
-
-## Seed fidelity
-
-The kit uses the JesseSort benchmark base seed:
-
-```text
-0x8A5CD789
-```
-
-and the exact `trial_seed(base_seed, n, input_ordinal, trial)` mixing constants.
-
-The important enum ordinals are also preserved, including:
-
-- Sorted+Noise(10%) = 12
-- MixedDirectionRuns = 13
-
-so trial seeds match the benchmark generator for the same `(n, input, trial)`.
-
-## Benchmark methodology
-
-- Default: 500 measured trials per input.
 - Default size: 10k.
-- 2 warmups per input.
-- One generated source per paired trial; ipnsort and all eight current JesseSort defaults receive it.
-- Input copying is outside the timed sort region.
-- Validation is outside the timed region against Rust stable `sort()`, not ipnsort.
-- Nine-algorithm execution order (ipnsort + eight JesseSort defaults) rotates and reverses across trials.
-- No shared cold-like preconditioner.
+- Default measurements: 500 trials per input, 2 warmups.
+- One generated source per trial is shared by all four algorithms.
+- Input/output allocation and copying are outside the timed sort region.
+- Correctness is validated outside the timed region against Rust stable `sort()`.
+- Execution order rotates and reverses across trials to reduce fixed order bias.
 - Rust: `-C target-cpu=native`.
 - C++: `-O3 -march=native -DNDEBUG`.
+- The JesseSort implementation is compiled from the enclosing repository tree, not copied snapshots.
 
-## Build
+Because all four algorithms run in one benchmark process, use this kit for Rust-vs-JesseSort comparison and publication/reference measurements. JesseSort retain/reject experiments should continue to use the repository's isolated A/B protocol.
 
-apt-get update
-apt-get install -y curl build-essential
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-source "$HOME/.cargo/env"
-rustup --version
-cargo --version
-rustc --version
-
-## Run
+## Setup
 
 ```bash
 chmod +x setup.sh run.sh
 ./setup.sh
-./run.sh 10000 500
 ```
 
-Then 100k:
+`setup.sh` fetches/refreshes `sort-research-rs` and installs the Rust nightly toolchain.
+
+## Run
 
 ```bash
-./run.sh 100000 500
+./run.sh 10000 500 2
+./run.sh 100000 500 2
 ```
 
-Outputs:
+Outputs are written to:
 
 - `results/raw.csv`
 - `results/summary.md`
 - `results/system.txt`
 
-Summary format matches the main benchmark tables: each JesseSort cell is `median ratio vs ipnsort (median microseconds)`, and the `ipnsort` column is the `1.0000` baseline.
+The summary columns are:
 
 ```text
-| Input | physical | simulated | frozen-single | indexed | noalloc-direct | noalloc-low-run | simulated-direct | simulated-direct-phase-map-mature | ipnsort |
+| Input | production-e733 | adaptive-noalloc | strict-noalloc | ipnsort |
 ```
 
-The kit compiles JesseSort from the **enclosing repository tree**, ensuring the tagged implementations being tested are exactly the files in the current checkpoint. `setup.sh` only refreshes the external `sort-research-rs`/ipnsort dependency. `run.sh` records the local JesseSort commit when git metadata is available, otherwise it records that the enclosing repository tree was used.
+Each JesseSort cell reports `median/ipnsort (median microseconds)`; ipnsort is the `1.0000` reference. `system.txt` records CPU/compiler/toolchain and source provenance for each run.

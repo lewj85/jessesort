@@ -1,0 +1,19 @@
+{
+  "config": "benchmarks/config/benchmark_layouts.json",
+  "layout_sha256": "ddd85e4443d17a7b57f58e7a5ed71d48cf47b488daf3a1a6ff10e5385b4cb11f",
+  "layouts": [
+    {
+      "base": "performance-noalloc",
+      "call": "jessesort::noalloc::sort_adaptive",
+      "header": "jessesort/jessesort_noalloc.h",
+      "modules": {
+        "lineage": "E728-live-phase-adaptive-noalloc;E729-global-natural-run-prepass-retained",
+        "role": "performance-noalloc"
+      },
+      "name": "noalloc",
+      "overrides": {}
+    }
+  ],
+  "registry": "benchmarks/config/pipeline_registry.json",
+  "schema_version": 1
+}

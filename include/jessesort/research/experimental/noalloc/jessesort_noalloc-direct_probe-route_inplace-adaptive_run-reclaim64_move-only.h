@@ -1,0 +1,4 @@
+#ifndef JESSESORT_NOALLOC_DIRECT_EXPERIMENTAL_COMPAT_H
+#define JESSESORT_NOALLOC_DIRECT_EXPERIMENTAL_COMPAT_H
+#include <jessesort/detail/pipelines/reference/noalloc_direct.h>
+#endif

@@ -1,11 +1,5 @@
-#include <jessesort/jessesort_physical_probe-routed_adjacent-adaptive-buffered.h>
-#include <jessesort/jessesort_simulated_probe-routed_adjacent-adaptive-buffered.h>
-#include <jessesort/jessesort_simulated-frozen_probe-routed_adjacent-powersort-adaptive-buffered_single-overflow.h>
-#include <jessesort/jessesort_indexed_probe-routed_adjacent-adaptive-buffered_move-only.h>
-#include <jessesort/jessesort_noalloc-direct_probe-routed_inplace-adaptive_run-reclaim64_move-only.h>
-#include <jessesort/experimental/jessesort_noalloc-low-run-merge_overlap-routed_inplace-adaptive_run-reclaim64.h>
-#include <jessesort/jessesort_simulated_direct-merge-probe-routed_adjacent-adaptive-buffered.h>
-#include <jessesort/jessesort_simulated-direct_phase-map-mature_probe-routed_adjacent-adaptive-buffered.h>
+#include <jessesort/jessesort.h>
+#include <jessesort/jessesort_noalloc.h>
 
 #include <algorithm>
 #include <chrono>
@@ -232,59 +226,24 @@ void jesse_generate_u64(std::uint64_t* out, std::size_t n,
         out[i] = encode_int(signed_values[i]);
 }
 
-double jesse_physical_u64(const std::uint64_t* input, std::size_t n,
-                          std::uint64_t* output) {
+double jesse_production_u64(const std::uint64_t* input, std::size_t n,
+                            std::uint64_t* output) {
     return timed_sort(input, n, output, [](auto& v) {
-        jessesort::actual_piles_legacy::sort(v);
+        jessesort::sort(v);
     });
 }
 
-double jesse_simulated_u64(const std::uint64_t* input, std::size_t n,
-                           std::uint64_t* output) {
-    return timed_sort(input, n, output, [](auto& v) {
-        jessesort::simulated_legacy::sort(v);
-    });
-}
-
-double jesse_frozen_single_u64(const std::uint64_t* input, std::size_t n,
-                               std::uint64_t* output) {
-    return timed_sort(input, n, output, [](auto& v) {
-        jessesort::simulated_early_freeze_single_overflow_legacy::sort(v);
-    });
-}
-
-double jesse_indexed_u64(const std::uint64_t* input, std::size_t n,
+double jesse_noalloc_u64(const std::uint64_t* input, std::size_t n,
                          std::uint64_t* output) {
     return timed_sort(input, n, output, [](auto& v) {
-        jessesort::index_tail_legacy::sort(v);
+        jessesort::noalloc::sort_adaptive(v);
     });
 }
 
-double jesse_noalloc_direct_u64(const std::uint64_t* input, std::size_t n,
+double jesse_strict_noalloc_u64(const std::uint64_t* input, std::size_t n,
                                 std::uint64_t* output) {
     return timed_sort(input, n, output, [](auto& v) {
-        jessesort::allocation_free_direct::sort(v);
-    });
-}
-
-double jesse_noalloc_low_run_u64(const std::uint64_t* input, std::size_t n,
-                                 std::uint64_t* output) {
-    return timed_sort(input, n, output, [](auto& v) {
-        jessesort::allocation_free_low_run::sort(v);
-    });
-}
-
-double jesse_simulated_direct_u64(const std::uint64_t* input, std::size_t n,
-                                  std::uint64_t* output) {
-    return timed_sort(input, n, output, [](auto& v) {
-        jessesort::simulated_direct_merge::sort(v);
-    });
-}
-
-double jesse_simulated_direct_phase_map_mature_u64(
-        const std::uint64_t* input, std::size_t n, std::uint64_t* output) {
-    return timed_sort(input, n, output, [](auto& v) {
-        jessesort::simulated_direct_phase_map_mature::sort(v);
+        jessesort::sort_unstable_noalloc(v);
     });
 }
 

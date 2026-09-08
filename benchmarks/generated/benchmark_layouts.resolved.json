@@ -1,0 +1,51 @@
+{
+  "config": "benchmarks/config/benchmark_layouts.json",
+  "layout_sha256": "783ceede4e958ef31b5a026c03678618e542ac23cc1418b166d64fffa791c074",
+  "layouts": [
+    {
+      "base": "simulated-direct_live-phase",
+      "call": "jessesort::backbone::sort",
+      "header": "jessesort/jessesort_backbone.h",
+      "modules": {
+        "lineage": "E691\u2192E701\u2192E706\u2192E723\u2192E726\u2192E732\u2192E733-public-promotion",
+        "role": "public-default-reference"
+      },
+      "name": "simulated-direct_live-phase",
+      "overrides": {}
+    },
+    {
+      "base": "performance-noalloc",
+      "call": "jessesort::noalloc::sort_adaptive",
+      "header": "jessesort/jessesort_noalloc.h",
+      "modules": {
+        "lineage": "E728-live-phase-adaptive-noalloc;E729-global-natural-run-prepass-retained",
+        "role": "performance-noalloc"
+      },
+      "name": "noalloc",
+      "overrides": {}
+    },
+    {
+      "base": "strict-noalloc",
+      "call": "jessesort::sort_unstable_noalloc",
+      "header": "jessesort/jessesort_noalloc.h",
+      "modules": {
+        "lineage": "E728-strict-live-phase;E731-E729-prepass-retained;E735-strict-live-phase-production-promotion",
+        "role": "strict-bounded-noalloc"
+      },
+      "name": "strict-noalloc",
+      "overrides": {}
+    },
+    {
+      "base": "std::sort",
+      "call": "std::sort",
+      "header": "algorithm",
+      "modules": {
+        "backends": "std::sort"
+      },
+      "name": "std::sort",
+      "overrides": {}
+    }
+  ],
+  "registry": "benchmarks/config/pipeline_registry.json",
+  "schema_version": 1
+}
