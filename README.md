@@ -4,7 +4,7 @@
 
 ## Description
 
-### **tl;dr Jessesort plays two games of Solitaire, one game with descending piles and one with ascending piles, then merges the piles together.**
+### **tl;dr Jessesort plays two games of Solitaire, one game with descending piles and one with ascending piles, then merges the piles together. Jessesort is up to 58x faster than `std::sort` with GCC/libstdc++, up to 11x faster than `std::sort` with Clang/libc++, and up to 22x faster than ipnsort in Rust.**
 
 Jessesort is an experimental family of comparison sorting algorithms built around **dual Patience**. Patience is a card game similar to Solitaire, where the cards don't have to be sequential, but the tails of each pile have to be kept in sorted order. This additional restriction allows new values to quickly find their correct pile via binary search over just these sorted pile tails.
 
@@ -19,215 +19,6 @@ n       n log k     n log n     n + k (allocating)        No        Yes
 ```
 
 ‡ Regarding memory: Several `noalloc` implementations are maintained in the repo that are allocation-free/move-only. They use fixed bounded metadata (≤8 KiB), no heap allocation inside the sort, direct structural routes for several low-entropy geometries, and allocation-free fallback behavior. Simulated variations do allocate though, with `n` 32-bit auxiliary storage plus base array copies of size `k`.
-
-## Speed tests
-
-**Jessesort is up to 45x faster than `std::sort` with GCC/libstdc++.** Below are speed comparisons. In these tables, a ratio of 5.0 means Jessesort is 5x faster. **Ratios >1 mean Jessesort is faster.**
-
-### std::sort with GCC (libstdc++)
-
-Cells are **median paired ratio vs `std::sort`** from 500 trials on n=100k elements using an Intel Xeon Platinum 8573C with GCC 14.2.0 (libstdc++) in C++20 with `-O3 -march=native -DNDEBUG`.
-
-| Input | simulated-direct_live-phase | adaptive-noalloc | strict-noalloc |
-|---|---:|---:|---:|
-| Random | **3.88×** | 3.83× | 3.75× |
-| Sorted | 13.78× | 27.37× | **27.37×** |
-| Reverse | 10.92× | 15.62× | **15.90×** |
-| Sorted+Noise(5%) | **2.23×** | 1.47× | 1.44× |
-| Sorted+Noise(10%) | 1.66× | 1.41× | **1.82×** |
-| Random%25 | 5.40× | 6.04× | **6.11×** |
-| Alternating | **2.85×** | 1.37× | 1.36× |
-| Sawtooth | **4.01×** | 3.64× | 1.25× |
-| MixedDirectionRuns | 9.72× | **16.64×** | 10.28× |
-| BlockSorted | 13.16× | **19.84×** | 19.34× |
-| OrganPipe | 28.79× | **45.76×** | 41.24× |
-| Rotated | 26.53× | 43.40× | **44.80×** |
-| MixedPhase3 | **3.09×** | 3.02× | 2.63× |
-| MixedPhase12 | **2.80×** | 2.48× | 1.39× |
-| RunMosaic | **7.49×** | 6.23× | 2.35× |
-| UnevenRunMosaic | 9.81× | **14.49×** | 13.73× |
-| MonotoneBurstNoise | 3.35× | 4.24× | **4.31×** |
-| SparseInversionPatches | 6.76× | 21.92× | **23.58×** |
-| WindowShuffle | 1.42× | 1.59× | **1.66×** |
-| PlateauStaircase | **2.51×** | 1.26× | 1.25× |
-| DuplicateRunMosaic | **3.86×** | 2.43× | 2.39× |
-| VariableCardinality | 4.87× | 4.94× | **5.28×** |
-| ClusteredDuplicates | 5.32× | 5.69× | **5.98×** |
-| InterleavedLanes | 3.12× | 1.83× | **3.15×** |
-| AlternatingWithJitter | **1.77×** | 0.87× | 1.75× |
-| WarpedBitonic | **40.89×** | 26.34× | 14.91× |
-| AsymmetricPipePlateau | 8.90× | **11.03×** | 10.85× |
-| MultiTurnAffine | 8.56× | **11.31×** | 5.63× |
-| OffsetRotationRamp | 11.70× | 37.57× | **38.09×** |
-| JitteredRotation | 41.87× | 42.12× | **42.17×** |
-| DiscontinuousAffinePhases | 16.06× | 33.13× | **34.55×** |
-| NoisyAffinePhases | 1.74× | **2.00×** | 1.91× |
-| OverlappingSortedBlocks | **7.84×** | 2.06× | 1.63× |
-| RandomWalk | 1.36× | **1.84×** | 1.83× |
-| StickyRandomWalk | 0.82× | **1.78×** | 1.35× |
-| PeriodicPerturbed | 1.38× | **3.17×** | 3.16× |
-| ChunkEntropyMixture | **3.04×** | 3.00× | 1.99× |
-| LocalizedAlternatingBursts | 4.35× | 6.04× | **6.29×** |
-| RandomCardinalityK5 | 2.20× | 5.85× | **5.85×** |
-| RandomCardinalityK10 | 5.71× | **6.69×** | 6.63× |
-| RandomCardinalityK50 | 5.55× | **6.39×** | 6.28× |
-| RandomCardinalityK100 | 6.33× | **7.04×** | 6.92× |
-| RandomCardinalityK256 | 5.39× | **5.97×** | 5.93× |
-| RandomCardinalityK1024 | 5.12× | **5.52×** | 5.47× |
-| RandomCardinalityK4096 | 4.93× | **5.09×** | 5.09× |
-| RandomCardinalityK16384 | 2.92× | 3.92× | **3.94×** |
-| RandomCardinalityK65536 | 4.91× | 4.91× | **5.01×** |
-| BlockShuffle16 | 0.83× | 0.63× | **4.70×** |
-| BlockShuffle32 | 1.39× | **4.77×** | 4.57× |
-| BlockShuffle64 | 1.12× | **3.55×** | 3.18× |
-| BlockShuffle128 | 1.18× | **3.35×** | 3.32× |
-| BlockShuffle256 | 1.19× | 3.13× | **3.16×** |
-| BlockShuffle512 | 1.27× | 2.82× | **2.90×** |
-| BlockShuffle1024 | 1.42× | 2.72× | **2.74×** |
-| BlockShuffle4096 | 1.34× | **1.50×** | 0.44× |
-| BlockShuffle16384 | **2.00×** | 0.62× | 0.56× |
-| SortedSwap1 | **0.71×** | 0.44× | 0.37× |
-| SortedSwap2 | **1.21×** | 0.66× | 0.72× |
-| SortedSwap5 | 1.03× | 0.84× | **1.17×** |
-| SortedSwap10 | **1.43×** | 1.41× | 1.14× |
-| SortedSwap20 | 1.68× | **1.99×** | 1.60× |
-| SortedSwap30 | 2.72× | 2.71× | **2.79×** |
-
-### std::sort with Clang (libc++)
-
-**Jessesort is up to 8x faster than `std::sort` with Clang/libc++.** Note that the code here was developed primarily with GCC and libstdc++, not clang and libc++. We provide make targets for clang support, but no testing has been done to actually ensure the code is compiling as expected (e.g., branchless behavior). We show one table of clang timings below for reference (500 trials, n=100k), using an AMD Ryzen 7 7445HS CPU.
-
-| Input | simulated-direct_live-phase | adaptive-noalloc | strict-noalloc |
-|---|---:|---:|---:|
-| Random | 3.36× | **3.45×** | 3.43× |
-| Sorted | 1.84× | **1.85×** | 1.79× |
-| Reverse | **1.54×** | 1.35× | 1.53× |
-| Sorted+Noise(5%) | **1.71×** | 0.63× | 1.07× |
-| Sorted+Noise(10%) | **1.39×** | 0.65× | 1.32× |
-| Random%25 | 3.69× | 3.77× | **3.78×** |
-| Alternating | **1.02×** | 0.87× | 0.87× |
-| Sawtooth | **0.97×** | 0.76× | 0.30× |
-| MixedDirectionRuns | **1.06×** | 0.84× | 0.75× |
-| BlockSorted | **2.09×** | 0.80× | 0.80× |
-| OrganPipe | 5.98× | **7.96×** | 7.53× |
-| Rotated | **4.15×** | 3.68× | 3.71× |
-| MixedPhase3 | **1.66×** | 1.44× | 1.22× |
-| MixedPhase12 | **1.12×** | 0.90× | 0.53× |
-| RunMosaic | **1.355×** | 0.874× | 0.600× |
-| UnevenRunMosaic | **1.046×** | 0.841× | 0.792× |
-| MonotoneBurstNoise | 1.259× | 1.635× | **1.644×** |
-| SparseInversionPatches | 1.682× | 5.166× | **5.725×** |
-| WindowShuffle | 0.795× | **0.998×** | 0.969× |
-| PlateauStaircase | 0.336× | **0.527×** | 0.524× |
-| DuplicateRunMosaic | 0.972× | **1.587×** | 1.561× |
-| VariableCardinality | 3.876× | **3.951×** | 3.935× |
-| ClusteredDuplicates | 3.893× | **3.988×** | 3.959× |
-| InterleavedLanes | 2.704× | **2.777×** | 2.737× |
-| AlternatingWithJitter | 1.257× | **1.274×** | 1.263× |
-| WarpedBitonic | **5.838×** | 2.849× | 1.385× |
-| AsymmetricPipePlateau | **2.268×** | 1.953× | 1.876× |
-| MultiTurnAffine | **2.421×** | 2.108× | 1.399× |
-| OffsetRotationRamp | 1.795× | **2.850×** | 2.817× |
-| JitteredRotation | **4.924×** | 4.864× | 4.445× |
-| DiscontinuousAffinePhases | **1.725×** | 1.663× | 1.592× |
-| NoisyAffinePhases | 0.945× | **1.033×** | 0.974× |
-| OverlappingSortedBlocks | **4.489×** | 0.559× | 0.512× |
-| RandomWalk | 1.243× | **1.272×** | 1.254× |
-| StickyRandomWalk | 0.595× | **1.067×** | 0.799× |
-| PeriodicPerturbed | 1.482× | **2.524×** | 2.510× |
-| ChunkEntropyMixture | **1.686×** | 1.216× | 0.873× |
-| LocalizedAlternatingBursts | 1.083× | 1.781× | **1.886×** |
-| RandomCardinalityK5 | 0.873× | 1.263× | **1.267×** |
-| RandomCardinalityK10 | 3.446× | 3.440× | **3.449×** |
-| RandomCardinalityK50 | 3.797× | 3.908× | **3.916×** |
-| RandomCardinalityK100 | 3.860× | **3.997×** | 3.996× |
-| RandomCardinalityK256 | 3.919× | 4.018× | **4.024×** |
-| RandomCardinalityK1024 | 3.974× | 3.986× | **3.994×** |
-| RandomCardinalityK4096 | 3.962× | **4.086×** | 4.069× |
-| RandomCardinalityK16384 | 3.333× | **3.423×** | 3.388× |
-| RandomCardinalityK65536 | 3.401× | **3.478×** | 3.446× |
-| BlockShuffle16 | 0.812× | 0.649× | **3.293×** |
-| BlockShuffle32 | 1.339× | **3.129×** | 3.106× |
-| BlockShuffle64 | 1.356× | **2.967×** | 2.924× |
-| BlockShuffle128 | 1.388× | **2.775×** | 2.744× |
-| BlockShuffle256 | 1.390× | **2.565×** | 2.541× |
-| BlockShuffle512 | 1.390× | **2.348×** | 2.327× |
-| BlockShuffle1024 | 1.414× | 2.107× | **2.124×** |
-| BlockShuffle4096 | **1.496×** | 0.774× | 0.271× |
-| BlockShuffle16384 | **1.701×** | 0.378× | 0.379× |
-| SortedNoise1 | 0.551× | **0.805×** | 0.787× |
-| SortedNoise2 | 0.572× | **0.613×** | 0.590× |
-| SortedNoise20 | **1.423×** | 1.337× | 0.988× |
-| SortedNoise30 | **1.644×** | 1.568× | 1.156× |
-
-### ipnsort
-
-**Jessesort is up to 22x faster than ipnsort in Rust.** Results below are direct timing comparisons (500 trials, n=100k) with an AMD Ryzen 7 7445HS CPU. Both algorithms ran in their native language: ipnsort was run in Rust, Jessesort was run in C++. See the `src/ipnsort_vs_jessesort/` folder for more details.
-
-| Input | simulated-direct_live-map | adaptive-noalloc | strict-noalloc |
-|---|---:|---:|---:|
-| Random | 0.94× | 0.97× | **0.97×** |
-| Sorted | 1.94× | **1.97×** | 0.99× |
-| Reverse | 0.86× | 0.52× | **0.87×** |
-| Sorted+Noise(5%) | 0.84× | 0.81× | **0.93×** |
-| Sorted+Noise(10%) | 0.65× | 0.66× | **0.98×** |
-| Random%25 | 0.84× | **0.89×** | 0.89× |
-| Alternating | 0.68× | 0.94× | **0.94×** |
-| Sawtooth | **0.95×** | 0.86× | 0.40× |
-| MixedDirectionRuns | 1.37× | **3.61×** | 2.87× |
-| BlockSorted | 1.50× | 3.99× | **4.45×** |
-| OrganPipe | 2.03× | 8.33× | **9.50×** |
-| Rotated | 20.66× | 13.33× | **20.83×** |
-| MixedPhase3 | 0.72× | **1.06×** | 0.92× |
-| MixedPhase12 | 0.76× | **0.92×** | 0.55× |
-| RunMosaic | 1.35× | **2.60×** | 1.26× |
-| UnevenRunMosaic | 1.31× | **4.00×** | 3.87× |
-| MonotoneBurstNoise | 1.06× | 4.46× | **4.51×** |
-| SparseInversionPatches | 1.25× | 15.70× | **15.70×** |
-| WindowShuffle | 0.64× | **1.19×** | 1.19× |
-| PlateauStaircase | 0.53× | 0.87× | **0.88×** |
-| DuplicateRunMosaic | 0.77× | **0.94×** | 0.94× |
-| VariableCardinality | 0.89× | 0.94× | **0.94×** |
-| ClusteredDuplicates | 0.89× | **0.92×** | 0.92× |
-| InterleavedLanes | 0.87× | 0.90× | **0.90×** |
-| AlternatingWithJitter | **0.94×** | 0.93× | 0.93× |
-| WarpedBitonic | 1.88× | **5.19×** | 3.16× |
-| AsymmetricPipePlateau | 1.60× | 3.94× | **4.24×** |
-| MultiTurnAffine | 1.85× | **4.54×** | 3.08× |
-| OffsetRotationRamp | 1.55× | 11.16× | **16.03×** |
-| JitteredRotation | 22.12× | 14.20× | **22.27×** |
-| DiscontinuousAffinePhases | 1.64× | 7.94× | **8.54×** |
-| NoisyAffinePhases | 0.65× | **1.01×** | 0.98× |
-| OverlappingSortedBlocks | 1.39× | **1.65×** | 0.91× |
-| RandomWalk | 0.91× | **0.92×** | 0.92× |
-| StickyRandomWalk | 0.33× | **0.79×** | 0.62× |
-| PeriodicPerturbed | 0.39× | 0.96× | **0.96×** |
-| ChunkEntropyMixture | 0.63× | **0.88×** | 0.63× |
-| LocalizedAlternatingBursts | 1.18× | **6.31×** | 6.20× |
-| RandomCardinalityK5 | 0.21× | **0.70×** | 0.69× |
-| RandomCardinalityK10 | 0.83× | **0.87×** | 0.87× |
-| RandomCardinalityK50 | 0.86× | **0.90×** | 0.90× |
-| RandomCardinalityK100 | 0.87× | 0.91× | **0.91×** |
-| RandomCardinalityK256 | 0.87× | 0.91× | **0.92×** |
-| RandomCardinalityK1024 | 0.88× | 0.92× | **0.92×** |
-| RandomCardinalityK4096 | 1.04× | **1.07×** | 1.07× |
-| RandomCardinalityK16384 | 0.93× | 0.95× | **0.95×** |
-| RandomCardinalityK65536 | 0.94× | **0.96×** | 0.96× |
-| BlockShuffle16 | 0.18× | 0.19× | **0.97×** |
-| BlockShuffle32 | 0.27× | 0.97× | **0.97×** |
-| BlockShuffle64 | 0.29× | 0.96× | **0.97×** |
-| BlockShuffle128 | 0.32× | 0.96× | **0.97×** |
-| BlockShuffle256 | 0.35× | 0.96× | **0.96×** |
-| BlockShuffle512 | 0.40× | 0.95× | **0.95×** |
-| BlockShuffle1024 | 0.44× | 0.94× | **0.94×** |
-| BlockShuffle4096 | **0.61×** | 0.58× | 0.20× |
-| BlockShuffle16384 | **0.76×** | 0.33× | 0.33× |
-| SortedNoise1 | 0.77× | **0.89×** | 0.88× |
-| SortedNoise2 | 0.65× | **0.65×** | 0.63× |
-| SortedNoise20 | 0.66× | **0.88×** | 0.70× |
-| SortedNoise30 | 0.66× | **0.86×** | 0.68× |
-
-While ipnsort wins two-thirds of the individual cells, **JesseSort actually wins the geometric mean because its structured victories are often enormous.** The adaptive-noalloc variation of Jessesort is geometrically **about 40% faster than ipnsort** overall.
 
 ## Algorithm overview
 
@@ -318,6 +109,219 @@ Jessesort explores a collection of distinctive sorting mechanisms, including sev
 
 A recurring design theme is **delaying irreversible data movement until cheap structural observations have made the next decision more informed**. Blueprints postpone pile construction, freezing stops preserving unnecessary exact structure, overflow postpones organization, and spatial probing postpones global commitment.
 
+## Speed tests
+
+Each benchmark runs 100 independent five-input executions (ABCDE), for 500 timed trials total. Within each execution, the first two timed runs (AB) are treated as warmup/transition measurements and excluded from the reported benchmark results. So only 300 of the 500 total (CDE) are kept for the aggregated results below.
+
+Below are speed comparisons. **The numbers below are how many times faster Jessesort is than the competitor.** For example, 3.89 means Jessesort is 3.89x faster.
+
+### std::sort with GCC (libstdc++)
+
+Cells are **median paired ratio vs `std::sort`** from 300 CDE trials on n=100k elements using an Intel Xeon Platinum 8573C with GCC 14.2.0 (libstdc++), CPU0 pinned, in C++20 with `-O3 -march=native -DNDEBUG`.
+
+| Input | simulated-direct_live-phase | adaptive-noalloc | strict-noalloc |
+|---|---:|---:|---:|
+| Random | 3.78× | **3.89×** | 3.83× |
+| Sorted | 27.38× | 27.91× | **28.12×** |
+| Reverse | 9.60× | 9.49× | **9.78×** |
+| Sorted+Noise(5%) | **2.08×** | 1.48× | 1.40× |
+| Random%25 | 5.35× | 6.04× | **6.09×** |
+| Diverging | **3.12×** | 1.41× | 1.40× |
+| Sawtooth | **6.28×** | 3.75× | 1.30× |
+| MixedDirectionRuns | 9.95× | **12.60×** | 8.81× |
+| OrganPipe | 54.12× | 53.10× | **57.87×** |
+| Rotated | 52.31× | 51.96× | **52.57×** |
+| AlternatingDirectionRuns | 9.25× | **12.41×** | 7.58× |
+| UnevenRunMosaic | 10.02× | **16.36×** | 15.38× |
+| MonotoneBurstNoise | 2.92× | **4.03×** | 3.90× |
+| SparseInversionPatches | 6.42× | 21.86× | **23.70×** |
+| WindowShuffle | 1.23× | **1.49×** | 1.47× |
+| PlateauStaircase | **2.10×** | 1.05× | 1.04× |
+| DuplicateRunMosaic | **3.63×** | 2.30× | 2.33× |
+| RandomCardinalityK2 | 0.93× | 6.22× | **6.32×** |
+| ClusteredDuplicates | 5.14× | 5.55× | **5.58×** |
+| InterleavedLanes | 2.93× | 3.03× | **3.07×** |
+| AlternatingWithJitter | **1.78×** | 1.72× | 1.71× |
+| WarpedBitonic | **40.79×** | 31.69× | 17.51× |
+| Reverse+Noise(5%) | **1.35×** | 1.22× | 0.97× |
+| MultiTurnAffine | **12.50×** | 11.53× | 4.98× |
+| OffsetRotationRamp | 19.89× | **43.69×** | 39.31× |
+| AllEqual | 19.16× | **19.34×** | 19.03× |
+| DiscontinuousAffinePhases | 25.44× | 38.34× | **38.66×** |
+| NoisyAffinePhases | 1.80× | **1.95×** | 1.91× |
+| OverlappingSortedBlocks | **6.02×** | 1.94× | 1.61× |
+| RandomWalk | 1.69× | **1.73×** | 1.72× |
+| StickyRandomWalk | 0.89× | **1.78×** | 1.32× |
+| PeriodicPerturbed | 1.38× | 2.96× | **3.03×** |
+| ChunkEntropyMixture | 2.96× | **2.98×** | 1.87× |
+| LocalizedAlternatingBursts | 4.23× | 5.60× | **5.84×** |
+| RandomCardinalityK5 | 2.19× | **5.44×** | 5.29× |
+| RandomCardinalityK10 | 5.38× | **6.21×** | 6.21× |
+| RandomCardinalityK50 | 5.33× | 5.88× | **5.89×** |
+| RandomCardinalityK100 | 5.28× | **5.95×** | 5.75× |
+| RandomCardinalityK256 | 5.23× | **5.70×** | 5.57× |
+| RandomCardinalityK1024 | 5.04× | 5.23× | **5.33×** |
+| RandomCardinalityK4096 | 4.76× | **4.95×** | 4.93× |
+| RandomCardinalityK16384 | **3.94×** | 3.91× | 3.83× |
+| Converging | 1.89× | **2.01×** | 1.95× |
+| BlockShuffle16 | 0.81× | 0.76× | **3.59×** |
+| BlockShuffle32 | 1.09× | **3.47×** | 3.46× |
+| BlockShuffle64 | 1.16× | 3.36× | **3.41×** |
+| BlockShuffle128 | 1.22× | **3.26×** | 3.14× |
+| BlockShuffle256 | 1.23× | **2.94×** | 2.90× |
+| BlockShuffle512 | 1.37× | **2.79×** | 2.77× |
+| BlockShuffle1024 | 1.44× | 2.54× | **2.61×** |
+| BlockShuffle4096 | **1.75×** | 1.44× | 0.42× |
+| BlockShuffle16384 | **2.10×** | 0.59× | 0.59× |
+| SortedNoise1 | **2.68×** | 1.66× | 1.54× |
+| SortedNoise2 | **1.62×** | 0.99× | 0.97× |
+| SortedNoise10 | 1.62× | 1.29× | **1.79×** |
+| SortedNoise20 | 2.00× | **2.10×** | 1.60× |
+| SortedNoise30 | 2.33× | **2.42×** | 1.80× |
+| MixedPhase3 | 3.01× | **3.19×** | 2.55× |
+| BlockSorted | **20.00×** | 18.26× | 18.40× |
+| DiversePhaseMix8 | **3.26×** | 2.94× | 1.80× |
+
+CDE median-speedup geometric mean across the maintained 60-input suite: simulated-direct_live-phase **3.83×**, adaptive-noalloc **4.35×**, strict-noalloc **3.98×**.
+
+### std::sort with Clang (libc++)
+
+Note that the code here was developed primarily with GCC and libstdc++, not clang and libc++. We provide make targets for clang support, but little testing has been done to actually ensure the code is compiling as expected (e.g., branchless behavior). We show one table of clang timings below for reference (300 CDE trials, n=100k), using an AMD Ryzen 7 7445HS CPU.
+
+| Input | simulated-direct_live-phase | adaptive-noalloc | strict-noalloc |
+|---|---:|---:|---:|
+| Random | 3.41× | **3.48×** | 3.46× |
+| Sorted | 1.54× | **1.83×** | 1.82× |
+| Reverse | **1.50×** | 1.36× | **1.50×** |
+| Sorted+Noise(5%) | **1.71×** | 0.63× | 1.08× |
+| Random%25 | 3.66× | 3.75× | **3.76×** |
+| Diverging | **1.11×** | 0.88× | 0.88× |
+| Sawtooth | **1.17×** | 0.75× | 0.30× |
+| MixedDirectionRuns | **1.36×** | 0.82× | 0.75× |
+| OrganPipe | **10.81×** | 8.07× | 7.59× |
+| Rotated | **3.97×** | 3.72× | 3.91× |
+| AllEqual | **2.86×** | 1.52× | 2.85× |
+| AlternatingDirectionRuns | **1.19×** | 0.81× | 0.72× |
+| AlternatingWithJitter | 1.26× | **1.27×** | 1.25× |
+| BlockShuffle1024 | 1.64× | **2.14×** | 2.12× |
+| BlockShuffle128 | 1.53× | **2.75×** | 2.73× |
+| BlockShuffle16 | 0.86× | 0.62× | **3.22×** |
+| BlockShuffle16384 | **2.19×** | 0.38× | 0.38× |
+| BlockShuffle256 | 1.56× | **2.56×** | 2.54× |
+| BlockShuffle32 | 1.45× | **3.09×** | 3.07× |
+| BlockShuffle4096 | **1.79×** | 0.78× | 0.28× |
+| BlockShuffle512 | 1.60× | **2.35×** | 2.33× |
+| BlockShuffle64 | 1.49× | **2.93×** | 2.92× |
+| BlockSorted | **4.57×** | 0.81× | 0.81× |
+| ChunkEntropyMixture | **1.65×** | 1.22× | 0.88× |
+| ClusteredDuplicates | 3.88× | **4.04×** | 4.03× |
+| Converging | 0.88× | **0.90×** | 0.89× |
+| DiscontinuousAffinePhases | **3.41×** | 1.54× | 1.50× |
+| DiversePhaseMix8 | **1.53×** | 1.13× | 0.74× |
+| DuplicateRunMosaic | 0.96× | **1.56×** | 1.54× |
+| InterleavedLanes | 2.71× | **2.77×** | 2.74× |
+| LocalizedAlternatingBursts | 1.27× | 1.80× | **1.84×** |
+| MixedPhase3 | **1.66×** | 1.45× | 1.23× |
+| MonotoneBurstNoise | 1.15× | 1.60× | **1.66×** |
+| MultiTurnAffine | **3.94×** | 2.07× | 1.42× |
+| NoisyAffinePhases | **1.03×** | 1.03× | 0.98× |
+| OffsetRotationRamp | **5.10×** | 2.88× | 2.86× |
+| OverlappingSortedBlocks | **2.40×** | 0.56× | 0.51× |
+| PeriodicPerturbed | 1.66× | **2.58×** | 2.55× |
+| PlateauStaircase | 0.36× | 0.52× | **0.52×** |
+| RandomCardinalityK10 | 3.37× | 3.43× | **3.44×** |
+| RandomCardinalityK100 | 3.82× | **4.00×** | 3.97× |
+| RandomCardinalityK1024 | 3.95× | 3.99× | **4.00×** |
+| RandomCardinalityK16384 | 3.34× | **3.40×** | 3.37× |
+| RandomCardinalityK2 | 0.29× | 2.41× | **2.53×** |
+| RandomCardinalityK256 | 3.92× | 4.03× | **4.04×** |
+| RandomCardinalityK4096 | 3.89× | 4.06× | **4.06×** |
+| RandomCardinalityK5 | 0.79× | 1.16× | **1.19×** |
+| RandomCardinalityK50 | 3.77× | **3.91×** | 3.91× |
+| RandomWalk | 1.24× | **1.27×** | 1.26× |
+| Reverse+Noise(5%) | **0.76×** | 0.53× | 0.43× |
+| SortedNoise1 | 0.55× | **0.81×** | 0.79× |
+| SortedNoise2 | 0.57× | **0.60×** | 0.58× |
+| SortedNoise10 | **1.38×** | 0.65× | 1.33× |
+| SortedNoise20 | **1.42×** | 1.34× | 0.99× |
+| SortedNoise30 | **1.60×** | 1.56× | 1.17× |
+| SparseInversionPatches | 1.72× | 5.40× | **5.82×** |
+| StickyRandomWalk | 0.65× | **1.05×** | 0.77× |
+| UnevenRunMosaic | **1.03×** | 0.81× | 0.78× |
+| WarpedBitonic | **5.50×** | 2.73× | 1.40× |
+| WindowShuffle | 0.74× | 0.95× | **0.96×** |
+
+CDE median-speedup geometric mean across the maintained 60-input suite: simulated-direct 1.73×, adaptive-noalloc 1.61×, strict-noalloc 1.57×.
+
+### ipnsort
+
+**Jessesort is up to 22x faster than ipnsort in Rust.** Results below are direct timing comparisons (500 trials, n=100k) with an AMD Ryzen 7 7445HS CPU. Both algorithms ran in their native language: ipnsort was run in Rust, Jessesort was run in C++. See the `src/ipnsort_vs_jessesort/` folder for more details.
+
+| Input | simulated-direct_live-map | adaptive-noalloc | strict-noalloc |
+|---|---:|---:|---:|
+| Random | 0.94× | 0.97× | **0.97×** |
+| Sorted | 1.94× | **1.97×** | 0.99× |
+| Reverse | 0.86× | 0.52× | **0.87×** |
+| Sorted+Noise(5%) | 0.84× | 0.81× | **0.93×** |
+| Random%25 | 0.84× | **0.89×** | 0.89× |
+| Diverging | 0.68× | 0.94× | **0.94×** |
+| Sawtooth | **0.95×** | 0.86× | 0.40× |
+| MixedDirectionRuns | 1.37× | **3.61×** | 2.87× |
+| BlockSorted | 1.50× | 3.99× | **4.45×** |
+| OrganPipe | 2.03× | 8.33× | **9.50×** |
+| Rotated | 20.66× | 13.33× | **20.83×** |
+| MixedPhase3 | 0.72× | **1.06×** | 0.92× |
+| MixedPhase12 | 0.76× | **0.92×** | 0.55× |
+| RunMosaic | 1.35× | **2.60×** | 1.26× |
+| UnevenRunMosaic | 1.31× | **4.00×** | 3.87× |
+| MonotoneBurstNoise | 1.06× | 4.46× | **4.51×** |
+| SparseInversionPatches | 1.25× | 15.70× | **15.70×** |
+| WindowShuffle | 0.64× | **1.19×** | 1.19× |
+| PlateauStaircase | 0.53× | 0.87× | **0.88×** |
+| DuplicateRunMosaic | 0.77× | **0.94×** | 0.94× |
+| VariableCardinality | 0.89× | 0.94× | **0.94×** |
+| ClusteredDuplicates | 0.89× | **0.92×** | 0.92× |
+| InterleavedLanes | 0.87× | 0.90× | **0.90×** |
+| AlternatingWithJitter | **0.94×** | 0.93× | 0.93× |
+| WarpedBitonic | 1.88× | **5.19×** | 3.16× |
+| AsymmetricPipePlateau | 1.60× | 3.94× | **4.24×** |
+| MultiTurnAffine | 1.85× | **4.54×** | 3.08× |
+| OffsetRotationRamp | 1.55× | 11.16× | **16.03×** |
+| JitteredRotation | 22.12× | 14.20× | **22.27×** |
+| DiscontinuousAffinePhases | 1.64× | 7.94× | **8.54×** |
+| NoisyAffinePhases | 0.65× | **1.01×** | 0.98× |
+| OverlappingSortedBlocks | 1.39× | **1.65×** | 0.91× |
+| RandomWalk | 0.91× | **0.92×** | 0.92× |
+| StickyRandomWalk | 0.33× | **0.79×** | 0.62× |
+| PeriodicPerturbed | 0.39× | 0.96× | **0.96×** |
+| ChunkEntropyMixture | 0.63× | **0.88×** | 0.63× |
+| LocalizedAlternatingBursts | 1.18× | **6.31×** | 6.20× |
+| RandomCardinalityK5 | 0.21× | **0.70×** | 0.69× |
+| RandomCardinalityK10 | 0.83× | **0.87×** | 0.87× |
+| RandomCardinalityK50 | 0.86× | **0.90×** | 0.90× |
+| RandomCardinalityK100 | 0.87× | 0.91× | **0.91×** |
+| RandomCardinalityK256 | 0.87× | 0.91× | **0.92×** |
+| RandomCardinalityK1024 | 0.88× | 0.92× | **0.92×** |
+| RandomCardinalityK4096 | 1.04× | **1.07×** | 1.07× |
+| RandomCardinalityK16384 | 0.93× | 0.95× | **0.95×** |
+| RandomCardinalityK65536 | 0.94× | **0.96×** | 0.96× |
+| BlockShuffle16 | 0.18× | 0.19× | **0.97×** |
+| BlockShuffle32 | 0.27× | 0.97× | **0.97×** |
+| BlockShuffle64 | 0.29× | 0.96× | **0.97×** |
+| BlockShuffle128 | 0.32× | 0.96× | **0.97×** |
+| BlockShuffle256 | 0.35× | 0.96× | **0.96×** |
+| BlockShuffle512 | 0.40× | 0.95× | **0.95×** |
+| BlockShuffle1024 | 0.44× | 0.94× | **0.94×** |
+| BlockShuffle4096 | **0.61×** | 0.58× | 0.20× |
+| BlockShuffle16384 | **0.76×** | 0.33× | 0.33× |
+| SortedNoise1 | 0.77× | **0.89×** | 0.88× |
+| SortedNoise2 | 0.65× | **0.65×** | 0.63× |
+| SortedNoise10 | 0.65× | 0.66× | **0.98×** |
+| SortedNoise20 | 0.66× | **0.88×** | 0.70× |
+| SortedNoise30 | 0.66× | **0.86×** | 0.68× |
+
+While ipnsort wins two-thirds of the individual cells, **JesseSort actually wins the geometric mean because its structured victories are often enormous.** The adaptive-noalloc variation of Jessesort is geometrically **about 40% faster than ipnsort** overall.
+
 ## Build and benchmark
 
 Build with GCC/libstdc++:
@@ -337,8 +341,8 @@ Equivalent direct build:
 
 ```bash
 g++ -std=c++20 -O3 -march=native -DNDEBUG \
-  -Wall -Wextra -Wpedantic -Iinclude \
-  benchmarks/benchmark.cpp src/*.cpp \
+  -Wall -Wextra -Wpedantic -Iinclude -Ibenchmarks/infrastructure \
+  benchmarks/canonical/benchmark.cpp \
   -o benchmark
 ```
 
@@ -385,6 +389,4 @@ This is under active development, so the preprint and code here differ substanti
 
 I welcome any contributions folks want to make to this project.
 
-My PhD has pulled me away from this project for a bit. I've actually come up with a couple other sorting algorithms that will have to wait as well! I will continue to update this in my free time whenever possible, but progress will be slower than before.
-
-Finally, I want to thank you all for your support and feedback--a special thank you to Sebastian Wild, Kenan Millet, and my beloved wife. Sorting is not my area of expertise, so I appreciate all your *patience*. 😉
+I need to finish my dissertation.

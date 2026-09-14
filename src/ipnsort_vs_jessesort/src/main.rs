@@ -8,25 +8,21 @@ use std::time::Instant;
 
 const BASE_SEED: u32 = 0x8A5CD789;
 
-const PATTERNS: [(&str, i32); 14] = [
+const PATTERNS: [(&str, i32); 10] = [
     ("Random", 0),
     ("Sorted", 1),
     ("Reverse", 2),
     ("Sorted+Noise(5%)", 3),
-    ("Sorted+Noise(10%)", 12),
     ("Random%25", 4),
-    ("Alternating", 5),
+    ("Diverging", 5),
     ("Sawtooth", 6),
     ("MixedDirectionRuns", 13),
-    ("BlockSorted", 7),
     ("OrganPipe", 8),
     ("Rotated", 9),
-    ("MixedPhase3", 14),
-    ("MixedPhase12", 15),
 ];
 
 const JESSE_NAMES: [&str; 3] = [
-    "simulated-direct_live-map",
+    "simulated-direct_live-phase",
     "adaptive-noalloc",
     "strict-noalloc",
 ];
@@ -149,7 +145,7 @@ fn run_suite(kind: SuiteKind, patterns: &[Pattern], n: usize, trials: usize,
     let suite_name = match kind { SuiteKind::Canonical => "canonical", SuiteKind::Ood => "ood" };
     let heading = if suite_name == "ood" { "Expanded OOD" } else { "Canonical" };
     summary.push_str(&format!("## {heading}\n\n"));
-    summary.push_str("| Input | simulated-direct_live-map | adaptive-noalloc | strict-noalloc | ipnsort |\n");
+    summary.push_str("| Input | simulated-direct_live-phase | adaptive-noalloc | strict-noalloc | ipnsort |\n");
     summary.push_str("|---|---:|---:|---:|---:|\n");
 
     for pattern in patterns {
@@ -227,7 +223,7 @@ fn main() -> std::io::Result<()> {
     }
     if suite == "ood" || suite == "all" {
         let patterns = ood_patterns();
-        assert_eq!(patterns.len(), 47, "maintained OOD suite must contain 47 families");
+        assert_eq!(patterns.len(), 50, "maintained additional suite must contain 50 families");
         run_suite(SuiteKind::Ood, &patterns, n, trials, warmups, &mut raw, &mut summary)?;
     }
 

@@ -17,6 +17,7 @@ fn main() {
     let repo = manifest.join("../..").canonicalize().expect("resolve enclosing JesseSort repository");
     let include = repo.join("include");
     let ood_include = repo.join("benchmarks/ood");
+    let infrastructure_include = repo.join("benchmarks/infrastructure");
     let bridge = manifest.join("cpp/bridge.cpp");
 
     if !repo.exists() {
@@ -26,6 +27,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}", bridge.display());
     println!("cargo:rerun-if-changed={}", repo.join("include").display());
     println!("cargo:rerun-if-changed={}", repo.join("benchmarks/ood/ood_families.h").display());
+    println!("cargo:rerun-if-changed={}", repo.join("benchmarks/infrastructure/input_generators.h").display());
     println!("cargo:rerun-if-changed={}", repo.join("src").display());
 
     let mut sources = vec![bridge];
@@ -48,6 +50,7 @@ fn main() {
             .arg("-DNDEBUG")
             .arg("-I").arg(&include)
             .arg("-I").arg(&ood_include)
+            .arg("-I").arg(&infrastructure_include)
             .arg("-c").arg(src)
             .arg("-o").arg(&obj);
         run(c);

@@ -11,6 +11,7 @@
 //          -> E726 middle-density sparse-disorder bypass
 //          -> E732 global natural-run prepass with endpoint preservation
 //          -> E738 dense-disorder large-object compact-index realization.
+//          -> E750 selective 20% merge-boundary precompaction (target >=32).
 //
 // E691 established the phase-local per-game T=9 pressure-overflow architecture.
 // E701 replaced the chunk classifier with the M=16 / k=4 tails-only probe.
@@ -22,6 +23,8 @@
 // endpoint shortcuts and falling through to live-phase when admission rejects.
 // E738 sorts 32-bit indices and realizes one final in-place permutation when
 // sizeof(T)>=32 and distributed local probes find dense direction switching.
+// E750 selectively precompacts a small excess of realized runs down to the
+// lower power-of-two merge boundary when that target is at least 32.
 
 #include <algorithm>
 #include <bit>
@@ -345,6 +348,74 @@ void mergeOuterRunsEndpointAware(std::vector<T>& a,const std::vector<std::size_t
     if(srcTmp)std::move(tmp.begin(),tmp.end(),a.begin());
 }
 
+
+template<class T, class Less>
+void premergeAdjacentPairE750(std::vector<T>& a, std::size_t b, std::size_t mid,
+                              std::size_t e, Less less, std::vector<T>& scratch) {
+    if (!less(a[mid], a[mid-1])) return;
+    scratch.clear();
+    scratch.reserve(std::max(scratch.capacity(), e-b));
+    if (!less(a[b], a[e-1])) {
+        scratch.insert(scratch.end(),
+                       std::make_move_iterator(a.begin()+static_cast<std::ptrdiff_t>(mid)),
+                       std::make_move_iterator(a.begin()+static_cast<std::ptrdiff_t>(e)));
+        scratch.insert(scratch.end(),
+                       std::make_move_iterator(a.begin()+static_cast<std::ptrdiff_t>(b)),
+                       std::make_move_iterator(a.begin()+static_cast<std::ptrdiff_t>(mid)));
+    } else {
+        std::merge(std::make_move_iterator(a.begin()+static_cast<std::ptrdiff_t>(b)),
+                   std::make_move_iterator(a.begin()+static_cast<std::ptrdiff_t>(mid)),
+                   std::make_move_iterator(a.begin()+static_cast<std::ptrdiff_t>(mid)),
+                   std::make_move_iterator(a.begin()+static_cast<std::ptrdiff_t>(e)),
+                   std::back_inserter(scratch), less);
+    }
+    std::move(scratch.begin(), scratch.end(),
+              a.begin()+static_cast<std::ptrdiff_t>(b));
+}
+
+template<class T, class Less>
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+void mergeOuterRunsBoundaryE750(std::vector<T>& a,
+                                const std::vector<std::size_t>& initial,
+                                Less less) {
+    std::vector<std::size_t> starts = initial;
+    std::size_t runs = starts.size()-1;
+    const std::size_t target = std::bit_floor(runs);
+    std::size_t need = runs-target;
+    std::vector<T> scratch;
+    std::vector<std::size_t> next;
+    next.reserve(starts.size());
+    while (need) {
+        runs = starts.size()-1;
+        next.clear();
+        next.push_back(starts[0]);
+        std::size_t r=0;
+        while (r<runs) {
+            if (need && r+2<runs) {
+                const std::size_t len0=starts[r+1]-starts[r];
+                const std::size_t len2=starts[r+3]-starts[r+2];
+                if (len0<=len2) {
+                    premergeAdjacentPairE750(a,starts[r],starts[r+1],starts[r+2],less,scratch);
+                    next.push_back(starts[r+2]);
+                    next.push_back(starts[r+3]);
+                } else {
+                    next.push_back(starts[r+1]);
+                    premergeAdjacentPairE750(a,starts[r+1],starts[r+2],starts[r+3],less,scratch);
+                    next.push_back(starts[r+3]);
+                }
+                --need;
+                r+=3;
+            } else {
+                next.push_back(starts[r+1]);
+                ++r;
+            }
+        }
+        starts.swap(next);
+    }
+    mergeOuterRunsEndpointAware(a, starts, less);
+}
 
 // E726: generic middle-density sparse-disorder bypass.
 // E725 showed the E661 sparse-disorder route explains most of the Noise5/10
@@ -681,7 +752,19 @@ void sort(std::vector<T>& values, Less less=Less{}) {
     }
 
     if (bounds.back() != n) bounds.push_back(n);
-    mergeOuterRunsEndpointAware(values, bounds, less);
+
+    // E750: when the realized run count is only slightly above a lower
+    // power-of-two merge boundary, selectively precompact one adjacent pair
+    // from each untouched triple until that boundary is reached. Restrict the
+    // optimization to targets >=32 and excess <=20%; smaller boundaries were
+    // rejected by E749/E750 acceptance.
+    const std::size_t e750Runs = bounds.size() - 1;
+    const std::size_t e750Target = std::bit_floor(e750Runs);
+    const std::size_t e750Need = e750Runs - e750Target;
+    if (e750Need >= 1 && e750Target >= 32 && e750Need * 100 <= e750Target * 20)
+        mergeOuterRunsBoundaryE750(values, bounds, less);
+    else
+        mergeOuterRunsEndpointAware(values, bounds, less);
 }
 
 } // namespace jessesort::simulated_direct_live_phase

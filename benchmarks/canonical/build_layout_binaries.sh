@@ -33,5 +33,7 @@ for layout in "${ROUTINE_ALGORITHMS[@]}"; do
     benchmarks/canonical/benchmark.cpp $BENCH_LDFLAGS -o "$dir/canonical"
   "$BENCH_CXX" $BENCH_CXXFLAGS -Iinclude -Ibenchmarks/infrastructure -Ibenchmarks/ood "$macro" \
     benchmarks/ood/benchmark.cpp $BENCH_LDFLAGS -o "$dir/ood"
+  "$BENCH_CXX" $BENCH_CXXFLAGS -Iinclude -Ibenchmarks/infrastructure -Ibenchmarks/ood "$macro" \
+    benchmarks/infrastructure/e759_five_trial.cpp $BENCH_LDFLAGS -o "$dir/five_trial"
   printf '%s\t%s\n' "$layout" "$safe"
 done > "$OUT_ROOT/layout_manifest.tsv"

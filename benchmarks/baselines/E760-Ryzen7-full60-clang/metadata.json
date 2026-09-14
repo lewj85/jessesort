@@ -1,0 +1,20 @@
+{
+  "method": "E760-ABCDE-CDE-history-median-v3",
+  "suite": "canonical",
+  "execs_per_cell": 100,
+  "timed_sorts_per_exec": 5,
+  "observations_per_cell": 500,
+  "blocks": 20,
+  "cpu": "0",
+  "schedule_seed": 59225,
+  "compiler": "clang",
+  "target_warmups": 0,
+  "seed_policy": "all 5*execs timed trial IDs used exactly once; each exec gets one ID from each fifth of domain; position/stratum rotates; fixed affine permutation",
+  "process_trajectory": "five distinct preconstructed inputs A,B,C,D,E; A is fresh; B is transitional after one prior sort; C-E are canonical history-conditioned after at least two prior sorts",
+  "pairing": "each JesseSort variant gets its own immediately adjacent std::sort process using identical five seed IDs/order; AB/BA balanced by exec",
+  "scheduling": "exec round outer; input/size blocks and variant-pair order deterministically SHA256 shuffled each round",
+  "primary_cell_statistics": "median runtime; Fresh=A, Transition=B, canonical History=C-E; speedup is ratio of channel medians",
+  "suite_aggregate": "geometric mean of per-cell speedups",
+  "secondary_statistics": "A-E position medians, p10/p25/p75/p90, SD, paired geometric-mean ratios, win rate",
+  "cooldown": "none; continuous round-robin load"
+}

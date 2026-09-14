@@ -1,7 +1,7 @@
 JESSESORT EXPERIMENT LOG
-Last updated: 2026-09-08
+Last updated: 2026-09-13
 Status: compact source of truth for current production, active research roadmap, and decision-level experiment history.
-experiment decisions, propagation status, and decision-relevant historical evidence.
+Scope: experiment decisions, propagation status, and decision-relevant historical evidence.
 
 LOG COMPACTION POLICY
 - This log intentionally summarizes old experiments rather than preserving every procedural detail.
@@ -24,31 +24,37 @@ EXPERIMENT DECISION POLICY
 
 1.1 BENCHMARK AND AUDIT STANDARD
 - E077 introduced the whole-sort benchmark methodology; E100 centralizes its deterministic seed policy.
-- E319 reduced the routine benchmark roster to seven Jessesort variants plus `std::sort`; architecturally interesting non-routine headers remain preserved under `include/jessesort/experimental/`.
+- E319 historically reduced the routine benchmark roster to seven Jessesort variants plus `std::sort`. E734 later replaced that research-era roster with the three maintained production paths plus independently timed `std::sort`; architecturally interesting controls remain under `include/jessesort/research/experimental/` and `include/jessesort/detail/pipelines/reference/`.
 - E320 retired multi-variation timing inside one benchmark process after proving that related variants could warm a shared backend for one another and move a bimodal median.
 - E323 removed the pre-timing reference-sort bias and defined warm-state steady-throughput. E337 closes the infrastructure audit by isolating every **algorithm × canonical-input cell** in its own process, randomizing/logging all cell order, keeping reference `std::sort` after timing, and making fixed CPU affinity canonical when `taskset` is available. E337 was necessary because algorithm-only isolation still allowed fixed workload order and unpinned scheduler/frequency bimodality to move short-input medians.
-- Canonical `make bench` profile (E466 runner cleanup):
+- Canonical `make bench` profile (E760 benchmark procedure):
     * C++20, -O3, -march=native, -DNDEBUG
-    * routine set = 8 Jessesort descriptors + independently timed `std::sort`
-    * default n = {10k, 100k} only; 1k/1m require explicit direct invocation and are never selected by the routine runner
-    * 2 untimed warmups per size/algorithm/input process
-    * 500 measured independent trials per cell in one uninterrupted process after warmups
-    * every size × algorithm × input is a separate process; one deterministic unique seed per trial
-    * the suite records and enforces exact CPU model plus benchmark/source fingerprints on resume
-    * active-cell rows stay quarantined under `in_progress/`; interrupted cells are discarded and rerun from trial 0
-    * each fully validated cell is atomically committed; 100k refreshes the cumulative ZIP after every cell, while 10k refreshes once after all 14 inputs for the current algorithm to avoid checkpoint overhead dominating short cells
+    * routine set = allocating `simulated-direct_live-phase`, `adaptive-noalloc`, and `strict-noalloc` + independently timed `std::sort` controls
+    * default n = {10k, 100k} only; 1k/1m require explicit direct invocation
+    * 100 independent fresh exec trajectories per input/size/algorithm cell; each trajectory preconstructs five distinct timed inputs A,B,C,D,E, for 500 timed observations total
+    * no untimed target-sort warmups; A is Fresh, B is an explicit transition diagnostic after one prior target sort, and C-D-E are the canonical History-conditioned channel after at least two prior target sorts
+    * the exact timed trial-ID population remains 0..499, each used once per cell; every exec receives five distinct IDs with balanced stratum/position assignment
+    * every JesseSort variant gets its own immediately adjacent `std::sort` process using identical five seed IDs/order; JesseSort-first/std-first pair order is balanced
+    * exec round is outermost; input/size blocks and variant-pair order are deterministically shuffled each round so every cell spans the full benchmark window
+    * primary per-cell runtime statistic is the median: Fresh=A median, History=CDE median, Overall=ABCDE median; channel speedup is `median(std::sort) / median(JesseSort)`. Suite aggregates use the geometric mean across per-cell median speedups
+    * B remains reported separately, alongside A-E position medians, p10/p25/p75/p90, SD, paired-ratio diagnostics, win rate, and raw observations
+    * completed rounds are immutable per-round journals; the master paired CSV is rebuilt only from durable journals after all rounds are present
 - CACHE/PROCESS POLICY:
     * Do **not** use Linux `drop_caches` as a CPU-cache flush; it targets filesystem page cache/dentries/inodes, not L1/L2/L3/BTB/TLB state.
     * Do **not** add a giant userspace eviction buffer to the canonical benchmark. That changes the workload into an artificial cold-cache/memory-pressure test and still cannot normalize instruction cache, branch predictor, TLB, or heterogeneous shared-cache topology.
-    * Residual hardware state from a previous child may survive process exit, but it is consumed by the next cell's untimed algorithm/input-specific warmups before measured trials. The benchmark intentionally measures warmed steady behavior.
+    * E754/E755 exposed a stronger failure mode than ordinary cache warmup: the first E754 MDR sort could put glibc per-thread malloc tcache into a persistent fast or slow equilibrium that survived hundreds of later trials. Therefore a single long-lived warmed process is no longer decision-grade evidence for JesseSort.
+    * E760 samples process history explicitly rather than trying to select one canonical warmup count. Fresh A has no prior target sort; B exposes the one-sort transition; CDE estimate history-conditioned runtime after at least two prior target sorts.
+    * Custom/localized performance runners should preserve fresh-process isolation, deterministic timed-seed ownership, and explicit call-position/history reporting when process state can affect the mechanism under study.
+    * Do **not** disable glibc tcache in normal performance measurements. `glibc.malloc.tcache_count=0` was a diagnostic intervention that identified the carrier; production benchmarking should preserve the normal allocator and make allocator-history sensitivity observable through forks.
     * The source vector is copied immediately before the timer, so input data is intentionally hot in a consistent way across algorithms.
-    * Every size × algorithm × input cell is a separate process. Cell order is randomized and recorded to prevent permanent algorithm or workload identity correlation with long-timescale host/thermal/frequency drift. The default one-second cooldown is a thermal/frequency settling aid, not a claimed cache flush.
+    * Every timed five-call trajectory runs in its own fresh process. Exec-round scheduling is randomized and recorded so no input/layout cell is concentrated in one host-time window. There is no per-process cooldown; continuous round-robin load plus local paired controls are used instead.
     * Canonical runs auto-pin children to the first CPU in the runner's allowed affinity mask when `taskset` is available; override with `BENCH_CPU=<cpu>` or disable with `BENCH_CPU=none`. E337 promoted pinning from optional to canonical after it collapsed a strong unpinned Random%25 bimodality.
     * CPU frequency, thermal state, interrupts, VM contention, and host migration remain external noise sources. Close decisions still require same-session controls and repeated confirmation.
 - VALIDATION POLICY:
     * Correctness validation remains outside timed regions.
     * The reference `std::sort` used for exact-output validation runs after the timed algorithm. This removes the E323-discovered bias where the `std::sort` control was always timed as a second back-to-back `std::sort`, and every Jessesort timing immediately followed a full reference sort.
 - CPU REPORTING IS MANDATORY FOR EVERY TIMED TEST: copy the exact CPU model reported by `/proc/cpuinfo` / benchmark metadata into the experiment-log entry alongside timing evidence. Do this for localized harnesses as well as full canonical sweeps. Hosted sessions may migrate between CPU models, so an experiment without its CPU recorded is not a safe longitudinal timing reference.
+- RANDOM CONTROL IS MANDATORY FOR EVERY PERFORMANCE EXPERIMENT: include plain `Random` at both n=10,000 and n=100,000 as end-to-end controls, including localized/targeted experiments. These two cells are required even when the mechanism is expected not to trigger on Random, because false-path/code-layout regressions are decision-relevant. Do not consider a performance experiment decision-complete without both Random controls unless the work is strictly non-performance/documentary.
 - E204 established that unchanged code can move materially across CPU models; historical absolute microseconds are therefore not longitudinal baselines. Record CPU/compiler with every timed result and use matched-session controls for causal comparisons.
 - E205's rotating same-process order policy is **superseded** by E320/E323 for cross-variation timing. E205 remains useful evidence that benchmark context itself can move timings, but it is no longer the canonical process model.
 - PRE-E323 TIMING PROVENANCE:
@@ -64,21 +70,18 @@ EXPERIMENT DECISION POLICY
 - Targeted numeric-size invocations use the requested trial count directly; they do not automatically apply the 1m 10:1 reduction.
 - Canonical seed policy for normal benchmarks and one-off A/B tests:
     * base seed: `jessesort::bench::kCanonicalBaseSeed` (0x8A5CD789)
-    * mixer: `jessesort::bench::trial_seed()` in `benchmarks/benchmark_seed.h`
+    * mixer: `jessesort::bench::trial_seed()` in `benchmarks/infrastructure/benchmark_seed.h`
     * do not invent a new seed population for an ordinary one-off test; explicitly label intentional held-out/confirmation cohorts instead.
 - Preserve raw per-algorithm timings. Report median, p25/p75, IQR, MAD, and ratio of independent medians as appropriate; do not silently trim outliers. Paired cross-algorithm trial ratios are not part of the canonical benchmark.
-- Full rationale and remaining limitations: `docs/benchmark_methodology.md`.
-- Baseline workload families (frozen in E180C): Random, Sorted, Reverse, Sorted+Noise(5%),
-  Sorted+Noise(10%), Random%25, Alternating, Sawtooth, MixedDirectionRuns, BlockSorted, OrganPipe,
-  and Rotated. E228 adds two permanent router-safety phase-change families without modifying any of
-  those 12 generators: MixedPhase3 = Sorted+Noise(5%) -> MixedDirectionRuns -> Random in three
-  contiguous near-equal phases; MixedPhase12 = the 12 frozen baseline families once each in baseline
-  order in 12 contiguous near-equal phases. Current acceptance therefore covers 12 frozen baseline
-  families + 2 router-safety families. Synthetic diagnostics outside these 14 may explain mechanisms
-  but may not tune production policy unless first promoted to the permanent benchmark suite.
+- The benchmark rationale and remaining limitations are summarized in this section; a separate maintained methodology document has not yet been restored after repository compaction.
+- Historical workload policy: E180C froze 12 baseline families and E228 added MixedPhase3/MixedPhase12 as router-safety inputs. That 14-core policy remains important provenance but is superseded for current runs by the 10-core/50-additional roster below; old experiment entries and timings must not be rewritten as if they used the new roster.
+- Current core workload families (2026-09-10): Random, Sorted, Reverse, Sorted+Noise(5%), Random%25, Diverging, Sawtooth, MixedDirectionRuns, OrganPipe, and Rotated. Diverging is a name-only correction of the former Alternating row; its values remain the same. Sorted+Noise(10%), BlockSorted, and MixedPhase3 retain their definitions in the additional suite. DiversePhaseMix8 replaces fixed-order MixedPhase12 with eight guaranteed regimes in seeded order and moderately varied lengths: ascending, descending, full-random, cardinality-25, 5%-noise sorted, diverging, mixed-direction runs, and shuffled sorted blocks. Additional-suite redundancy cleanup replaced RunMosaic/VariableCardinality/JitteredRotation/AsymmetricPipePlateau with AlternatingDirectionRuns/RandomCardinalityK2/AllEqual/Reverse+Noise(5%), respectively.
+- `Random%25` is the core fully random cardinality-25 input: every element is drawn uniformly from `[0,24]`; the name does not mean 25%-random data. The additional cardinality sweep omits `RandomCardinalityK25` as a duplicate and retains K5/K10/K50/K100/K256/K1024/K4096/K16384. Converging replaces the former K65536 position with the lane-direction inverse of Diverging. The maintained roster contains 10 core + 50 additional inputs (60 total).
 - HISTORICAL PERFORMANCE REFERENCES:
-  * E189 preserves the older Intel Xeon Platinum 8573C canonical tables used in the README for historical comparison.
+  * E189 preserves an older Intel Xeon Platinum 8573C canonical generation that appeared in earlier README revisions; it is historical rather than the current publication table.
   * E203 is a same-session AMD EPYC 9V74 snapshot of the then-maintained pre-phase-map bank; it is historical, not a current baseline.
+  * E742 is the current Intel Xeon Platinum 8573C integer reference for the three production paths versus GCC `std::sort`; its historical swap-noise OOD rows remain labeled `SortedSwap` until the corrected current OOD suite is rerun on that CPU.
+  * The current Clang/libc++ and direct native Rust/ipnsort tables are separate AMD Ryzen 7 7445HS cohorts and must not be combined with E742 timing rows.
   * Detailed historical timing artifacts were pruned from the maintained repository; the compact historical summary here is authoritative.
   * Current optimization decisions must use an immediately rerun same-session baseline for the affected tagged variation(s), with CPU/compiler recorded.
   * E204 demonstrated why: unchanged code moved materially across CPUs, so absolute historical microseconds are not longitudinal performance claims.
@@ -92,7 +95,7 @@ EXPERIMENT DECISION POLICY
   to uniform, and exactly 250/500 positions before versus at/after the nominal 50%
   freeze decision point. Keep the randomized generator; control it through canonical
   seeds rather than deterministic stratification.
-- `make bench` / `./benchmark.sh` is the canonical multi-algorithm runner. Resume occurs only at committed measurement units: an interrupted 500-trial cell is discarded and rerun from trial 0 with fresh warmups, while completed cells are never rerun. The runner locks CPU model and benchmark/source/seed/runner fingerprints so evidence from different binaries or hosts cannot be silently mixed.
+- `make bench` through `benchmarks/canonical/run.sh` is the canonical multi-algorithm runner. Resume occurs only at committed measurement units: an interrupted 500-trial cell is discarded and rerun from trial 0 with fresh warmups, while completed cells are never rerun. The runner locks CPU model and benchmark/source/seed/runner fingerprints so evidence from different binaries or hosts cannot be silently mixed.
 - DURABLE CHUNK POLICY (E209): long experiments must be split into small resumable checkpoints rather
   than relying on one execution environment to finish a multi-hour sweep. Preferred sequence is compile/smoke,
   localized 10k, localized 100k, retain/reject, then affected-variation acceptance one size (or small pattern group) at a time.
@@ -105,20 +108,27 @@ EXPERIMENT DECISION POLICY
 - Do not assume an optimization transfers between variations; propagation gets its own
   causal evidence unless the change is purely mechanical/documentary.
 
-1.2 CURRENT MAINTAINED VARIATIONS - E229 LAYER TAGS
+1.2 CURRENT PRODUCTION AND PRESERVED RESEARCH VARIATIONS
 
 AUTHORITATIVE NAMING
 - Grammar: `jessesort_<decomposition>_<router>_<reconstruction-and-merge>[_<other-policy>...]`.
 - Underscores separate major layers; dashes combine tags inside a layer.
-- Full definitions/provenance: `docs/E229_variation_tag_migration.md`.
+- E229 naming provenance is retained in the chronological history below; the separate migration document referenced by older revisions is not present in the compact repository.
 - Historical E001-E228 records keep their original numbered names; do not rewrite them retroactively.
 
-DEFAULT BENCHMARK DESCRIPTORS (eight Jessesort + std::sort; E458/E466 current roster)
+CURRENT ROUTINE PRODUCTION DESCRIPTORS (E734 roster)
+- `simulated-direct_live-phase` -> E732 allocating live-phase, with E738 large-object compact-index realization; public/default `jessesort::sort`.
+- `adaptive-noalloc` -> E729 allocation-free performance path; public `jessesort::noalloc::sort_adaptive`.
+- `strict-noalloc` -> E735 allocation-free bounded/worst-case-safe path; public `jessesort::sort_unstable_noalloc`.
+- E740/E741 add opt-in caller-scratch compact-index companions for movement-expensive values; they are public APIs but are not separate routine benchmark descriptors.
+- `std::sort` is timed independently as the control. E661 is preserved under `research/experimental/` as a legacy speed donor/reference, not as the public default.
+
+FORMER ROUTINE / CURRENT RESEARCH DESCRIPTORS (preserved, not benchmarked by default)
 - `physical` -> `jessesort_physical_probe-route_adj-adaptive-buffer` (pre-E225 `physical` control)
 - `simulated` -> `jessesort_simulated_probe-route_adj-adaptive-buffer` (pre-E225 `simulated` control)
 - `frozen-single` -> `jessesort_simulated-frozen_probe-route_adj-powersort-adaptive-buffer_single-overflow` (pre-E225 `frozen-single` control)
 - `indexed` -> `jessesort_indexed_probe-route_adj-adaptive-buffer_move-only` (pre-E225 `indexed` control)
-- `noalloc-direct` -> `jessesort_noalloc-direct_probe-route_inplace-adaptive_run-reclaim64_move-only` (E369 current Rust-contract/no-heap contender)
+- `noalloc-direct` -> `jessesort_noalloc-direct_probe-route_inplace-adaptive_run-reclaim64_move-only` (historical E369 Rust-contract/no-heap contender)
 - `noalloc-low-run` -> `jessesort_noalloc-low-run_probe-route_inplace-adaptive_run-reclaim64_move-only` (restored as the eighth routine specialist after E430/E436 roster reconciliation)
 - `simulated-direct` -> `jessesort_simulated_direct-merge-probe-route_adj-adaptive-buffer` (E225 direct-merge champion)
 - `phase-map` -> `jessesort_simulated-direct_phase-map-mature_probe-route_adj-adaptive-buffer` (E283/E314 mature mixed-input phase-map champion)
@@ -132,7 +142,7 @@ NON-ROUTINE / EXPERIMENTAL DESCRIPTORS
 - `simulated-phase-map-range-transition-partition-body-entropy` - E256 descendant; broadens E255 only to allow a non-STRUCTURED tail while keeping a STRUCTURED lead and ENTROPY midpoint.
 
 CURRENT BANK SIZE
-- Eight routine JesseSort descriptors are benchmarked by default: `physical`, `simulated`, `frozen-single`, `indexed`, `noalloc-direct`, `noalloc-low-run`, `simulated-direct`, and `phase-map`, plus independently timed `std::sort`. E458 restored `noalloc-low-run` as the eighth routine specialist after the E430/E436 roster audit showed its capability had survived and remained best-in-class on some regimes.
+- Three maintained JesseSort production descriptors are benchmarked by default, plus independently timed `std::sort`. The former eight-descriptor E458 bank remains preserved as research architecture and donor provenance rather than being silently deleted or described as current production.
 
 1.2A MAINTAINED ARCHITECTURE REFERENCE
 
@@ -363,8 +373,8 @@ IDENTITY GUARDRAIL
 
 1.4 CURRENT BENCHMARK ARTIFACT POLICY
 - `benchmarks/canonical/benchmark.cpp` is the canonical whole-sort benchmark and `make bench` is the routine 10k+100k entrypoint.
-- Canonical suite runs write ephemeral raw state under gitignored `results/`; committed repository evidence is limited to compact representative summaries under `benchmarks/baselines/`. Historical raw timing trees are pruned after their decision-relevant conclusions are consolidated here.
-- A 500-trial cell is atomic: partial active-cell output is never merged with a later process. If interrupted, discard that cell and rerun it from trial 0; completed cells remain committed. At 10k the ZIP checkpoint is refreshed after all 14 inputs for an algorithm; at 100k it is refreshed after every cell.
+- Canonical suite runs write ephemeral raw state under gitignored `results/`. Compact current evidence is summarized in the README, this log, and the direct ipnsort comparison folder; historical raw timing trees are pruned after their decision-relevant conclusions are consolidated.
+- A 500-trial cell is atomic: partial active-cell output is never merged with a later process. If interrupted, discard that cell and rerun it from trial 0; completed cells remain committed. At 10k the ZIP checkpoint is refreshed after all 10 core inputs for an algorithm; at 100k it is refreshed after every cell.
 - Performance decisions use one algorithm/input cell per process under the warm-isolated methodology. `std::sort` is an independently timed control; correctness reference sorting occurs after the timed call. Close audit decisions use repeated independent process medians rather than same-process paired observations.
 - Test only variations whose executable behavior changes; include an imported dependency/source variation only when its behavior is affected.
 - Every retained performance change requires canonical affected-variation acceptance, CPU/compiler context, >1% regression investigation, propagation disposition, and a ZIP checkpoint.
@@ -384,38 +394,36 @@ IDENTITY GUARDRAIL
 2. ACTIVE TODO / ROADMAP
 ===============================================================================
 
-Priority order (2026-09-05)
-1. **E691 speed convergence without losing generalization.** E691 is the forward maintained backbone; E661 remains the public/default speed reference. Recover performance through generic observable structure, never benchmark-family fingerprints or donor-name routing.
-2. **E702 ghost-run integration / realization audit.** Do not add a new Sawtooth/BlockSorted route. E701 outer monotone regions are already realized in-place and sent directly to the final merge pool; audit the older dense-ghost path used inside the mature Patience engine, where detached ghost spans are still represented by blueprint tags and copied/reverse-copied into the reconstruction buffer before merge. Measure whether ghost spans can remain physically realized or otherwise bypass redundant reconstruction/movement while preserving mixed-input/phase-map behavior and generic comparator semantics. Focus on post-detachment handling, not new ghost admission thresholds.
-3. **E703 generic phase-local sparse-disorder repair.** Revisit the Sorted+Noise5 signal without fixed 128-element blocks or named-noise routing. Let phase-map boundaries define arbitrary-sized regions/islands; test whether locally repairing only unresolved sparse-disorder regions and then merging realized runs can beat full Patience representation while preserving mixed/random-island behavior.
-4. **E704 low realized-run-density direct merge.** When decomposition produces a small number of physically realized contiguous runs, test whether direct merge should replace further Patience/reconstruction work. Sweep generic run-density economics (candidate region roughly 0.5%-3% of n or an equivalent cost model), with no Rotated-specific assumptions. Require that runs are already realized; do not pay scatter/flatten cost merely to qualify.
-5. **Run/phase geometry cluster.** Recover generic Sawtooth/BlockSorted/Rotated/MixedDirectionRuns speed only through transferable run/phase mechanisms; do not pursue the rejected Alternating two-lane specialization.
-6. **Duplicate/cardinality structure.** Keep this only as a generic equivalence-density/cardinality research question; do not recover Random%25 by turning the route into a counting sort or by assuming a small fixed key universe.
-7. **Boundary/block geometry.** Study Rotated, BlockSorted, RunMosaic/UnevenRunMosaic, SparseInversionPatches, OffsetRotationRamp, and OverlappingSortedBlocks for shared monotone-boundary/run-layout signals rather than independent routes.
-8. **Noisy-sorted crossover.** E691 is poor on very low noise, approaches parity around the middle, and becomes stronger at higher noise. Find the causal local-disorder transition and make admission continuous rather than thresholding named Noise families.
-9. **Reduce generic E691 overhead.** Random is only modestly slower than E661; after the large structural cliffs, reduce redundant probes, pressure bookkeeping, and eagerly built metadata.
-10. **Cheaper pressured-game overflow.** Preserve E691's per-game T=9 safety semantics while deferring/reducing overflow normalization and merge work. Priority hypothesis: keep overflow virtual through the first merge level or consume it through simulated merge ownership rather than flattening first.
-11. **Hard OOD anti-regression envelope.** Preserve E691's strong MonotoneBurstNoise, affine/bitonic, ChunkEntropyMixture, LocalizedAlternatingBursts, and BlockShuffle>=32 behavior while importing E661 speed mechanisms.
-12. **Fallback failures versus std::sort.** RandomWalk, StickyRandomWalk, PeriodicPerturbed, BlockShuffle16/32, and low-noise SortedNoise remain important counterexamples. Determine whether the problem is classifier ownership, backend choice, or execution overhead.
-13. **Production replacement bar.** Do not replace E661 until E691 eliminates current multi-x cliffs, avoids broad >10% established regressions (prefer <=5% on common paths), preserves its OOD win envelope, and remains independently benchmarkable against E661.
-14. **Transferable retained donors only.** E607 narrow blueprints, compact/hierarchical scheduling, morph admission, E656 fusion evidence, and within-pile/cross-game value-density ideas may be revisited only by rebasing the mechanism onto E691 or current E661. Do not compare obsolete whole headers directly.
-15. **Noalloc/Rust track.** `jessesort::sort_unstable_noalloc` is the strict bounded public contender; `jessesort::noalloc::sort_adaptive` is the performance-oriented noalloc path. Near-term work is tooling/comparison cleanup and eventual direct Rust/ipnsort validation, not more scratch-threshold fishing.
+Priority order (2026-09-13; E760 CDE-history benchmark methodology is now the validation baseline)
+0. **Benchmark methodology remains E760; E761 freezes the canonical Markdown presentation as CDE-only unless a concrete new failure mode is observed.** New timing uses 100 fresh ABCDE trajectories/cell, Fresh=A, Transition=B, History=CDE, median cell runtimes, local paired std::sort controls, deterministic round-robin scheduling, and immutable round journals.
+1. **Revalidate timing-sensitive retained decisions under E760 before using close historical ratios as active optimization evidence.** Structural/correctness conclusions remain valid unless contradicted by new evidence.
+2. **E750/current production timing provenance refresh.** Bank the maintained allocating/adaptive/strict 60-input reference under E760 and use it as the anti-regression envelope.
+3. **Noalloc structured-path recovery and large-record follow-up.** Use E760 for all timing adjudication; Random10k/100k remain mandatory controls for targeted performance changes.
+4. **Compiler/codegen portability.** Audit Clang/libc++ after the E760 provenance refresh.
+
 
 Deferred/high-level research backlog (not priority ordered)
 - **Ghost-run continuation and direct ingestion.** E575 proved that detached dense monotone runs can be useful, but simple span/min-length threshold sweeps and relative admission guards are closed. Future work should change what happens *after* a run is detached: keep ghost ownership virtual, ingest a proven run directly into later merge ownership, or use ghost descriptors as structure sensors. Do not retry E571/E585 anchored placement + immediate `std::inplace_merge` as-is.
+- **Arbitrary phase-local sparse-disorder repair.** E725/E726 retained a distributed middle-density admission signal but still realize accepted work through fixed 128-element insertion blocks. The unfinished E703 idea is to let discovered phase/island boundaries size the repair regions, locally repair only unresolved sparse disorder, and merge already realized neighbors while preserving mixed/random-island behavior. Do not reopen named Noise routing.
+- **Low realized-run-density direct merge at the local merge point.** E704/E705 rejected broad descriptor-permutation and fixed run-count gates, including cap=2. The remaining question is whether already realized contiguous runs can switch locally according to byte/work economics without new outer routing, metadata-layout changes, or paying scatter/flatten costs merely to qualify.
 - **Deeper simulated blueprint merging / delayed materialization.** Continue the E649-E656 line beyond one local fusion: consume blueprint, ghost, or overflow ownership through one or more merge levels before physically flattening; exploit reconstructed pair/triple geometry and natural dependency closures inside an already-required reconstruction/merge pass. Avoid a separate ownership representation whose construction erases the movement savings (E651/E652).
 - **Patience decomposition as a recurring structure sensor.** When cheap monotone/run evidence becomes ambiguous, consider sparse/galloped dual-Patience observations of pile count, game balance, concentration, and pressure rather than a one-shot classifier. Keep phase-boundary evidence separate from backend-choice evidence; E252-E257 showed that broad RouteState labels alone are too coarse for backend routing.
 - **Freeze by structural economics rather than fixed input percentage.** Revisit early freezing using pile count, per-game pressure, power-of-two/balanced-merge geometry, or an estimated remaining-work model. Preserve the old idea of allowing overflow to help balance later merge levels. Do not reopen blind freeze-percentage or cap sweeps without a structural model.
 - **Single-game / reverse-traversal / two-ended Patience research.** E467-E479 established this as a distinct experimental family. Future attempts need a stronger general discriminator or representation mechanism: exact/reliably mapped descending regions, reverse visitation without physical reversal, or two-ended/rainbow-style pile ownership. Do not promote simple single-game parity work merely for symmetry.
 - **Streaming outer loop and proved natural-run consumption.** Explore consuming long comparator-proved monotone segments as units once pile/run ownership is known, then re-entering the outer classifier after each committed segment. Connect this with the active run/phase-geometry work instead of adding benchmark-family routes.
 - **Layout-stable specialist composition.** Strong specialist mechanisms such as repeated-ascending materialization and exact low-run/rotation handling should be revisited only through stable wrappers/module boundaries or clearly isolated ownership. Avoid monolithic hot-header edits where unrelated codegen movement dominates the measurement.
+- **Duplicate/cardinality structure.** Keep Random%25 and low-cardinality behavior as a generic equivalence-density/cardinality question. Do not turn a route into counting sort or assume a small fixed universe. Revisit only with comparator-generic equivalence concentration, tail/pile geometry, or another transferable signal.
+- **Cheaper pressured-game overflow.** Preserve the current per-game T=9 safety semantics while deferring or reducing overflow normalization and merge work. The leading unfinished hypothesis is to keep overflow virtual through the first merge level or consume it through simulated merge ownership rather than flattening first.
+- **Generic live-phase overhead.** After the structural ownership cliffs are addressed, reduce redundant probes, pressure bookkeeping, eagerly built metadata, and null-path allocation/code-layout costs. Do not trade away classifier generalization for a small Random-only win.
 - **Better in-place long-run merge primitive.** The noalloc/Rust line still has a primitive-level movement bottleneck on overlapping long runs; merge-order tuning alone did not solve it (E345). Reopen when there is a materially different in-place merge/rearrangement primitive, not another scheduler permutation.
 - **High-entropy backend parity remains parked.** Random-path profiling historically put most remaining cost in partition + smallsort rather than Patience routing. Reopen only for a genuinely new partition/smallsort primitive, compiler/codegen opportunity, or direct Rust/ipnsort parity experiment; do not resume broad threshold micro-tuning.
+- **Transferable retained donors.** E607 narrow blueprints, compact/hierarchical scheduling, morph admission, E656 fusion evidence, and within-pile/cross-game value-density ideas remain available only as mechanisms to rebase onto a current maintained owner. Do not compare or promote obsolete whole headers directly.
+- **Noalloc/Rust comparison maintenance.** Direct native Rust/ipnsort validation now exists, but keep its harness, compiler/toolchain provenance, row definitions, and ratio direction synchronized with the maintained three-production roster. Future work should investigate causal ownership/backend gaps, not tune scratch thresholds to the current table.
 - **Historical regression/provenance diagnostics remain available, not active optimization.** If a coherent same-method regression reappears, first build a retained-gain cancellation/ownership map and then use logarithmic checkpoint bisection under the current isolated runner. Do not replay old experiments linearly or treat old absolute timings as current baselines.
 
 Execution discipline
 - One mechanism at a time; use clean separate binaries for causal performance decisions.
-- Canonical retain/reject default: 10k and 100k, 500 trials/cell, 2 warmups, deterministic seeds, pinned CPU when available; use 1000+ trials for close/high-value adjudication.
+- Canonical retain/reject default (E760+): 10k and 100k; 100 fresh exec trajectories/cell × five distinct timed inputs A-E = 500 observations; Fresh=A, Transition=B, History=CDE; pinned CPU when available; local paired std::sort controls with balanced pair order; deterministic round-robin cell scheduling; immutable per-round journals; median cell runtimes and ratio-of-medians speedups are primary. For close/high-value adjudication, repeat independent E760 cohorts rather than extending one process history.
 - Investigate >1% regressions with reversed process order and correctness validation before retention.
 - Keep production/backbone code free of benchmark-family fingerprints; route only on generally observable structure/state.
 - `results/` is ephemeral and gitignored. Preserve only compact summaries/provenance needed for current decisions; detailed tables belong in the chat/artifact that made the decision, not the clean repository.
@@ -1689,4 +1697,53 @@ E741 — adaptive caller-scratch compact-index realization — NEW PUBLIC API RE
 - Remaining 100k losses included Noise5 1.4740x, Noise10 1.4059x, Alternating 1.6142x, Sawtooth 1.0502x, MixedPhase3 1.0808x, and MixedPhase12 1.1715x; BlockSorted's 1.2220x fallback/layout regression also remains unexplained.
 E742 — three-production integer canonical/OOD benchmark and OOD noise-definition cleanup — MEASUREMENT/MAINTENANCE RETAIN
 - Intel Xeon Platinum 8573C timings cover current allocating live-phase, adaptive noalloc, strict noalloc, and `std::sort`: canonical 10k/100k plus the then-49-family OOD suite at 100k, 2 warmups + 500 trials/cell, with correctness validation. Repaired canonical and OOD summaries remain the retained 8573C integer reference.
-- Follow-up corrected a naming/semantics discrepancy: OOD `SortedNoise` previously performed `pct*n` random swaps, unlike canonical per-position random replacement. The maintained OOD generator now uses canonical replacement logic and omits redundant 5%/10% rows, leaving `SortedNoise1/2/20/30` and 47 total OOD families. Historical E742 OOD timings retain their original swap-noise provenance; replacement-noise reruns are pending a 8573C host.
+- Follow-up corrected a naming/semantics discrepancy: OOD `SortedNoise` previously performed `pct*n` random swaps, unlike canonical per-position random replacement. The maintained OOD generator now uses canonical replacement logic and omits redundant 5%/10% rows, leaving `SortedNoise1/2/20/30`. A later generator audit removed `RandomCardinalityK25` because it duplicates canonical `Random%25`, leaving 46 current OOD families. Historical E742 OOD timings retain their original swap-noise and cardinality-25 provenance; replacement-noise/current-roster reruns are pending a 8573C host.
+E742A — 10-core/50-additional workload-roster maintenance — RETAIN
+- Reduced the routine core to Random, Sorted, Reverse, Sorted+Noise(5%), Random%25, Alternating, Sawtooth, MixedDirectionRuns, OrganPipe, and Rotated. Moved Sorted+Noise(10%), MixedPhase3, and BlockSorted to the additional suite without changing their workload semantics.
+- Retired fixed-order MixedPhase12 from active rosters and replaced it with DiversePhaseMix8: eight guaranteed regimes in seeded shuffled order with moderately varied phase lengths. Appended all four additional rows after the pre-existing 46 so their ordinals and seed schedules remain unchanged. Current maintained roster: 10 core + 50 additional = 60 total. Historical MixedPhase12 timings and unfinished phase-change recovery questions remain preserved.
+E742B — generator deduplication and four-row coverage cleanup — RETAIN
+- Centralized shared canonical/additional/Rust-comparison workload logic in `benchmarks/infrastructure/input_generators.h` and removed the dormant second implementations of moved/retired canonical rows from both canonical benchmark front ends. This is a generator-maintenance change; core definitions and RNG engines/seed schedules remain unchanged.
+- Replaced RunMosaic with AlternatingDirectionRuns, VariableCardinality with RandomCardinalityK2, JitteredRotation with AllEqual, and AsymmetricPipePlateau with Reverse+Noise(5%). The replacement rows keep the same four additional-suite positions, so every unaffected family retains its ordinal and seed schedule. Historical timings remain preserved under the retired names; the current roster remains 10 core + 50 additional = 60 total.
+E742C — Diverging name correction and Converging counterpart — RETAIN
+- Renamed the active core Alternating row to Diverging because its two interleaved lanes move away from each other (`0,-1,-2,...` and `n,n+1,n+2,...`). Generator output, numeric ID, seeds, and historical timings are unchanged; older experiment entries retain the name used when recorded.
+- Replaced RandomCardinalityK65536 with Converging at the same additional-suite ordinal. Converging uses the inverse lane motion (`0,1,2,...` and `n,n-1,n-2,...`) so the two lanes meet at the midpoint. The active roster remains 10 core + 50 additional = 60 unique inputs.
+E743 — pile-tail invariant / route-ownership / merge-topology audit — COMPLETE; MODEL CORRECTED
+- EPYC 9V74 audit found no equivalent live pile tails and confirmed maintained merging is adjacent-pairwise, not k-way. Sawtooth is outer-merge dominated; Diverging/RandomCardinalityK2 are true two-pile Patience cases.
+E744 — continuous boundary/block/noise crossover audit — COMPLETE; HYPOTHESIS REJECTED
+- Broader crossover testing did not support a simple prepass-cap explanation for the remaining structured-input cliffs; no production change.
+E745 — local >64-realized-run Direct handoff — RESEARCH RETAIN; NO PROMOTION
+- A generic handoff reduced some high-run merge costs but did not clear the broad regression envelope; mechanism retained only as a research donor.
+E746 — selective adjacent-three precompaction — RESEARCH RETAIN; NO PROMOTION
+- Selective three-run precompaction showed real merge-depth wins but also broad enough regressions to block production adoption.
+E747 — staged E745/E746 merge-depth validation — COMPLETE; NO PROMOTION
+- Expanded validation confirmed the mechanisms are real but insufficiently robust for production; no active routing changed.
+E748 — same-binary causal isolation + full-60 exposure — COMPLETE; NO PROMOTION
+- Runtime toggles isolated E745/E746 effects from binary-layout noise and extended testing to all 60 maintained inputs; both remained research-only.
+E749 — E746 threshold sweep — COMPLETE; NO PRODUCTION CHANGE
+- Full-60 testing favored a narrow low-threshold region, with 20% the best broad candidate after extension, but triggered regressions remained too large for promotion.
+E750 — 20% merge-depth precompaction + minimum-target-32 gate — PROMOTED
+- Added the generic gated precompaction to allocating live-phase after broad acceptance testing; adaptive and strict noalloc paths unchanged. Preserve BlockShuffle32 10k as a known counterexample.
+E751 — E750 deterministic merge-cost census — COMPLETE
+- Cost instrumentation supported E750's causal interpretation: triggered timing changes track comparison/movement reductions; no additional selector was justified.
+E752 — E750 correctness/invariant stress — COMPLETE; PASS
+- Stress, sanitizer, and move-only checks found no correctness/invariant failure in the promoted E750 path.
+E753 — allocating move-only support + API smoke restoration — RETAINED
+- Restored allocating production support for move-only/non-default-constructible values and repaired public API compile/smoke coverage.
+E754 — reverse E750 precompaction sweep — DIAGNOSTIC RETAIN
+- 8573C reverse-sweep testing produced useful causal evidence but exposed suspicious process-history sensitivity; no production promotion.
+E755 — disjoint-warmup correction + baseline refresh — SUPERSEDED METHODOLOGY
+- Corrected reused timed-seed warmups and confirmed that single-process 500-trial cells could still shift materially with allocator history.
+E756 — forked-block benchmark methodology — SUPERSEDED
+- Split each 500-trial cell across 10 fresh processes × 50 trials, resolving the worst MDR artifact but leaving only 10 independent allocator histories and measurable block-history bias.
+E757 — fresh-exec paired benchmark methodology — SUPERSEDED BY E759/E760
+- Validation showed smaller process blocks continued to move structured rows; fresh-exec local JS/std pairing and round-robin scheduling were retained as design foundations, but fresh-only timing was not representative of repeated library use.
+E758 — direction-neutral global natural-run prepass — CANDIDATE; NOT YET PROMOTED
+- MDR audit found an ascending-only 64-prefix admission defect: old prepass admitted 84/100 ascending-start and 0/100 descending-start seeds; the candidate admitted 84/100 and 85/100 and largely removed the direction timing split. Full-60 A/B remains required before production promotion.
+E759 — ABCDE process-history benchmark methodology — SUPERSEDED BY E760
+- Established 100 fresh execs/cell × five distinct preconstructed inputs (500 historical timed IDs exactly once), retaining A-E separately and exposing process-history effects that motivated the final CDE reporting channel.
+E760 — CDE history channel + durable round journals — CANONICAL PROCESS PROCEDURE
+- Full-60 8573C evidence showed B remained transitional mainly for sim-direct, so canonical channels became Fresh=A, Transition=B, History=CDE, Overall=ABCDE. Immutable per-round journals replaced fragile monolithic append/checkpoint persistence.
+- E761 corrected canonical reporting to CDE medians from the same raw cohort: 60-input history GM = 3.83× sim-direct, 4.35× adaptive, 3.98× strict.
+E761 — median-CDE reporting + repository cleanup — RETAINED
+- Canonical cell reporting is CDE median: `median(std::sort CDE) / median(JesseSort CDE)`; `make bench` stores raw ABCDE CSV observations while routine Markdown and README headline tables exclude A/B. The retained 8573C cohort aggregates to 3.83×/4.35×/3.98× for sim-direct/adaptive/strict.
+- Cleanup retained only the validated E760 8573C full-60 100k raw cohort plus current runners/provenance and removed superseded timing/diagnostic bloat.

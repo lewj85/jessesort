@@ -1,4 +1,5 @@
 #include "benchmark_seed.h"
+#include "input_generators.h"
 #ifndef JESSESORT_BENCH_LAYOUT_HEADER
 #define JESSESORT_BENCH_LAYOUT_HEADER "../generated/benchmark_layouts.h"
 #endif
@@ -27,9 +28,8 @@
 
 enum class InputType {
     Random = 0, Sorted = 1, Reverse = 2, NearlySorted = 3, Random25 = 4,
-    Alternating = 5, Sawtooth = 6, BlockSorted = 7, OrganPipe = 8, Rotated = 9,
-    SortedNoise10 = 12, MixedDirectionRuns = 13,
-    MixedPhase3 = 14, MixedPhase12 = 15
+    Diverging = 5, Sawtooth = 6, OrganPipe = 8, Rotated = 9,
+    MixedDirectionRuns = 13
 };
 
 static std::string_view name(InputType t) {
@@ -39,15 +39,11 @@ static std::string_view name(InputType t) {
         case InputType::Reverse: return "Reverse";
         case InputType::NearlySorted: return "Sorted+Noise(5%)";
         case InputType::Random25: return "Random%25";
-        case InputType::Alternating: return "Alternating";
+        case InputType::Diverging: return "Diverging";
         case InputType::Sawtooth: return "Sawtooth";
-        case InputType::BlockSorted: return "BlockSorted";
-        case InputType::SortedNoise10: return "Sorted+Noise(10%)";
         case InputType::MixedDirectionRuns: return "MixedDirectionRuns";
         case InputType::OrganPipe: return "OrganPipe";
         case InputType::Rotated: return "Rotated";
-        case InputType::MixedPhase3: return "MixedPhase3";
-        case InputType::MixedPhase12: return "MixedPhase12";
     }
     return "?";
 }
@@ -57,35 +53,21 @@ static constexpr auto& kAlgorithmSpecs = jessesort_benchmark_config::kAlgorithmS
 static constexpr std::size_t kAlgorithmCount = jessesort_benchmark_config::kAlgorithmCount;
 static constexpr std::string_view kBenchmarkLayoutSha256 = jessesort_benchmark_config::kLayoutSha256;
 
-static constexpr std::string_view kBenchmarkMethodVersion = "E695-maintained-isolated-cell-v3";
+static constexpr std::string_view kBenchmarkMethodVersion = "E756-forked-block-v1";
 
 
-static constexpr std::array<InputType, 12> kBaselineInputs{
+// Deliberately small core suite. Additional inputs live only in the shared
+// additional-suite generator, avoiding dormant second implementations here.
+static constexpr std::array<InputType, 10> kInputs{
     InputType::Random, InputType::Sorted, InputType::Reverse,
-    InputType::NearlySorted, InputType::SortedNoise10, InputType::Random25,
-    InputType::Alternating, InputType::Sawtooth, InputType::MixedDirectionRuns,
-    InputType::BlockSorted, InputType::OrganPipe, InputType::Rotated
-};
-
-static constexpr std::array<InputType, 14> kInputs{
-    InputType::Random, InputType::Sorted, InputType::Reverse,
-    InputType::NearlySorted, InputType::SortedNoise10, InputType::Random25,
-    InputType::Alternating, InputType::Sawtooth, InputType::MixedDirectionRuns,
-    InputType::BlockSorted, InputType::OrganPipe, InputType::Rotated,
-    InputType::MixedPhase3, InputType::MixedPhase12
+    InputType::NearlySorted, InputType::Random25,
+    InputType::Diverging, InputType::Sawtooth, InputType::MixedDirectionRuns,
+    InputType::OrganPipe, InputType::Rotated
 };
 
 static constexpr std::array<std::size_t, 2> kDefaultSizes{
     10000, 100000
 };
-
-static std::size_t structured_scale(std::size_t n) {
-    // Balanced sublinear structural scale: both typical run length and run count
-    // grow with n. n^(2/3) yields about 100/464/2154/10000 elements per
-    // run at 1k/10k/100k/1m, respectively.
-    return std::max<std::size_t>(8, static_cast<std::size_t>(
-        std::pow(static_cast<double>(n), 2.0 / 3.0)));
-}
 
 static std::string size_label(std::size_t n) {
     if (n == 1000) return "1k";
@@ -96,167 +78,18 @@ static std::string size_label(std::size_t n) {
 }
 
 static void generate(std::vector<int>& v, InputType t, std::mt19937& rng) {
-    const std::size_t n = v.size();
+    namespace inputs = jessesort::bench::inputs;
     switch (t) {
-        case InputType::Random: {
-            std::uniform_int_distribution<int> d(
-                std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-            for (int& x : v) x = d(rng);
-            break;
-        }
-        case InputType::Sorted:
-            std::iota(v.begin(), v.end(), 0);
-            break;
-        case InputType::Reverse:
-            std::iota(v.rbegin(), v.rend(), 0);
-            break;
-        case InputType::NearlySorted: {
-            std::iota(v.begin(), v.end(), 0);
-            std::bernoulli_distribution change(0.05);
-            std::uniform_int_distribution<int> d(0, static_cast<int>(n) - 1);
-            for (int& x : v) if (change(rng)) x = d(rng);
-            break;
-        }
-        case InputType::SortedNoise10: {
-            std::iota(v.begin(), v.end(), 0);
-            std::bernoulli_distribution change(0.10);
-            std::uniform_int_distribution<int> d(0, static_cast<int>(n) - 1);
-            for (int& x : v) if (change(rng)) x = d(rng);
-            break;
-        }
-        case InputType::Random25: {
-            std::uniform_int_distribution<int> d(0, 24);
-            for (int& x : v) x = d(rng);
-            break;
-        }
-        case InputType::Alternating: {
-            int lo = 0;
-            int hi = static_cast<int>(n);
-            for (std::size_t i = 0; i < n; ++i)
-                v[i] = (i % 2 == 0) ? lo-- : hi++;
-            break;
-        }
-        case InputType::Sawtooth: {
-            // Classic repeated ascending ramp with a hard reset, but scale the
-            // period sublinearly so both run length and run count grow with n.
-            // target ~= n^(2/3): about 10x100 at 1k, 22x464 at 10k,
-            // 47x2154 at 100k, and 100x10000 at 1m.
-            const std::size_t period = structured_scale(n);
-            for (std::size_t i = 0; i < n; ++i)
-                v[i] = static_cast<int>(i % period);
-            break;
-        }
-        case InputType::MixedDirectionRuns: {
-            // Seeded family of natural monotone runs. Both run count and run length
-            // scale with n: target length ~= n^(2/3), with substantial per-run
-            // variation. Direction, starting range, and positive step size vary
-            // independently so this is not a repeated sawtooth or shuffled-block proxy.
-            const std::size_t target = structured_scale(n);
-            const std::size_t minLen = std::max<std::size_t>(4, target / 2);
-            const std::size_t maxLen = std::max(minLen, target + target / 2);
-            std::uniform_int_distribution<std::size_t> lenDist(minLen, maxLen);
-            std::bernoulli_distribution descending(0.5);
-            std::uniform_int_distribution<int> stepDist(1, 7);
-            const long long span = std::min<long long>(
-                static_cast<long long>(std::numeric_limits<int>::max()) / 8,
-                std::max<long long>(1024, static_cast<long long>(n) * 8));
-            std::uniform_int_distribution<long long> startDist(-span, span);
-
-            std::size_t pos = 0;
-            while (pos < n) {
-                const std::size_t len = std::min(lenDist(rng), n - pos);
-                const int step = stepDist(rng);
-                const bool desc = descending(rng);
-                long long startValue = startDist(rng);
-                const long long runSpan = static_cast<long long>(len - 1) * step;
-                if (desc && startValue - runSpan < std::numeric_limits<int>::min())
-                    startValue = static_cast<long long>(std::numeric_limits<int>::min()) + runSpan;
-                if (!desc && startValue + runSpan > std::numeric_limits<int>::max())
-                    startValue = static_cast<long long>(std::numeric_limits<int>::max()) - runSpan;
-                for (std::size_t k = 0; k < len; ++k) {
-                    const long long delta = static_cast<long long>(k) * step;
-                    v[pos + k] = static_cast<int>(desc ? startValue - delta : startValue + delta);
-                }
-                pos += len;
-            }
-            break;
-        }
-        case InputType::BlockSorted: {
-            // Globally sorted unique values partitioned into variable-length
-            // ascending blocks and then shuffled. Like MixedDirectionRuns, the
-            // structural scale is centered on n^(2/3), but every block remains
-            // ascending and retains its original disjoint value interval.
-            std::iota(v.begin(), v.end(), 0);
-            const std::size_t target = structured_scale(n);
-            const std::size_t minLen = std::max<std::size_t>(4, target / 2);
-            const std::size_t maxLen = std::max(minLen, target + target / 2);
-            std::uniform_int_distribution<std::size_t> lenDist(minLen, maxLen);
-
-            struct Block { std::size_t begin; std::size_t len; };
-            std::vector<Block> blocks;
-            for (std::size_t pos = 0; pos < n;) {
-                const std::size_t len = std::min(lenDist(rng), n - pos);
-                blocks.push_back({pos, len});
-                pos += len;
-            }
-            std::shuffle(blocks.begin(), blocks.end(), rng);
-
-            const auto source = v;
-            std::size_t dest = 0;
-            for (const Block& block : blocks) {
-                std::copy_n(
-                    source.begin() + static_cast<std::ptrdiff_t>(block.begin),
-                    block.len,
-                    v.begin() + static_cast<std::ptrdiff_t>(dest));
-                dest += block.len;
-            }
-            break;
-        }
-        case InputType::OrganPipe:
-            for (std::size_t i = 0; i < n; ++i)
-                v[i] = static_cast<int>(i <= n / 2 ? i : n - i);
-            break;
-        case InputType::Rotated: {
-            std::iota(v.begin(), v.end(), 0);
-            std::uniform_int_distribution<std::size_t> d(0, n - 1);
-            std::rotate(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(d(rng)), v.end());
-            break;
-        }
-        case InputType::MixedPhase3: {
-            // Router-safety input: three contiguous phases with deliberately
-            // different structural regimes. Sorted+Noise(5%) is first so a
-            // prefix-only router is tempted by near-sorted structure; mixed
-            // natural directions then exercise both dual-Patience games; the
-            // final Random phase tests whether late entropy is re-detected.
-            static constexpr std::array<InputType, 3> phases{
-                InputType::NearlySorted, InputType::MixedDirectionRuns, InputType::Random
-            };
-            std::size_t begin = 0;
-            for (std::size_t phase = 0; phase < phases.size(); ++phase) {
-                const std::size_t end = n * (phase + 1) / phases.size();
-                std::vector<int> part(end - begin);
-                generate(part, phases[phase], rng);
-                std::copy(part.begin(), part.end(),
-                          v.begin() + static_cast<std::ptrdiff_t>(begin));
-                begin = end;
-            }
-            break;
-        }
-        case InputType::MixedPhase12: {
-            // Router-safety input: one contiguous phase from every original
-            // baseline generator, in the canonical baseline order. Phase
-            // lengths differ by at most one element and sum exactly to n.
-            std::size_t begin = 0;
-            for (std::size_t phase = 0; phase < kBaselineInputs.size(); ++phase) {
-                const std::size_t end = n * (phase + 1) / kBaselineInputs.size();
-                std::vector<int> part(end - begin);
-                generate(part, kBaselineInputs[phase], rng);
-                std::copy(part.begin(), part.end(),
-                          v.begin() + static_cast<std::ptrdiff_t>(begin));
-                begin = end;
-            }
-            break;
-        }
+        case InputType::Random: inputs::random(v, rng); break;
+        case InputType::Sorted: inputs::sorted(v); break;
+        case InputType::Reverse: inputs::reverse(v); break;
+        case InputType::NearlySorted: inputs::sorted_noise(v, rng, 0.05); break;
+        case InputType::Random25: inputs::random_cardinality(v, rng, 25); break;
+        case InputType::Diverging: inputs::diverging(v); break;
+        case InputType::Sawtooth: inputs::sawtooth(v); break;
+        case InputType::MixedDirectionRuns: inputs::mixed_direction_runs(v, rng); break;
+        case InputType::OrganPipe: inputs::organ_pipe(v); break;
+        case InputType::Rotated: inputs::rotated(v, rng); break;
     }
 }
 
@@ -356,7 +189,8 @@ static int trials_for_size(int base_trials, std::size_t n, bool sweeping_all_siz
 
 static void write_metadata(const std::filesystem::path& path,
                            int base_trials, const std::vector<std::size_t>& sizes,
-                           bool sweeping_all_sizes, int warmups, std::string_view input_filter) {
+                           bool sweeping_all_sizes, int warmups, std::string_view input_filter,
+                           int trial_offset, int fork_index, int total_timed_trials) {
     std::ofstream out(path);
     const std::time_t now = std::time(nullptr);
     out << "JesseSort benchmark metadata\n";
@@ -373,6 +207,9 @@ static void write_metadata(const std::filesystem::path& path,
     for (std::size_t n : sizes)
         out << "trials_" << size_label(n) << '=' << trials_for_size(base_trials, n, sweeping_all_sizes) << '\n';
     out << "warmup_trials_per_input=" << warmups << '\n';
+    out << "fork_index=" << fork_index << '\n';
+    out << "trial_offset=" << trial_offset << '\n';
+    out << "total_timed_trials=" << total_timed_trials << '\n';
     out << "input_filter=" << (input_filter.empty() ? "all" : input_filter) << '\n';
     out << "clock=std::chrono::steady_clock\n";
     out << "hardware_concurrency=" << std::thread::hardware_concurrency() << '\n';
@@ -392,8 +229,9 @@ static void write_metadata(const std::filesystem::path& path,
             break;
         }
     }
-    out << "method=single-algorithm/single-input cell process when invoked by benchmarks/canonical/run.sh; fresh deterministic input seed per trial; reference validation occurs after the timed call; cross-cell aggregation is independent\n";
-    out << "cache_policy=warm-state benchmark; selected algorithm receives per-input warmups; no forced hardware-cache flush; source buffer is copied immediately before timing\n";
+    out << "method=E756 forked-block benchmark: one algorithm/input/size/fork per process; timed seeds are globally unique across forks; reference validation occurs after the timed call\n";
+    out << "cache_policy=warm-state within each independent fork; two fork-specific warmups precede a bounded timed block; no single warmup history owns the full cell\n";
+    out << "warmup_seed_policy=E756 fork-specific deterministic warmup seeds; distinct across fork/index and guaranteed disjoint from all concrete timed RNG seeds for the complete cell\n";
     out << "validation_policy=std::sort reference is computed only after the timed call so it cannot prewarm the algorithm under test or the std::sort control\n";
     out << "warning=absolute timings and saved std::sort medians are not portable across VM/host sessions; CPU frequency, thermal state, scheduler placement, and host load remain external noise sources\n";
     out << "benchmark_layout_sha256=" << kBenchmarkLayoutSha256 << '\n';
@@ -622,6 +460,10 @@ int main(int argc, char** argv) {
         return 7;
     }
 
+    const int trial_offset = argc > 7 ? std::max(0, std::atoi(argv[7])) : 0;
+    const int fork_index = argc > 8 ? std::max(0, std::atoi(argv[8])) : 0;
+    const int total_timed_trials = argc > 9 ? std::max(base_trials, std::atoi(argv[9])) : base_trials;
+
     const bool explicit_run_dir = argc > 4 && std::string_view(argv[4]).size() > 0;
     const std::filesystem::path run_dir = explicit_run_dir ? std::filesystem::path(argv[4]) : make_run_directory();
     const bool resuming = explicit_run_dir && std::filesystem::exists(run_dir / "benchmark_metadata.txt");
@@ -656,7 +498,7 @@ int main(int argc, char** argv) {
     raw << std::setprecision(17);
     raw.flush();
 
-    write_metadata(metadata_path, base_trials, sizes, sweeping_all_sizes, warmups, selected_input_arg);
+    write_metadata(metadata_path, base_trials, sizes, sweeping_all_sizes, warmups, selected_input_arg, trial_offset, fork_index, total_timed_trials);
 
     std::vector<std::vector<std::array<BenchmarkCell, kAlgorithmCount>>> cells(
         sizes.size(), std::vector<std::array<BenchmarkCell, kAlgorithmCount>>(kInputs.size()));
@@ -673,7 +515,8 @@ int main(int argc, char** argv) {
             auto it = loaded.find(key);
             if (it != loaded.end()) {
                 for (int t = 0; t < expected_trials; ++t) {
-                    auto jt = it->second.find(t);
+                    const int global_trial = trial_offset + t;
+                    auto jt = it->second.find(global_trial);
                     if (jt != it->second.end() && jt->second.complete(selected)) existing.push_back(jt->second.rec);
                 }
             }
@@ -700,6 +543,7 @@ int main(int argc, char** argv) {
     }
     std::cout << " algorithm=" << selected_variations_arg;
     std::cout << " input=" << (selected_input_arg.empty() ? "all" : selected_input_arg);
+    std::cout << " fork=" << fork_index << " trial_offset=" << trial_offset;
     std::cout << "\nresults_dir=" << run_dir.string();
     if (resuming) std::cout << " (resuming)";
     std::cout << "\n\n";
@@ -717,7 +561,8 @@ int main(int argc, char** argv) {
             int resumed_trials = 0;
             if (loaded_it != loaded.end()) {
                 for (int trial = 0; trial < trials_this_size; ++trial) {
-                    auto jt = loaded_it->second.find(trial);
+                    const int global_trial = trial_offset + trial;
+                    auto jt = loaded_it->second.find(global_trial);
                     if (jt != loaded_it->second.end() && jt->second.complete(selected)) ++resumed_trials;
                 }
             }
@@ -726,7 +571,9 @@ int main(int argc, char** argv) {
                 write_progress(progress_path, n, name(input), resumed_trials, trials_this_size,
                                resumed_trials ? "resuming" : "warming_up");
                 for (int w = 0; w < warmups; ++w) {
-                    std::mt19937 rng(trial_rng_seed(0xA5A5A5A5u, n, input, w));
+                    const unsigned warm_seed = jessesort::bench::warmup_seed_for_fork(
+                        base_seed, n, static_cast<int>(input), fork_index, w, total_timed_trials);
+                    std::mt19937 rng(warm_seed);
                     std::vector<int> source(n);
                     generate(source, input, rng);
                     for (std::size_t id = 0; id < kAlgorithmCount; ++id) {
@@ -743,22 +590,23 @@ int main(int argc, char** argv) {
             }
 
             for (int trial = 0; trial < trials_this_size; ++trial) {
+                const int global_trial = trial_offset + trial;
                 if (loaded_it != loaded.end()) {
-                    auto jt = loaded_it->second.find(trial);
+                    auto jt = loaded_it->second.find(global_trial);
                     if (jt != loaded_it->second.end() && jt->second.complete(selected)) {
                         records.push_back(jt->second.rec);
                         continue;
                     }
                 }
 
-                const unsigned input_seed = trial_rng_seed(base_seed, n, input, trial);
+                const unsigned input_seed = trial_rng_seed(base_seed, n, input, global_trial);
                 std::mt19937 rng(input_seed);
                 std::vector<int> source(n);
                 generate(source, input, rng);
 
                 TrialRecord rec;
                 rec.seed = input_seed;
-                rec.trial = trial;
+                rec.trial = global_trial;
                 std::size_t selected_id = 0;
                 while (selected_id < kAlgorithmCount && !selected[selected_id]) ++selected_id;
                 auto values = source;

@@ -2,7 +2,7 @@
 
 This benchmark compares Rust **ipnsort** with the three maintained JesseSort public paths that are relevant to production and no-allocation work:
 
-1. **`simulated-direct_live-map`** — `jessesort::sort`, the current public/default E733->E732 simulated-direct live-phase path.
+1. **`simulated-direct_live-phase`** — `jessesort::sort`, the current public/default E733->E732 simulated-direct live-phase path.
 2. **`adaptive-noalloc`** — `jessesort::noalloc::sort_adaptive`, the performance-oriented maintained no-allocation path.
 3. **`strict-noalloc`** — `jessesort::sort_unstable_noalloc`, the bounded-stack, no-heap, worst-case `O(n log n)` public contender intended for eventual direct Rust unstable-sort comparison.
 4. **`ipnsort`** — Rust ipnsort from `sort-research-rs`.
@@ -11,13 +11,24 @@ Historical physical/simulated/frozen/indexed/direct/phase-map representatives ar
 
 ## Inputs and type fidelity
 
-The benchmark can run the 14 canonical JesseSort input families, the maintained
-47-family expanded OOD suite, or both.
+The benchmark can run the 10 core JesseSort input families, the maintained
+50-input additional/OOD suite, or both (60 total).
 
-Random, Sorted, Reverse, Sorted+Noise(5%), Sorted+Noise(10%), Random%25, Alternating, Sawtooth, MixedDirectionRuns, BlockSorted, OrganPipe, Rotated, MixedPhase3, and MixedPhase12.
+The core inputs are Random, Sorted, Reverse, Sorted+Noise(5%), Random%25,
+Diverging, Sawtooth, MixedDirectionRuns, OrganPipe, and Rotated. Diverging is
+the unchanged former Alternating generator under a topology-accurate name.
 
-The canonical generators are implemented directly in `cpp/bridge.cpp` using
-C++ `std::mt19937` and the canonical seed mixing. OOD names, definitions, order,
+Sorted+Noise(10%), MixedPhase3, and BlockSorted moved to the additional suite
+without changing their workload semantics. `DiversePhaseMix8` replaces
+MixedPhase12 with eight guaranteed regimes in seeded order and moderately varied
+lengths: ascending, descending, full-random, cardinality-25, 5%-noise sorted,
+alternating, mixed-direction runs, and shuffled sorted blocks. The four rows are
+appended after the pre-existing additional inputs to preserve their ordinals and
+seed schedules.
+
+Canonical and cross-suite shared generators come from
+`benchmarks/infrastructure/input_generators.h`; `cpp/bridge.cpp` uses them with
+C++ `std::mt19937` and canonical seed mixing. OOD names, definitions, order,
 `std::mt19937_64`, and seed schedule come directly from the enclosing repository's
 `benchmarks/ood/ood_families.h`, preventing a second copy of the OOD definitions
 from drifting. Both suites first generate signed 32-bit topology and then map
@@ -28,6 +39,15 @@ uint64_t(uint32_t(x) ^ 0x80000000u)
 ```
 
 This is order-preserving, so equality and signed integer ordering are preserved while both Rust and C++ sort the same `u64` data. The base seed remains `0x8A5CD789`.
+
+Canonical `Random%25` is fully random uniform cardinality-25 data. The additional
+RandomCardinality sweep omits the redundant `RandomCardinalityK25` row while
+retaining K5, K10, K50, K100, K256, K1024, K4096, and K16384. `Converging`
+replaces the former K65536 row at the same additional-suite position; its low
+lane rises while its high lane falls toward the same midpoint.
+The additional suite separately includes `RandomCardinalityK2`, `AllEqual`,
+`AlternatingDirectionRuns`, and `Reverse+Noise(5%)` in place of the retired
+VariableCardinality, JitteredRotation, RunMosaic, and AsymmetricPipePlateau rows.
 
 ## Methodology
 
@@ -72,7 +92,7 @@ Outputs are written to:
 The summary columns are:
 
 ```text
-| Input | simulated-direct_live-map | adaptive-noalloc | strict-noalloc | ipnsort |
+| Input | simulated-direct_live-phase | adaptive-noalloc | strict-noalloc | ipnsort |
 ```
 
 Each JesseSort cell reports `median/ipnsort (median microseconds)`; ipnsort is the

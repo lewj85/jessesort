@@ -1,95 +1,39 @@
 #!/usr/bin/env python3
-"""Render a canonical benchmark summary.csv as readable Markdown tables."""
+"""Render canonical benchmark Markdown from summary.csv.
 
-import argparse
-import csv
+E760/E761 canonical summaries use CDE history-conditioned medians.
+"""
+import argparse,csv
 from pathlib import Path
 
+CANON=["Random","Sorted","Reverse","Sorted+Noise(5%)","Random%25","Diverging","Sawtooth","MixedDirectionRuns","OrganPipe","Rotated"]
+VARIANTS=["simulated-direct_live-phase","noalloc","strict-noalloc"]
 
-def markdown_text(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", " ")
+def main():
+    ap=argparse.ArgumentParser();ap.add_argument('summary_csv');ap.add_argument('-o','--output');a=ap.parse_args()
+    src=Path(a.summary_csv); rows=list(csv.DictReader(src.open())); fields=set(rows[0]) if rows else set()
+    required={"variant","history_variant_median_us","history_speedup_std_over_variant"}
+    if not required <= fields:
+        raise SystemExit('summary.csv is not the E761 median-CDE schema; regenerate it from paired_trials.csv')
+    indexed={(r['input'],int(r['n']),r['variant']):r for r in rows}
+    md=['# Canonical benchmark summary — CDE history-conditioned median only','',
+        'Cells show `CDE median µs (std::sort / JesseSort median speedup)`; lower µs and higher × are better. Positions A (fresh) and B (transition) are intentionally excluded from these Markdown tables. Full ABCDE raw observations remain in `paired_trials.csv`; `summary.csv` preserves median diagnostics for all positions.','']
+    for n in sorted({int(r['n']) for r in rows}):
+        md += [f'## n={n}','', '| Input | simulated-direct_live-phase | noalloc | strict-noalloc |','|---|---:|---:|---:|']
+        for name in CANON:
+            vals=[]; cells=[]
+            for v in VARIANTS:
+                r=indexed.get((name,n,v)); vals.append(None if r is None else float(r['history_variant_median_us']))
+            finite=[x for x in vals if x is not None]; best=min(finite) if finite else None
+            for v,x in zip(VARIANTS,vals):
+                if x is None: cells.append('—'); continue
+                r=indexed[(name,n,v)]; text=f"{x:.2f} µs ({float(r['history_speedup_std_over_variant']):.2f}×)"
+                if x==best:text=f'**{text}**'
+                cells.append(text)
+            md.append(f"| {name} | "+' | '.join(cells)+' |')
+        md.append('')
+    out='\n'.join(md)+'\n'
+    if a.output:Path(a.output).write_text(out)
+    else:print(out,end='')
 
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("summary_csv", type=Path)
-    parser.add_argument("summary_md", type=Path)
-    args = parser.parse_args()
-
-    with args.summary_csv.open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
-
-    required = {"input", "n", "algorithm", "median_us"}
-    fields = set(rows[0]) if rows else set()
-    missing = required - fields
-    if missing:
-        names = ", ".join(sorted(missing))
-        raise SystemExit(f"{args.summary_csv}: missing required columns: {names}")
-
-    preferred_order = [
-        "simulated-direct_live-phase",
-        "noalloc",
-        "strict-noalloc",
-    ]
-    present = {row["algorithm"] for row in rows}
-    algorithms = [name for name in preferred_order if name in present]
-    algorithms += sorted(present - set(algorithms) - {"std::sort"})
-    sizes = sorted({int(row["n"]) for row in rows})
-    preferred_input_order = [
-        "Random",
-        "Sorted",
-        "Reverse",
-        "Sorted+Noise(5%)",
-        "Sorted+Noise(10%)",
-        "Random%25",
-        "Alternating",
-        "Sawtooth",
-        "MixedDirectionRuns",
-        "BlockSorted",
-        "OrganPipe",
-        "Rotated",
-        "MixedPhase3",
-        "MixedPhase12",
-    ]
-    present_inputs = {row["input"] for row in rows}
-    inputs = [name for name in preferred_input_order if name in present_inputs]
-    inputs += sorted(present_inputs - set(inputs))
-    indexed = {(row["input"], int(row["n"]), row["algorithm"]): row for row in rows}
-
-    lines = [
-        "# Canonical benchmark summary",
-        "",
-        "Cells show `std::sort median / JesseSort median`; higher is better. Ratios use independent medians.",
-        "",
-    ]
-    for size in sizes:
-        lines.extend(
-            [
-                f"## n={size}",
-                "",
-                "| Input | " + " | ".join(map(markdown_text, algorithms)) + " |",
-                "|---|" + "|".join("---:" for _ in algorithms) + "|",
-            ]
-        )
-        for input_name in inputs:
-            std_row = indexed.get((input_name, size, "std::sort"))
-            std_median = float(std_row["median_us"]) if std_row else None
-            cells = []
-            for algorithm in algorithms:
-                row = indexed.get((input_name, size, algorithm))
-                if row is None:
-                    cells.append("—")
-                    continue
-                if std_median is None or std_median == 0:
-                    cells.append("—")
-                else:
-                    median = float(row["median_us"])
-                    cells.append(f"{std_median / median:.4f}")
-            lines.append(f"| {markdown_text(input_name)} | " + " | ".join(cells) + " |")
-        lines.append("")
-
-    args.summary_md.write_text("\n".join(lines), encoding="utf-8")
-
-
-if __name__ == "__main__":
-    main()
+if __name__=='__main__':main()

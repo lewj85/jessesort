@@ -13,7 +13,8 @@ namespace jessesort::backbone {
 //          -> E723 geometry-gated tier-0 gallop
 //          -> E726 middle-density sparse-disorder bypass
 //          -> E732 global natural-run prepass
-//          -> E738 large-object compact-index realization.
+//          -> E738 large-object compact-index realization
+//          -> E750 selective 20% merge-boundary precompaction (target >=32).
 template <class T, class Less = std::less<T>>
 void sort(std::vector<T>& values, Less less = Less{}) {
     jessesort::simulated_direct_live_phase::sort(values, less);

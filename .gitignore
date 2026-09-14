@@ -3,6 +3,7 @@
 /benchmark
 /benchmark-clang
 /benchmark_*
+/benchmarks/generated/layout_bins/
 /e*_phase_meta*
 *.o
 *.clang.o
