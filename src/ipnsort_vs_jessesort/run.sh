@@ -6,9 +6,8 @@ JESSESORT_ROOT="$(cd "$ROOT/../.." && pwd)"
 cd "$ROOT"
 
 N="${1:-10000}"
-TRIALS="${2:-500}"
-WARMUPS="${3:-2}"
-SUITE="${4:-canonical}"
+EXECS="${2:-100}"
+SUITE="${3:-canonical}"
 
 case "$SUITE" in
   canonical|ood|all) ;;
@@ -35,8 +34,11 @@ fi
 {
   echo "generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "n=$N"
-  echo "trials=$TRIALS"
-  echo "warmups=$WARMUPS"
+  echo "execs=$EXECS"
+  echo "timed_observations_per_algorithm=$((EXECS * 5))"
+  echo "published_cde_observations_per_algorithm=$((EXECS * 3))"
+  echo "target_warmups=0"
+  echo "history_channel=CDE median"
   echo "suite=$SUITE"
   echo "jessesort_source=$JESSESORT_SOURCE"
   echo "sort_research_rs_commit=$(git -C deps/sort-research-rs rev-parse HEAD)"
@@ -49,7 +51,7 @@ fi
 } > results/system.txt
 
 export RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=native"
-cargo +nightly run --release -- "$N" "$TRIALS" "$WARMUPS" "$SUITE"
+cargo +nightly run --release -- "$N" "$EXECS" "$SUITE"
 
 echo
 cat results/summary.md

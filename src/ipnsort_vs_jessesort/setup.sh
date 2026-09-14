@@ -28,4 +28,4 @@ echo "sort-research-rs commit: $(git -C deps/sort-research-rs rev-parse HEAD)"
 
 rustup toolchain install nightly --profile minimal
 echo
-echo "Setup complete. Run: ./run.sh 10000 500"
+echo "Setup complete. Run: ./run.sh 10000 100 canonical"

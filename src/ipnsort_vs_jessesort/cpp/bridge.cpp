@@ -4,6 +4,7 @@
 #include "ood_families.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -63,6 +64,7 @@ double timed_sort(const std::uint64_t* input, std::size_t n,
     return std::chrono::duration<double, std::micro>(end - start).count();
 }
 
+
 } // namespace
 
 extern "C" {
@@ -117,6 +119,39 @@ double jesse_strict_noalloc_u64(const std::uint64_t* input, std::size_t n,
     return timed_sort(input, n, output, [](auto& v) {
         jessesort::sort_unstable_noalloc(v);
     });
+}
+
+
+
+
+int jesse_run_five_u64(int algorithm, const std::uint64_t* inputs,
+                       std::size_t n, double* times_us,
+                       std::uint64_t* outputs) {
+    if (algorithm < 1 || algorithm > 3 || !inputs || !times_us || !outputs)
+        return 2;
+
+    std::array<std::vector<std::uint64_t>, 5> values;
+    for (int i = 0; i < 5; ++i) {
+        const auto* first = inputs + std::size_t(i) * n;
+        values[i].assign(first, first + n);
+    }
+
+    for (int i = 0; i < 5; ++i) {
+        const auto start = std::chrono::steady_clock::now();
+        switch (algorithm) {
+            case 1: jessesort::sort(values[i]); break;
+            case 2: jessesort::noalloc::sort_adaptive(values[i]); break;
+            case 3: jessesort::sort_unstable_noalloc(values[i]); break;
+            default: return 2;
+        }
+        const auto end = std::chrono::steady_clock::now();
+        times_us[i] = std::chrono::duration<double, std::micro>(end - start).count();
+    }
+
+    for (int i = 0; i < 5; ++i) {
+        std::copy(values[i].begin(), values[i].end(), outputs + std::size_t(i) * n);
+    }
+    return 0;
 }
 
 }

@@ -52,16 +52,20 @@ VariableCardinality, JitteredRotation, RunMosaic, and AsymmetricPipePlateau rows
 ## Methodology
 
 - Default size: 10k.
-- Default measurements: 500 trials per input, 2 warmups.
-- One generated source per trial is shared by all four algorithms.
-- Input/output allocation and copying are outside the timed sort region.
-- Correctness is validated outside the timed region against Rust stable `sort()`.
-- Execution order rotates and reverses across trials to reduce fixed order bias.
+- Default cohort: 100 independent five-input executions per input/algorithm, for 500 timed observations.
+- Each execution uses five distinct inputs labeled A/B/C/D/E. All five sources and timed working buffers are constructed before A.
+- There are no explicit target-sort warmups. A is the fresh-process observation; B is the transition observation; C/D/E are the canonical history-conditioned observations.
+- Each algorithm gets its own fresh process for each ABCDE trajectory, so one algorithm cannot warm or perturb another algorithm's allocator/cache history.
+- The same five deterministic timed trial IDs/seeds are used for all four algorithms in a given execution. Across 100 executions, all 500 timed trial IDs are used exactly once per input/algorithm, using the same five-stratum rotating assignment as the E760/E761 benchmark.
+- Correctness validation happens only after E so validation work cannot condition C/D/E.
+- Published per-input results use only the 300 C/D/E observations: `median(ipnsort CDE) / median(JesseSort CDE)`. Values above 1× mean JesseSort is faster; ipnsort is the 1.000× reference.
+- Raw CSV output retains all A/B/C/D/E observations for diagnostics.
+- Algorithm process launch order rotates/reverses across executions to reduce temporal order bias.
 - Rust: `-C target-cpu=native`.
 - C++: `-O3 -march=native -DNDEBUG`.
 - The JesseSort implementation is compiled from the enclosing repository tree, not copied snapshots.
 
-Because all four algorithms run in one benchmark process, use this kit for Rust-vs-JesseSort comparison and publication/reference measurements. JesseSort retain/reject experiments should continue to use the repository's isolated A/B protocol.
+This comparison harness now follows the same fresh/transition/history interpretation as the E761 JesseSort benchmark. A and B remain available for diagnosis, but are intentionally excluded from the published comparison table.
 
 ## Setup
 
@@ -75,19 +79,21 @@ chmod +x setup.sh run.sh
 ## Run
 
 ```bash
-./run.sh 100000 500 2 canonical
-./run.sh 100000 500 2 ood
-./run.sh 100000 500 2 all
+./run.sh 100000 100 canonical
+./run.sh 100000 100 ood
+./run.sh 100000 100 all
 ```
 
-The optional fourth argument is `canonical`, `ood`, or `all`; it defaults to
-`canonical` for compatibility with earlier commands.
+Arguments are `N`, number of fresh ABCDE executions, and suite. The suite is
+`canonical`, `ood`, or `all`; defaults are `10000`, `100`, and `canonical`.
+With the default 100 executions, each algorithm gets 500 timed observations per
+input, of which the 300 C/D/E observations determine the published median.
 
 Outputs are written to:
 
-- `results/raw.csv`
-- `results/summary.md`
-- `results/system.txt`
+- `results/raw.csv` — all A/B/C/D/E timings with execution, position, trial ID, seed, and algorithm.
+- `results/summary.md` — CDE-median comparison table.
+- `results/system.txt` — selected suite, CPU/compiler/toolchain, process policy, and source provenance.
 
 The summary columns are:
 
@@ -95,7 +101,7 @@ The summary columns are:
 | Input | simulated-direct_live-phase | adaptive-noalloc | strict-noalloc | ipnsort |
 ```
 
-Each JesseSort cell reports `median/ipnsort (median microseconds)`; ipnsort is the
-`1.0000` reference. When `all` is selected, the Markdown output contains separate
-Canonical and Expanded OOD tables. The raw CSV includes a `suite` column.
-`system.txt` records the selected suite, CPU/compiler/toolchain, and source provenance.
+Each JesseSort cell reports `ipnsort CDE median / JesseSort CDE median` plus the
+JesseSort CDE median microseconds; ipnsort is the `1.0000×` reference. Therefore
+**values above 1× mean JesseSort is faster**. When `all` is selected, the
+Markdown output contains separate Canonical and Expanded OOD tables.
